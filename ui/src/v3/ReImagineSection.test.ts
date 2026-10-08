@@ -11,6 +11,13 @@ const context: Clip = { ...source, id: "context", name: "Context audio" };
 const tracks: Track[] = [source, context].map((clip, index) => ({ id: `track-${index}`, index, name: `Track ${index}`, type: "audio", clips: [clip] }));
 const snapshot: Snapshot = { schemaVersion: 1, session: { key: { tonic: "A", mode: "minor" }, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4, sampleRate: 48000, length: 4, editFile: "fixture.mosh" }, tracks, transport: { playing: false, recording: false, looping: false, position: 0, loopStart: 0, loopEnd: 4 } };
 
+const typeInto = (field: HTMLInputElement, value: string) => act(() => {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  if (!setter) throw new Error("Input setter unavailable");
+  setter.call(field, value);
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+});
+
 describe("V3 direct Re-Imagine targeting", () => {
   let host: HTMLDivElement;
   let root: Root;
@@ -27,7 +34,8 @@ describe("V3 direct Re-Imagine targeting", () => {
     host = document.createElement("div"); document.body.append(host); root = createRoot(host);
     exec.mockClear();
     useStore.setState({ selection: new Set(), projectEpoch: 7, projectTransitioning: false, exec, sa3Available: true, explicitRenderDecision: true,
-      directRenderTestFixture: false, genServiceState: "ready", loadColors: vi.fn(async () => {}) });
+      directRenderTestFixture: false, genServiceState: "ready", loadColors: vi.fn(async () => {}), loadLoras: vi.fn(),
+      availableLoras: [] });
   });
   afterEach(() => { act(() => root.unmount()); host.remove(); useStore.setState(original); });
 
@@ -38,10 +46,14 @@ describe("V3 direct Re-Imagine targeting", () => {
     act(() => useStore.setState({ selection: new Set(["source", "context"]) }));
     expect(host.querySelector<HTMLButtonElement>('[data-testid="v3-reimagine-open"]')?.disabled).toBe(true);
     act(() => useStore.setState({ selection: new Set(["source"]) }));
-    await click("v3-reimagine-open"); await click("gen-render");
+    await click("v3-reimagine-open");
+    // The engine refuses an empty prompt, so Generate waits for one.
+    expect(host.querySelector<HTMLButtonElement>('[data-testid="gen-render"]')?.disabled).toBe(true);
+    typeInto(host.querySelector<HTMLInputElement>('[data-testid="gen-prompt"]')!, "A warm pad.");
+    await click("gen-render");
     expect(exec.mock.calls).toEqual([
       ["create_render_layer", { clipId: "source", decisionPolicy: "explicit", adapter: "stable_audio3", mode: "reimagine", modelVariant: "sa3-medium" }],
-      ["set_render_param", { clipId: "source", prompt: "", nl: 0.4, seed: 0 }], ["render_layer", { clipId: "source" }],
+      ["set_render_param", { clipId: "source", prompt: "A warm pad.", nl: 0.4, seed: 0, loras: [] }], ["render_layer", { clipId: "source" }],
     ]);
   });
 

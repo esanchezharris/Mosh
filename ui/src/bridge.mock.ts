@@ -6170,8 +6170,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       // would: queued -> running -> ready. It used to go straight to ready, so no
       // UI built on the mock ever saw a live status (the LoRA Lab treated
       // "queued"/"running" as finished, and nothing here could show it). The
-      // first "running" carries no detail, as precompute reports none. Like
-      // native, the read is what updates the recorded job.
+      // first "running" carries no detail: the service's precompute progress
+      // (phase "precompute", clips encoded) is not simulated, and a remote
+      // trainer reports none anyway. Like native, the read is what updates the
+      // recorded job.
       if (job.status === "queued") {
         job.status = "running";
       } else if (job.status === "running") {

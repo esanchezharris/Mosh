@@ -42,6 +42,7 @@ Stdlib-only: safe to import from server.py on every /loras request.
 """
 from __future__ import annotations
 
+import math
 import hashlib
 import json
 import os
@@ -237,9 +238,11 @@ def descriptor() -> list[dict]:
 def resolve(selection: list[dict], lab: bool = False) -> list[tuple[str, str, float]]:
     """Validate a UI selection [{name, value}] -> [(name, file, strength)] in order.
 
-    Unbounded and unclamped (owner call): strength = value/100, value>100 allowed
-    (overdrive), negative rejected, 0 skipped as removed. Raises ValueError on
-    unknown/invalid names or duplicates — fail-closed before any job submit.
+    Unbounded and unclamped (owner call): strength = value/100. Above 100
+    overdrives; below 0 subtracts the adapter's learned update (owner call
+    2026-10-07: any typed value is honoured); exactly 0 is skipped as removed.
+    Raises ValueError on unknown/invalid names, duplicates or a non-number —
+    fail-closed before any job submit.
     `lab` is accepted for signature compatibility; it gates nothing here.
     """
     if not selection:
@@ -257,11 +260,14 @@ def resolve(selection: list[dict], lab: bool = False) -> list[tuple[str, str, fl
         if name in seen:
             raise ValueError(f"duplicate LoRA: {name!r}")
         seen.add(name)
-        value = float(item.get("value", 0))
-        if value < 0.0:
-            raise ValueError(f"LoRA value must be >= 0 (got {value})")
+        try:
+            value = float(item.get("value", 0))
+        except (TypeError, ValueError):
+            raise ValueError(f"LoRA value for {name!r} is not a number: {item.get('value')!r}") from None
+        if not math.isfinite(value):
+            raise ValueError(f"LoRA value for {name!r} must be finite (got {value})")
         strength = value / 100.0
-        if strength <= 0.0:
+        if strength == 0.0:
             continue        # 0 = removed; skip rather than merge a no-op
         out.append((name, rec["file"], round(strength, 4)))
     return out

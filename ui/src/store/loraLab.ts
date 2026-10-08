@@ -22,6 +22,7 @@ import type { StateCreator } from "zustand";
 import { executeCommand } from "../bridge";
 import type { CommandResult } from "../types";
 import type { State } from "../store";
+import { LORA_ADD_VALUE } from "../ui/loraStrengthValues";
 
 /** One auditionable checkpoint. `name` is what the render path resolves. */
 export type LabTake = {
@@ -39,6 +40,9 @@ export type LabRender = {
   outputWav?: string;
   error?: string;
   peaks?: [number, number][];
+  /** The prompt, seed and source it was rendered under (labRenderContext). A render
+   *  made under another context is not this take's audio for the current one. */
+  ctx?: string;
 };
 
 /** Every status the training service reports for a run that is still going.
@@ -64,13 +68,17 @@ export type LabRun = {
   jobId: string;
   label: string;
   status: LabRunStatus;
-  /** The trainer's own phase while the job runs (`detail.phase`): "training",
-   *  then the state it exited in while the service collects the last takes.
-   *  null during the local trainer's precompute, which reports no progress, for
-   *  the whole run on a backend that reports none (remote_http), and on a
-   *  service that predates it. Presentation only — whether the run is live is
-   *  `status`. */
+  /** What a running job is doing (`detail.phase`): "precompute" while the local
+   *  trainer encodes the corpus, then "training", then the state the trainer
+   *  exited in while the service collects the last takes. null for the whole run
+   *  on a backend that reports no progress (remote_http), briefly before the
+   *  first report, and on a service that predates it. Presentation only —
+   *  whether the run is live is `status`. */
   phase: string | null;
+  /** While the phase is "precompute": how many of the run's clips have been
+   *  encoded so far, of how many. null outside precompute. */
+  prepared: number | null;
+  preparedOf: number | null;
   step: number;
   totalSteps: number;
   loss: number | null;
@@ -126,6 +134,9 @@ export type LoraLabSlice = {
   promoteLabTake: (take: string, keptName: string) => Promise<boolean>;
   /** Add / set / remove a kept adapter in the audition stack (0 = remove). */
   setLabStackValue: (name: string, value: number) => void;
+  /** Put a kept adapter on the stack at the add strength (70), at the end. */
+  addLabStack: (name: string) => void;
+  removeLabStack: (name: string) => void;
   /** Audition the whole stack as one take. */
   auditionLabStack: () => Promise<void>;
   /** Build the corpus from approved sources and start a run. */
@@ -172,6 +183,17 @@ export const renderKey = (takeName: string | null) => takeName ?? BASELINE_KEY;
 export const stackKey = (stack: LabStackEntry[]) =>
   `__stack__${stack.map((e) => `${e.name}@${e.value}`).join("+")}`;
 
+/** What a take's audio depends on besides the adapters: the prompt, the seed and the
+ *  clip it is rendered over. The render slots are keyed by take, so without this a
+ *  take auditioned with one prompt, seed or source replayed that audio after any of
+ *  them changed — switching "over" to a clip played the old text-to-audio take. */
+export const labRenderContext = (s: { labPrompt: string; labSeed: number; labSourceClipId: string | null }) =>
+  `${s.labPrompt.trim()}|${s.labSeed}|${s.labSourceClipId ?? ""}`;
+
+/** A slot's render, if it was made for the current context. */
+export const currentRender = (render: LabRender | undefined, ctx: string) =>
+  render && render.ctx === ctx ? render : undefined;
+
 export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (set, get) => ({
   labRun: null,
   labTakes: [],
@@ -200,7 +222,8 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
     const prompt = s.labPrompt.trim();
     if (!prompt) return;
     const key = renderKey(name);
-    const existing = s.labRenders[key];
+    const ctx = labRenderContext(s);
+    const existing = currentRender(s.labRenders[key], ctx);
 
     // Already rendered: play it straight from disk. Re-submitting would be
     // correct-but-slow (the backend would cache-hit anyway), and A/B comparison
@@ -213,7 +236,7 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
 
     set((st) => ({
       labCued: name,
-      labRenders: { ...st.labRenders, [key]: { takeId: "", status: "rendering", progress: 0 } },
+      labRenders: { ...st.labRenders, [key]: { takeId: "", status: "rendering", progress: 0, ctx } },
     } as Partial<State>));
 
     const res = await executeCommand<CommandResult<{ takeId: string; status: string; outputWav?: string }>>({
@@ -230,7 +253,7 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
       set((st) => ({
         labRenders: {
           ...st.labRenders,
-          [key]: { takeId: "", status: "error", progress: 0, error: res.error || "render failed" },
+          [key]: { takeId: "", status: "error", progress: 0, error: res.error || "render failed", ctx },
         },
       } as Partial<State>));
       return;
@@ -245,6 +268,7 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
           status: status === "ready" ? "ready" : "rendering",
           progress: status === "ready" ? 1 : 0,
           outputWav,
+          ctx,
         },
       },
     } as Partial<State>));
@@ -289,7 +313,7 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
       labRun: {
         // What submit records, natively and in the service, until the first
         // poll says otherwise.
-        jobId, label: runLabel, status: "queued", phase: null,
+        jobId, label: runLabel, status: "queued", phase: null, prepared: null, preparedOf: null,
         step: 0, totalSteps: 0, loss: null, sPerStep: null, etaSeconds: null,
         leg: null, legs: null,
         // Unknown until the run reports them — deliberately NOT seeded from the
@@ -352,37 +376,47 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
       labKeepError: { ...st.labKeepError, [take]: "" },
     } as Partial<State>));
     // Re-read the library so the new adapter appears in the rack immediately;
-    // otherwise "Keep" looks like it did nothing until the next reload.
-    await get().loadLoras();
+    // otherwise "Keep" looks like it did nothing until the next reload. Forced:
+    // loadLoras keeps its first non-empty answer, so with any adapter already in
+    // the library this refresh used to be a no-op.
+    get().loadLoras(true);
     return true;
   },
 
+  // Any number the producer types is kept as typed: above 200 is overdrive, below 0
+  // subtracts the adapter, 0 is a no-op the registry skips. Membership is explicit
+  // (addLabStack / removeLabStack): a slider dragged to 0 must not make its own row
+  // vanish under the producer's hand.
   setLabStackValue: (name, value) => {
-    const v = Math.max(0, Math.round(value));
+    if (!Number.isFinite(value)) return;
     set((st) => {
-      const without = st.labStack.filter((e) => e.name !== name);
-      // 0 means removed, not "merged at zero strength" — the registry skips a
-      // zero-strength entry anyway, so keeping it would only make the Sigma
-      // readout lie about how many adapters are actually in play.
-      if (v === 0) return { labStack: without } as Partial<State>;
       const existing = st.labStack.find((e) => e.name === name);
       // Preserve position on a value change; append when newly added, because
       // merge order is sequential and reordering under the producer's hand
       // would silently change the sound.
       return {
         labStack: existing
-          ? st.labStack.map((e) => (e.name === name ? { ...e, value: v } : e))
-          : [...without, { name, value: v }],
+          ? st.labStack.map((e) => (e.name === name ? { ...e, value } : e))
+          : [...st.labStack, { name, value }],
       } as Partial<State>;
     });
   },
+
+  addLabStack: (name) => {
+    if (get().labStack.some((e) => e.name === name)) return;
+    set((st) => ({ labStack: [...st.labStack, { name, value: LORA_ADD_VALUE }] } as Partial<State>));
+  },
+
+  removeLabStack: (name) =>
+    set((st) => ({ labStack: st.labStack.filter((e) => e.name !== name) } as Partial<State>)),
 
   auditionLabStack: async () => {
     const s = get();
     const prompt = s.labPrompt.trim();
     if (!prompt || s.labStack.length === 0) return;
     const key = stackKey(s.labStack);
-    const existing = s.labRenders[key];
+    const ctx = labRenderContext(s);
+    const existing = currentRender(s.labRenders[key], ctx);
     if (existing?.status === "ready" && existing.outputWav) {
       set({ labCued: key });
       void executeCommand({ command: "audition_file", args: { path: existing.outputWav } });
@@ -390,7 +424,7 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
     }
     set((st) => ({
       labCued: key,
-      labRenders: { ...st.labRenders, [key]: { takeId: "", status: "rendering", progress: 0 } },
+      labRenders: { ...st.labRenders, [key]: { takeId: "", status: "rendering", progress: 0, ctx } },
     } as Partial<State>));
 
     const res = await executeCommand<CommandResult<{ takeId: string; status: string; outputWav?: string }>>({
@@ -406,7 +440,7 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
       set((st) => ({
         labRenders: {
           ...st.labRenders,
-          [key]: { takeId: "", status: "error", progress: 0, error: res.error || "render failed" },
+          [key]: { takeId: "", status: "error", progress: 0, error: res.error || "render failed", ctx },
         },
       } as Partial<State>));
       return;
@@ -420,6 +454,7 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
           status: status === "ready" ? "ready" : "rendering",
           progress: status === "ready" ? 1 : 0,
           outputWav,
+          ctx,
         },
       },
     } as Partial<State>));
@@ -495,6 +530,8 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
         ...run,
         status: (status as LabRunStatus) || run.status,
         phase: str(progress.phase) || null,
+        prepared: typeof progress.precomputed === "number" ? progress.precomputed : null,
+        preparedOf: typeof progress.clips === "number" ? progress.clips : null,
         step: num(progress.step, run.step),
         totalSteps: num(progress.totalSteps, run.totalSteps),
         loss: typeof progress.loss === "number" ? progress.loss : run.loss,
@@ -515,7 +552,12 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
     // Takes arrive through the run's progress, since publishing happens as each
     // checkpoint lands. Merge rather than replace: `landedAt` is what orders the
     // sheet newest-first, and re-stamping it on every poll would scramble it.
-    const raw = Array.isArray(progress.takes) ? (progress.takes as Record<string, unknown>[]) : [];
+    // The final adapter (`@final`) is published only once the trainer has exited,
+    // so it is in the finished run's `result.takes` and never in its progress:
+    // read both, or the sheet never offers the take the run was for.
+    const result = (d.result ?? {}) as Record<string, unknown>;
+    const raw = [progress.takes, result.takes]
+      .flatMap((list) => (Array.isArray(list) ? (list as Record<string, unknown>[]) : []));
     if (raw.length) {
       const known = new Map(get().labTakes.map((t) => [t.name, t]));
       const now = Date.now();

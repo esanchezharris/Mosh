@@ -59,7 +59,7 @@ test("Pro Tools directly generates and keeps an explicitly labelled deterministi
   const trace = await page.evaluate(() => (window as GenerativeWindow).__moshCmdTrace ?? []);
   for (const [command, args] of [
     ["create_render_layer", { clipId: target.clipId, decisionPolicy: "explicit", adapter: "stable_audio3", mode: "reimagine", modelVariant: "sa3-medium" }],
-    ["set_render_param", { clipId: target.clipId, prompt: "A sustained synthesizer tone.", nl: 0.3285, seed: 0 }],
+    ["set_render_param", { clipId: target.clipId, prompt: "A sustained synthesizer tone.", nl: 0.3285, seed: 0, loras: [] }],
     ["render_layer", { clipId: target.clipId }],
     ["bypass_layer", { clipId: target.clipId, audition: "result" }],
     ["bypass_layer", { clipId: target.clipId, audition: "source" }],

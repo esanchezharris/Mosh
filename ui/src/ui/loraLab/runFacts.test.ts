@@ -19,7 +19,7 @@ import { epochsFor } from "./recipe";
 import type { LabRun } from "../../store/loraLab";
 
 const RUN: LabRun = {
-  jobId: "j1", label: "ken-01", status: "running", phase: "training",
+  jobId: "j1", label: "ken-01", status: "running", phase: "training", prepared: null, preparedOf: null,
   step: 940, totalSteps: 2079, loss: 0.31, sPerStep: 2.15, etaSeconds: 2450,
   leg: 2, legs: 4, clipCount: 189, batchSize: 2, gradAccum: 2,
 };

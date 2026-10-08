@@ -1,5 +1,7 @@
 #include "TrainerRegistry.h"
 
+#include <cmath>
+
 #include <algorithm>
 #include <juce_cryptography/juce_cryptography.h>
 
@@ -613,13 +615,31 @@ var TrainerRegistry::listJobs()
 // submit knows the whole record (bundle, output dir, config); a status poll and
 // a cancel each bring a few fields, and replacing the record with those erased
 // what the run was trained on.
-void TrainerRegistry::updateJob (const var& job)
+// What a poll brings back against what is on disk. var's == compares objects
+// and arrays by identity, and a status poll builds a fresh `result` every time:
+// compare their JSON instead. Numbers are read back from training_state.json,
+// which JSON::toString writes to 15 decimal places, so 5/6 comes back as
+// 0.833333333333333 and is never == the fresh 0.8333333333333334 (var's double
+// == is within DBL_EPSILON): compare them with a tolerance far above that
+// rounding, or nearly every poll would count as a change.
+static bool sameRecordedValue (const var& a, const var& b)
+{
+    if (a.isObject() || b.isObject() || a.isArray() || b.isArray())
+        return JSON::toString (a, true) == JSON::toString (b, true);
+    const auto isNumber = [] (const var& v) { return v.isInt() || v.isInt64() || v.isDouble(); };
+    if (isNumber (a) && isNumber (b))
+        return std::abs ((double) a - (double) b) < 1.0e-9;
+    return a == b;
+}
+
+bool TrainerRegistry::updateJob (const var& job)
 {
     auto st = state();
     auto* stObj = st.getDynamicObject();
     auto jobs = toArray (stObj->getProperty ("jobs"));
     const auto jobId = job.getProperty ("jobId", var()).toString();
     bool merged = false;
+    bool changed = false;
     for (int i = 0; i < jobs.size(); ++i)
     {
         auto& stored = jobs.getReference (i);
@@ -628,18 +648,37 @@ void TrainerRegistry::updateJob (const var& job)
             auto* into = stored.getDynamicObject();
             auto* from = job.getDynamicObject();
             if (into != nullptr && from != nullptr)
+            {
                 for (auto& field : from->getProperties())
+                {
+                    // A poll repeats what was already recorded most of the time
+                    // (the LoRA Lab polls once a second): only a real change is
+                    // written, and only a real change is worth a new snapshot.
+                    if (into->hasProperty (field.name) && sameRecordedValue (into->getProperty (field.name), field.value))
+                        continue;
                     into->setProperty (field.name, field.value);
+                    changed = true;
+                }
+            }
             else
+            {
                 jobs.set (i, job);
+                changed = true;
+            }
             merged = true;
             break;
         }
     }
     if (! merged)
+    {
         jobs.add (job);
+        changed = true;
+    }
+    if (! changed)
+        return false;
     stObj->setProperty ("jobs", jobs);
     saveState (st);
+    return true;
 }
 
 String TrainerRegistry::activeAdapterId() const

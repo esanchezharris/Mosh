@@ -52,6 +52,42 @@ describe("LoRA Lab — audition loop", () => {
     expect(useStore.getState().labRenders["ken-run@600"].status).toBe("rendering");
   });
 
+  // A take's audio depends on the prompt, the seed and the clip it is rendered over.
+  // Its slot used to be keyed by the take alone, so after any of them changed the Lab
+  // replayed the old audio: switching "over" to a clip played the text-to-audio take.
+  it("renders again when the source, prompt or seed changed, and replays only an unchanged take", async () => {
+    const renders: Record<string, unknown>[] = [];
+    vi.spyOn(await import("../../bridge"), "executeCommand").mockImplementation(
+      (async (req: { command: string; args: Record<string, unknown> }) => {
+        if (req.command === "render_lora_take") {
+          renders.push(req.args);
+          return { ok: true, data: { takeId: `t${renders.length}`, status: "ready", outputWav: `/lab/t${renders.length}.wav` } };
+        }
+        return { ok: true, data: {} };
+      }) as never,
+    );
+    const s = () => useStore.getState();
+    await s().auditionLabTake("ken@600");
+    await s().auditionLabTake("ken@600");                 // unchanged: replayed from disk
+    expect(renders).toHaveLength(1);
+
+    s().setLabSource("clip-1");
+    await s().auditionLabTake("ken@600");
+    expect(renders).toHaveLength(2);
+    expect(renders[1].sourceClipId).toBe("clip-1");
+
+    s().setLabPrompt("warm pad");
+    await s().auditionLabTake("ken@600");
+    s().setLabSeed(8);
+    await s().auditionLabTake("ken@600");
+    expect(renders.map((r) => [r.prompt, r.seed])).toEqual([
+      ["rage trap instrumental, distorted 808", 7], ["rage trap instrumental, distorted 808", 7],
+      ["warm pad", 7], ["warm pad", 8],
+    ]);
+    await s().auditionLabTake("ken@600");                 // unchanged again: replayed
+    expect(renders).toHaveLength(4);
+  });
+
   it("sends an EMPTY stack for the baseline — the stock model is a real take", async () => {
     // The comparison has to be renderable through the same path, or "better than
     // base" is a judgement against something never actually heard.

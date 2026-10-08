@@ -4,7 +4,7 @@
 // resolve paths). In Vite dev the mock drives Settings/Export/Log; the iPhone
 // companion is real-backend only (the mock reports it unavailable).
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../store";
 import { useLoraLab } from "./dock/useLoraLab";
@@ -202,23 +202,10 @@ export function FileMenu({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-export function TrainingTool({
-  training,
-  label,
-  title: buttonTitle,
-  className,
-  ariaLabel,
-  testId,
-}: { training: TrainingState | null } & ToolChromeProps) {
-  const exec = useStore((s) => s.exec);
-  const refresh = useStore((s) => s.refresh);
-  // Guest degradation: the trainer is a deterministic-stub scaffold everywhere until the
-  // owner points MOSH_TRAINING_REMOTE_URL at a rented GPU box — label it so a tester
-  // doesn't mistake a completed "training run" for a real fine-tune. loadCapabilities is
-  // triggered lazily via Pop's onOpen below (see that prop's comment for why not here).
-  const previewLabel = useStore((s) => trainingPreviewLabel(s.capabilities));
-  const loadCapabilities = useStore((s) => s.loadCapabilities);
-  const loadLoras = useStore((s) => s.loadLoras);
+// The training form's state lives with whatever owns the panel (the v2/classic popover
+// trigger, V3's launcher), which stays mounted while the panel opens and closes: the
+// fields and the Build -> Train -> Import chain survive closing it, as they always did.
+export function useTrainingForm() {
   const [title, setTitle] = useState("");
   const [creator, setCreator] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -227,6 +214,39 @@ export function TrainingTool({
   const [proofOfRights, setProofOfRights] = useState("");
   const [bundlePath, setBundlePath] = useState("");
   const [lastJobId, setLastJobId] = useState("");
+  return {
+    title, setTitle, creator, setCreator, sourceUrl, setSourceUrl, localPath, setLocalPath,
+    userClaimedLicense, setUserClaimedLicense, proofOfRights, setProofOfRights,
+    bundlePath, setBundlePath, lastJobId, setLastJobId,
+  };
+}
+export type TrainingForm = ReturnType<typeof useTrainingForm>;
+
+/** What a surface opening the training tools should load first: the trainer's
+ *  capabilities and the LoRA library. On open, never at mount (the eager-spawn bug). */
+export function useTrainingToolsOpen() {
+  const loadCapabilities = useStore((s) => s.loadCapabilities);
+  const loadLoras = useStore((s) => s.loadLoras);
+  return useCallback(() => { loadCapabilities(); loadLoras(true); }, [loadCapabilities, loadLoras]);
+}
+
+/** The training tools' body: the rights registry (sources), the way into the LoRA Lab,
+ *  the library and the jobs. Shared by the v2/classic popover and V3's launcher. */
+export function TrainingPanel({ training, form, onClose }: {
+  training: TrainingState | null; form: TrainingForm; onClose: () => void;
+}) {
+  const exec = useStore((s) => s.exec);
+  const refresh = useStore((s) => s.refresh);
+  // Guest degradation: the trainer is a deterministic-stub scaffold everywhere until the
+  // owner points MOSH_TRAINING_REMOTE_URL at a rented GPU box — label it so a tester
+  // doesn't mistake a completed "training run" for a real fine-tune.
+  const previewLabel = useStore((s) => trainingPreviewLabel(s.capabilities));
+  const loadLoras = useStore((s) => s.loadLoras);
+  const {
+    title, setTitle, creator, setCreator, sourceUrl, setSourceUrl, localPath, setLocalPath,
+    userClaimedLicense, setUserClaimedLicense, proofOfRights, setProofOfRights,
+    bundlePath, setBundlePath, lastJobId, setLastJobId,
+  } = form;
   const sources = training?.sources ?? [];
   // Kept adapters only: a run's on-trial checkpoints live in the Lab's take
   // sheet, and letting six of them bury three kept ones is the reason the rack
@@ -282,23 +302,11 @@ export function TrainingTool({
     await exec("import_lora_adapter", { jobId: lastJobId });
     // Re-read the LIBRARY, not just the snapshot: import now enrolls into
     // $MOSH_LORA_DIR/sa3, which reaches the UI through list_loras.
-    await Promise.all([refresh(), loadLoras()]);
+    loadLoras(true);   // forced: the list it already holds predates the import
+    await refresh();
   };
 
   return (
-    <Pop
-      label={label ?? "LoRA"}
-      title={buttonTitle ?? "Type-beat training"}
-      className={`training-pop${className ? ` ${className}` : ""}`}
-      ariaLabel={ariaLabel ?? "Type-beat training"}
-      testId={testId}
-      // Guest degradation: TrainingTool itself is always mounted (part of the topbar/
-      // overflow tools), so a plain useEffect here would fire at app load — the same
-      // eager-spawn bug this pass fixed elsewhere. onOpen only fires on the actual
-      // open transition (a user click), the correct lazy trigger point.
-      onOpen={() => { loadCapabilities(); void loadLoras(); }}
-    >
-      {() => (
         <>
           {/* Anchor for e2e: asserting the ABSENCE of the preview badge needs a
               positive signal that the popover actually rendered, or the assertion
@@ -316,7 +324,7 @@ export function TrainingTool({
           <div className="pop-actions">
             <button className="btn primary" data-testid="open-lora-lab"
               title="Train, audition checkpoints, and keep the one that sounds right"
-              onClick={() => { useLoraLab.getState().show(); close(); }}>Open LoRA Lab</button>
+              onClick={() => { useLoraLab.getState().show(); onClose(); }}>Open LoRA Lab</button>
           </div>
           <div className="pop-group">
             <div className="pop-label">Add source</div>
@@ -341,7 +349,12 @@ export function TrainingTool({
           </div>
           <div className="pop-group" data-testid="training-sources">
             <div className="pop-label">Sources</div>
-            <div className="training-status" role="status">{canStartTraining ? "All sources ready for training" : `${blockedSources.length} source${blockedSources.length === 1 ? " needs" : "s need"} review`}</div>
+            {/* Always mounted, empty until there is a source: a live region announces a
+                change of its text, so one created along with its first message can stay
+                silent, and adding the first source would go unheard. */}
+            <div className="training-status" role="status">
+              {sources.length === 0 ? "" : canStartTraining ? "All sources ready for training" : `${blockedSources.length} source${blockedSources.length === 1 ? " needs" : "s need"} review`}
+            </div>
             <div className="modal-list training-list">
               {sources.length === 0 && <div className="rack-empty">no sources yet</div>}
               {sources.map((s) => (
@@ -405,7 +418,7 @@ export function TrainingTool({
                     <div className="plugin-row">
                       <span className="pr-name" title={j.jobId}>{j.jobId}</span>
                       <span className={`cmdlog-badge${v.phase === "error" ? " err" : ""}`}>{v.label}</span>
-                      {v.canImport && <button className="btn" onClick={() => void exec("import_lora_adapter", { jobId: j.jobId }).then(refresh)}>Import</button>}
+                      {v.canImport && <button className="btn" onClick={() => void exec("import_lora_adapter", { jobId: j.jobId }).then(() => { loadLoras(true); return refresh(); })}>Import</button>}
                     </div>
                     {v.showProgress && (
                       <div className="training-progress" role="progressbar" aria-valuenow={v.progressPct} aria-valuemin={0} aria-valuemax={100} aria-label={`Training ${j.jobId}`}>
@@ -420,7 +433,33 @@ export function TrainingTool({
           </div>
           <div className="pop-note tc">{training?.activeAdapterId ? `active adapter: ${training.activeAdapterId}` : "no active adapter"}</div>
         </>
-      )}
+  );
+}
+
+export function TrainingTool({
+  training,
+  label,
+  title: buttonTitle,
+  className,
+  ariaLabel,
+  testId,
+}: { training: TrainingState | null } & ToolChromeProps) {
+  const form = useTrainingForm();
+  const onOpen = useTrainingToolsOpen();
+  return (
+    <Pop
+      label={label ?? "LoRA"}
+      title={buttonTitle ?? "Type-beat training"}
+      className={`training-pop${className ? ` ${className}` : ""}`}
+      ariaLabel={ariaLabel ?? "Type-beat training"}
+      testId={testId}
+      // Guest degradation: TrainingTool itself is always mounted (part of the topbar/
+      // overflow tools), so a plain useEffect here would fire at app load — the same
+      // eager-spawn bug this pass fixed elsewhere. onOpen only fires on the actual
+      // open transition (a user click), the correct lazy trigger point.
+      onOpen={onOpen}
+    >
+      {(close) => <TrainingPanel training={training} form={form} onClose={close} />}
     </Pop>
   );
 }

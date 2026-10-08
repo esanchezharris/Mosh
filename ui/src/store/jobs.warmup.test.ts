@@ -106,6 +106,28 @@ describe("jobs slice — service warmup retry (GEN-WARMUP)", () => {
     expect(useStore.getState().availableLoras).toEqual([{ id: "l1", name: "Take 1" }]);
     expect(useStore.getState().availableTransformTargets).toEqual([{ name: "violin" }]);
   });
+  // Re-Imagine's banner is list_colors' to decide. A LoRA answer that marked the
+  // service "ready" first made the panel say the helper was too old for direct render
+  // until colors answered, and replaced a real colors error with that message.
+  it("a quiet, forced loadLoras refreshes the list without touching the service state", async () => {
+    useStore.setState({ availableLoras: [{ name: "old" }], genServiceState: "warming", genServiceError: null } as never);
+    vi.mocked(executeCommand).mockResolvedValue({ ok: true, data: { loras: [{ name: "old" }, { name: "kept" }] } });
+    useStore.getState().loadLoras(true, true);
+    await flush(3);
+    expect(useStore.getState().availableLoras).toEqual([{ name: "old" }, { name: "kept" }]);
+    expect(useStore.getState().genServiceState).toBe("warming");
+
+    vi.mocked(executeCommand).mockResolvedValue({ ok: false, error: "service down" });
+    useStore.setState({ genServiceState: "warming", genServiceError: null } as never);
+    useStore.getState().loadLoras(true, true);
+    await flush();
+    await vi.advanceTimersByTimeAsync(20000);
+    await flush(3);
+    expect(useStore.getState().genServiceState).toBe("warming");
+    expect(useStore.getState().genServiceError).toBeNull();
+    expect(useStore.getState().loraRetrying).toBe(false);
+  });
+
   it("refreshes SA3 capability explicitly even when a cached color rack exists", async () => {
     vi.mocked(executeCommand).mockResolvedValue({ ok: true, data: { colors: [{ name: "grit" }], sa3: false } });
     useStore.setState({ colorsRetrying: false });

@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../../store";
-import { renderKey, type LabTake } from "../../store/loraLab";
+import { currentRender, labRenderContext, renderKey, type LabTake } from "../../store/loraLab";
 import { executeCommand } from "../../bridge";
 import type { CommandResult } from "../../types";
 
@@ -59,7 +59,8 @@ function Waveform({ peaks, playing }: { peaks?: [number, number][]; playing: boo
 export function TakeRow({ take }: { take: TakeRowModel }) {
   const name = take.name;
   const key = renderKey(name);
-  const render = useStore((s) => s.labRenders[key]);
+  // Only a render made for the current prompt, seed and source is this take's audio.
+  const render = useStore((s) => currentRender(s.labRenders[key], labRenderContext(s)));
   const cued = useStore((s) => s.labCued);
   const audition = useStore((s) => s.auditionLabTake);
   const stop = useStore((s) => s.stopLabAudition);

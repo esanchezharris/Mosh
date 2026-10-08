@@ -33,6 +33,7 @@ export function LoraLab() {
   const close = useLoraLab((s) => s.close);
   const move = useLoraLab((s) => s.move);
   const resize = useLoraLab((s) => s.resize);
+  const focusSeq = useLoraLab((s) => s.focusSeq);
 
   const capabilities = useStore((s) => s.capabilities);
   const loadCapabilities = useStore((s) => s.loadCapabilities);
@@ -86,7 +87,7 @@ export function LoraLab() {
     .filter((c) => c.type === "wave");
 
   return (
-    <FloatingWindow win={win} title="LoRA Lab" onMove={move} onResize={resize} onClose={close}>
+    <FloatingWindow win={win} title="LoRA Lab" onMove={move} onResize={resize} onClose={close} focusKey={focusSeq}>
       <div className="lab" data-testid="lora-lab">
         {/* Unavailability is stated, with the command that fixes it — never a
             Train button that errors on click. A stub backend gets the same
@@ -127,7 +128,7 @@ export function LoraLab() {
                      : `Train on ${eligibleClips} approved clip${eligibleClips === 1 ? "" : "s"}`}
               onClick={() => void startRun()}>
               {run ? "Train again" : "Train"}
-              {eligibleClips > 0 && <span className="lab-go-n">{eligibleClips} clips</span>}
+              {eligibleClips > 0 && <span className="lab-go-n">{eligibleClips} clip{eligibleClips === 1 ? "" : "s"}</span>}
             </button>
           )}
           {startError && <span className="lab-take-note err" data-testid="lab-start-error">{startError}</span>}

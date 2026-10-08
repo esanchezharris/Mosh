@@ -63,6 +63,8 @@ describe("direct Re-Imagine", () => {
   it.each([false, undefined])("blocks generation without affirmative SA3 capability (%s)", async (available) => {
     // Given a service which does not affirm SA3 availability.
     useStore.setState({ sa3Available: available }); render();
+    // With a prompt, so the missing capability is the only thing that can block it.
+    edit("gen-prompt", "A soft flute.");
     // When generation is requested.
     await act(async () => button("gen-render").click());
     // Then no adapter, including fake, receives a command.
@@ -78,7 +80,7 @@ describe("direct Re-Imagine", () => {
     // Then commands address the fixed source without a compiler or agent.
     expect(exec.mock.calls).toEqual([
       ["create_render_layer", { clipId: "clip-one", decisionPolicy: "explicit", adapter: "stable_audio3", mode: "reimagine", modelVariant: "sa3-medium" }],
-      ["set_render_param", { clipId: "clip-one", prompt: "A soft flute.", nl: 0.1325, seed: 17 }],
+      ["set_render_param", { clipId: "clip-one", prompt: "A soft flute.", nl: 0.1325, seed: 17, loras: [] }],
       ["render_layer", { clipId: "clip-one" }],
     ]);
   });
@@ -150,7 +152,7 @@ describe("direct Re-Imagine", () => {
       if (command === "create_render_layer") useStore.setState({ projectEpoch: 10 });
       return { ok: true, command };
     });
-    render();
+    render(); edit("gen-prompt", "A soft flute.");
     // When generation is requested.
     await act(async () => button("gen-render").click());
     // Then no later command can address a clip in the replacement session.
@@ -176,6 +178,7 @@ describe("direct Re-Imagine", () => {
   it("labels an authorized test fixture before a layer exists without claiming SA3", async () => {
     useStore.setState({ sa3Available: false, explicitRenderDecision: true, directRenderTestFixture: true }); render();
     expect(host.querySelector('[data-testid="engine-badge"]')?.textContent).toBe("Test fixture");
+    edit("gen-prompt", "A soft flute.");
     await act(async () => button("gen-render").click());
     expect(exec).toHaveBeenCalledWith("render_layer", { clipId: "clip-one" });
   });
@@ -316,6 +319,115 @@ describe("direct Re-Imagine", () => {
     useStore.setState({ explicitRenderDecision: supported, genServiceState: "ready" }); render();
     const line = host.querySelector('[data-testid="gen-service-unavailable"]')!.textContent ?? "";
     expect(line).toContain("The Re-Imagine helper in ~/Library/Application Support/Mosh/ReImagine/service is older than this Mosh (no direct render). Refresh it, then press Retry.");
+  });
+
+  // A LoRA trained in the Lab and kept is what makes a render the producer's own: it has
+  // to be pickable where Re-Imagine runs, at the strength the Lab auditioned it at.
+  describe("LoRA", () => {
+    const lora = (name: string, extra: Record<string, unknown> = {}) =>
+      ({ name, displayName: name, trigger: "", hint: "", valid: true, family: "library", ...extra });
+    const loraButtons = () => [...host.querySelectorAll<HTMLButtonElement>('[aria-label="Kept LoRAs"] button')];
+    const strength = (name: string) => host.querySelector<HTMLInputElement>(`input[aria-label="${name} strength"]`);
+    const setParam = () => exec.mock.calls.find(([name]) => name === "set_render_param")?.[1] as Record<string, unknown> | undefined;
+
+    it("reads the library fresh and offers only kept, usable adapters", () => {
+      useStore.setState({ availableLoras: [lora("keeper", { displayName: "Keeper" }), lora("run-1@12", { family: "lab" }),
+        lora("broken", { valid: false })] as never });
+      render();
+      expect(useStore.getState().loadLoras).toHaveBeenCalledWith(true, true);
+      expect(loraButtons().map((b) => b.textContent)).toEqual(["Keeper"]);
+      expect(loraButtons()[0].getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("renders with a picked LoRA, added at 70 unless the strength is changed", async () => {
+      useStore.setState({ availableLoras: [lora("keeper", { displayName: "Keeper" })] as never });
+      render(); edit("gen-prompt", "A soft flute.");
+      await act(async () => loraButtons()[0].click());
+      expect(loraButtons()[0].getAttribute("aria-pressed")).toBe("true");
+      expect(strength("Keeper")?.value).toBe("70");
+      await act(async () => button("gen-render").click());
+      expect(setParam()?.loras).toEqual([{ name: "keeper", value: 70 }]);
+
+      exec.mockClear();
+      edit("gen-prompt", "A soft flute.");
+      act(() => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+        setter.call(strength("Keeper"), "60");
+        strength("Keeper")!.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => button("gen-render").click());
+      expect(setParam()?.loras).toEqual([{ name: "keeper", value: 60 }]);
+    });
+
+    it("unpicking a LoRA sends an empty list, which is what removes it from the layer", async () => {
+      useStore.setState({ availableLoras: [lora("keeper")] as never });
+      render(clip(layer({ loras: [{ name: "keeper", value: 100 }] })));
+      expect(loraButtons()[0].getAttribute("aria-pressed")).toBe("true");
+      await act(async () => loraButtons()[0].click());
+      expect(strength("keeper")).toBeNull();
+      await act(async () => button("gen-render").click());
+      expect(setParam()?.loras).toEqual([]);
+    });
+
+    it("follows the layer's LoRAs when they change from elsewhere (undo, another surface)", () => {
+      useStore.setState({ availableLoras: [lora("keeper"), lora("other")] as never });
+      render(clip(layer({ loras: [{ name: "keeper", value: 70 }] })));
+      expect(loraButtons().map((b) => b.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
+      render(clip(layer({ loras: [{ name: "other", value: 40 }] })));
+      expect(loraButtons().map((b) => b.getAttribute("aria-pressed"))).toEqual(["false", "true"]);
+      expect(strength("other")?.value).toBe("40");
+    });
+
+    it("does not claim a LoRA for a result its params no longer describe", () => {
+      useStore.setState({ availableLoras: [lora("keeper", { displayName: "Keeper" })] as never });
+      // A Generate whose params landed but whose render failed: the layer is dirty, and
+      // the pending result is the previous one.
+      render(clip(layer({ status: "dirty", loras: [{ name: "keeper", value: 80 }] })));
+      expect(host.querySelector('[data-testid="gen-status"]')?.textContent).toBe("Result ready to audition");
+    });
+
+    it("lets a LoRA missing from the library be removed, so Generate can work again", async () => {
+      useStore.setState({ availableLoras: [lora("keeper")] as never });
+      render(clip(layer({ loras: [{ name: "gone", value: 100 }] })));
+      expect(host.textContent).toContain("gone (missing)");
+      await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Remove gone"]')!.click());
+      expect(strength("gone")).toBeNull();
+      await act(async () => button("gen-render").click());
+      expect(setParam()?.loras).toEqual([]);
+    });
+
+    it("Retry reads the library again as well as the service's capability", async () => {
+      useStore.setState({ explicitRenderDecision: undefined, genServiceState: "error", genServiceError: "down" });
+      render();
+      vi.mocked(useStore.getState().loadLoras).mockClear();
+      const retry = [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Retry")!;
+      await act(async () => retry.click());
+      expect(useStore.getState().loadColors).toHaveBeenCalledWith(true);
+      expect(useStore.getState().loadLoras).toHaveBeenCalledWith(true, true);
+    });
+
+    it("says which LoRA the result was rendered with", () => {
+      useStore.setState({ availableLoras: [lora("keeper", { displayName: "Keeper" })] as never });
+      render(clip(layer({ loras: [{ name: "keeper", value: 80 }] })));
+      expect(host.querySelector('[data-testid="gen-status"]')?.textContent).toBe("Result ready to audition · with Keeper 80");
+    });
+
+    it("explains where LoRAs come from when none is kept", () => {
+      render();
+      expect(loraButtons()).toEqual([]);
+      expect(host.querySelector('[data-testid="gen-lora-empty"]')?.textContent).toContain("LoRA Lab");
+    });
+  });
+
+  it("does not offer Generate until there is a prompt, which the engine requires", async () => {
+    render();
+    expect(button("gen-render").disabled).toBe(true);
+    await act(async () => button("gen-render").click());
+    expect(exec).not.toHaveBeenCalled();
+    edit("gen-prompt", "  ");
+    expect(button("gen-render").disabled).toBe(true);
+    edit("gen-prompt", "A soft flute.");
+    expect(button("gen-render").disabled).toBe(false);
   });
 
   it("keeps the service's own error and the SA3-missing copy for their own causes", () => {

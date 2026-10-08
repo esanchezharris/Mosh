@@ -1,5 +1,6 @@
 @import "./tokens.css";
 @import "../v2/css/80-plugin-picker.css";
+@import "../v2/css/96-lora-lab.css";
 @import "./panels/css/index.css";
 
 .v3-shell, .v3-shell * { box-sizing: border-box; }
@@ -532,6 +533,13 @@
 .v3-shell .direct-reimagine input[type="range"] { width: 100%; min-width: 0; accent-color: var(--accent); }
 .v3-shell .direct-reimagine p { margin: 0; }
 .v3-shell .direct-reimagine-hint { color: var(--muted); }
+.v3-shell .direct-reimagine-loras { display: grid; gap: 6px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.v3-shell .direct-reimagine-loras legend { padding: 0; margin-bottom: 4px; color: var(--muted); }
+.v3-shell .direct-reimagine-loras .gen-actions { flex-wrap: wrap; }
+.v3-shell .direct-reimagine-loras .gen-actions .btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v3-shell .direct-reimagine-lora { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.v3-shell .direct-reimagine-lora .nlabel { flex: 0 1 auto; max-width: 35%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v3-shell .direct-reimagine-lora.missing .nlabel { color: var(--warn); }
 .v3-shell .direct-reimagine .gen-service-status { margin: 0; padding: 8px; color: var(--text); background: var(--surface2); }
 .v3-shell .direct-reimagine .gen-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .v3-shell .direct-reimagine .btn { color: var(--text); font-size: 11px; padding: 6px 8px; }
@@ -942,3 +950,82 @@
   box-shadow: inset 0 0 0 1px var(--record);
 }
 /* demo-round2:pressed end */
+
+/* ── LoRA training dialog (TrainingLauncher) ────────────────────────────────────
+   The panel's markup is shared with the v2/classic popover (TrainingPanel); classic's
+   global rules for these classes carry its own palette, so the dialog restyles them
+   in V3's tokens, which all four colourways follow. */
+/* .modal.glass included: it alone outranks a bare .training-modal and pins every dialog at 420px. */
+.v3-shell .modal.glass.training-modal { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 64px); }
+.v3-shell .training-modal .training-body { display: grid; gap: 12px; min-height: 0; overflow-y: auto; font-size: 12px; line-height: 1.4; color: var(--text); }
+.v3-shell .training-body .pop-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; color: var(--text); }
+.v3-shell .training-body .pop-head-badge { padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 500; color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.v3-shell .training-body .pop-note { margin: 0; font-size: 12px; color: var(--muted); }
+.v3-shell .training-body .pop-note.tc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v3-shell .training-body .pop-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.v3-shell .training-body .pop-group { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--fog-line); }
+.v3-shell .training-body .pop-label { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.v3-shell .training-body .pop-row { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 8px; color: var(--muted); }
+.v3-shell .training-body .pop-row input { min-width: 0; padding: 5px 8px; font: inherit; color: var(--text); background: var(--surface2); border: 1px solid var(--line); border-radius: 6px; }
+.v3-shell .training-body .pop-row input::placeholder { color: var(--fog-label); }
+.v3-shell .training-body .pop-row input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.v3-shell .training-body .training-status { font-size: 12px; color: var(--text); }
+.v3-shell .training-body .modal-list { display: grid; gap: 2px; max-height: 184px; overflow-y: auto; margin: 0; padding: 0; border: 0; background: none; }
+.v3-shell .training-body .rack-empty { padding: 4px 0; font-size: 12px; color: var(--muted); }
+.v3-shell .training-body .plugin-row { display: flex; align-items: center; gap: 8px; min-height: 0; padding: 4px 8px; font-size: 12px; background: var(--surface2); border: 0; border-radius: 6px; }
+.v3-shell .training-body .pr-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 400; color: var(--text); }
+/* Errors in V3's danger ink (as .mi.danger): --record is about 3.7:1 on the glass, and classic
+   draws .training-job-error as a pink box. */
+.v3-shell .training-body :is(.pr-sub.err, .training-job-error) { padding: 0 8px; font-size: 11px; color: #FF8B7A; background: none; border: 0; }
+.v3-shell .training-body .cmdlog-badge { flex: 0 0 auto; padding: 1px 6px; font-size: 10px; color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 999px; }
+.v3-shell .training-body .cmdlog-badge.err { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.v3-shell .training-body .training-blocker-list { margin: 4px 0 0; padding-left: 16px; }
+.v3-shell .training-body .training-progress { height: 3px; margin: 2px 8px 4px; overflow: hidden; background: var(--fog-line); border: 0; border-radius: 2px; }
+.v3-shell .training-body .training-progress-fill { height: 100%; background: var(--accent); box-shadow: none; }
+.v3-shell .training-body .btn.primary { background: var(--accent); border-color: var(--accent); color: #0B0C0C; font-weight: 600; }
+
+/* ── The LoRA Lab in V3 ──────────────────────────────────────────────────────────
+   The Lab's own stylesheet (v2/css/96-lora-lab.css) is imported at the top of this file,
+   so it loses every same-specificity tie to the V3 rules above, and its markup reuses
+   classic classes (.floatwin, .btn.x, .btn.primary, .mode-btn, .gen-prog, .gen-badge)
+   whose global rules carry classic's palette. What either got wrong is restated here,
+   in V3's tokens, which all four colourways follow. */
+
+/* Under V3's menus (40-45) and dialogs (50). Classic floats the window at 70, over every
+   V3 layer, so the training dialog (the Lab's own way back to the training tools),
+   Settings and the context menu opened hidden underneath it. */
+.v3-shell .floatwin { z-index: 30; color: var(--text); background: var(--surface); border-color: var(--line); }
+.v3-shell .floatwin:focus { outline: none; }
+.v3-shell .floatwin:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent), 0 18px 50px rgba(0, 0, 0, .5); }
+.v3-shell .floatwin-bar { background: var(--top); border-bottom-color: var(--fog-line); }
+.v3-shell .floatwin-title { color: var(--text); }
+/* ✕ (close the window, hide a take, remove from the stack): classic's danger red is about
+   2:1 on V3's dark. V3's hover rule still brings them up to --text. */
+.v3-shell :is(.floatwin-bar, .lab) .btn.x { color: var(--muted); }
+/* Audition is the verb the Lab exists for: the play button keeps its 38px circle and
+   14px glyph, which .v3-shell .btn would otherwise make a small rounded square. */
+.v3-shell .lab .lab-play { width: 38px; height: 38px; padding: 0; border-radius: 50%; font-size: 14px; }
+/* Train and Keep: the colourway's accent, not classic lime. */
+.v3-shell .lab .btn.primary { background: var(--accent); border-color: var(--accent); color: #0B0C0C; font-weight: 600; }
+.v3-shell :is(.lab, .training-body) .btn.primary:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: #0B0C0C; filter: brightness(1.06); }
+/* The cue toggle: a V3 toggle, outlined in the accent when cued (classic draws it dark grey
+   on the dark row, about 1:1, and lime when on). */
+.v3-shell .lab .mode-btn {
+  padding: 2px 8px; font-size: 11px; line-height: 1.5; color: var(--muted);
+  background: var(--surface2); border: 1px solid var(--fog-line); border-radius: 6px;
+}
+.v3-shell .lab .mode-btn:hover { color: var(--text); }
+.v3-shell .lab .mode-btn.on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface2)); }
+.v3-shell .lab .mode-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent); }
+/* The run's progress bar and status pill (classic: a cream track and pill, lime fill). */
+.v3-shell .lab .gen-prog { height: 4px; background: var(--fog-line); border: 0; border-radius: 2px; }
+.v3-shell .lab .gen-prog > span { background: var(--accent); }
+.v3-shell .lab .gen-badge { color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 999px; }
+.v3-shell .lab .gen-badge.st-working { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.v3-shell .lab .gen-badge.st-ready { color: #0B0C0C; background: var(--accent); border-color: var(--accent); }
+.v3-shell .lab .gen-badge.st-error { color: #FF8B7A; background: transparent; border-color: color-mix(in srgb, #FF8B7A 45%, transparent); }
+/* The Lab's fields get V3's visible focus ring (the shared rule's 12%-accent one is all but
+   invisible on the dark field). */
+.v3-shell .lab :is(.lab-prompt, .lab-seed input, .lab-source select, .lab-keep-name input):focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}

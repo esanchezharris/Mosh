@@ -125,6 +125,19 @@ def main() -> None:
     check([s[0] for s in stacked] == ["ken", "run7@1200"], f"stack order/identity wrong: {stacked}")
     check(abs(stacked[1][2] - 0.5) < 1e-9, f"stacked strength wrong: {stacked[1][2]}")
 
+    # Any typed strength is honoured (owner call 2026-10-07): over 200 overdrives,
+    # negative subtracts the adapter, and only exactly 0 is skipped as removed.
+    typed = REG.resolve([{"name": "ken", "value": -40}, {"name": "run7@1200", "value": 250}])
+    check([(n, round(st, 4)) for n, _p, st in typed] == [("ken", -0.4), ("run7@1200", 2.5)],
+          f"typed strengths not honoured: {typed}")
+    check(REG.resolve([{"name": "ken", "value": 0}]) == [], "a zero-strength LoRA was merged instead of skipped")
+    for bad in ("loud", float("nan"), float("inf")):
+        try:
+            REG.resolve([{"name": "ken", "value": bad}])
+            check(False, f"value {bad!r} was accepted")
+        except ValueError:
+            pass
+
     # ── 3) available() ignores the lab family ────────────────────────────────
     # A producer who has trained but never KEPT anything must not be shown a
     # rack that the UI then filters down to empty.
