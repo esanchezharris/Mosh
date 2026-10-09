@@ -58,6 +58,8 @@
 #include <iostream>
 #include <cstring>
 #include <functional>
+#include <atomic>
+#include <memory>
 #include <map>
 #include <optional>
 #include <set>
@@ -387,6 +389,65 @@ void pump (int ms)
     if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
         mm->runDispatchLoopUntil (ms);
 }
+
+juce::uint32 msSince (juce::uint32 start) { return juce::Time::getMillisecondCounter() - start; }
+
+// Pump the message loop in 5 ms slices until `done` holds or `timeoutMs` has passed; true when
+// it holds. A fixed pump races the message queue: on a loaded machine (or behind a backlog of
+// async updates) a timer's tick can land after it, so wait on the condition instead.
+bool pumpUntil (const std::function<bool()>& done, int timeoutMs)
+{
+    const auto start = juce::Time::getMillisecondCounter();
+    for (;;)
+    {
+        if (done())
+            return true;
+        if ((int) msSince (start) >= timeoutMs)
+            return false;
+        pump (5);
+    }
+}
+
+// Deliver every message already queued: post a marker behind them (JUCE's queue is FIFO) and
+// pump until it arrives, for at most `timeoutMs`; true when it did. Commands that queued async
+// updates without pumping leave a backlog, and a timer's tick waits behind all of it: under
+// heavy load a backlog took seconds to drain (some messages ran for over a second each).
+bool drainMessageQueue (int timeoutMs)
+{
+    auto arrived = std::make_shared<std::atomic<bool>> (false);
+    juce::MessageManager::callAsync ([arrived] { arrived->store (true); });
+    return pumpUntil ([arrived] { return arrived->load(); }, timeoutMs);
+}
+
+// Tracktion's Edit::UndoTransactionTimer (tracktion_Edit.cpp) restarts a 350 ms timer on every
+// change broadcast from the Edit's UndoManager (a JUCE ChangeBroadcaster, so asynchronous) and,
+// when it fires, closes the current step unless an UndoTransactionInhibitor is held. This
+// witness hears the same broadcasts and restarts its own 700 ms timer from each. JUCE fires due
+// timers in deadline order, and twice the period covers the timer thread's countdown granularity
+// (it ticks at least every 100 ms), so once the witness has fired, Tracktion's timer has fired
+// too since the last change. A check that a step stayed OPEN proves nothing until then.
+class UndoTimerWitness final : private juce::ChangeListener, private juce::Timer
+{
+public:
+    explicit UndoTimerWitness (juce::UndoManager& u) : um (u) { um.addChangeListener (this); }
+    ~UndoTimerWitness() override { um.removeChangeListener (this); }
+    bool fired() const noexcept { return fired_; }
+
+private:
+    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    {
+        fired_ = false;
+        startTimer (700);
+    }
+    void timerCallback() override
+    {
+        stopTimer();
+        fired_ = true;
+    }
+
+    juce::UndoManager& um;
+    bool fired_ = false;
+};
 
 // A sampler loads its sounds in an AsyncUpdate (handleAsyncUpdate rebuilds the list from the
 // SOUND state). Run a pending one NOW instead of hoping a pump reaches it: juce::AsyncUpdater
@@ -858,31 +919,57 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
             {
                 return command (ops, "set_plugin_param", object ({ { "trackId", tid }, { "index", eq }, { "paramIndex", 0 }, { "value", value } }));
             };
-            // This is the selftest's first message-loop pump: let the backlog the earlier
-            // sections queued drain first, so the pauses below are what the timer sees.
-            pump (1000);
-            // Control: the timer does run headless, so the checks after it can fail.
+            // This is the selftest's first message-loop pump: deliver the backlog the earlier
+            // sections queued first, so the waits below are what the timer sees. (A fixed 1 s
+            // pump did not always reach the end of it: under load the edit's change broadcast
+            // then arrived seconds late, and the control's fixed 1.5 s pause missed the close.)
+            const auto drainStart = juce::Time::getMillisecondCounter();
+            check (drainMessageQueue (20000), "the message queue the earlier sections left has drained (" + String (msSince (drainStart))
+                                                  + " ms; limit 20000), so the waits below are the timer's own");
+            // Control: the timer does run headless, so the checks after it can fail. Wait for
+            // the close (up to 6 s) instead of pausing a fixed 1.5 s: the 350 ms count from when
+            // the change broadcast arrives, and both it and the tick can land late under load.
+            // A step that never closes still fails.
             check (ok (plain (0.15)) && um.getNumActionsInCurrentTransaction() > 0, "control: a gesture-less edit leaves its step open");
-            pump (1500);
-            check (um.getNumActionsInCurrentTransaction() == 0,
-                   "control: after a 1.5 s pause Tracktion's timer has closed that step by itself");
+            const auto controlStart = juce::Time::getMillisecondCounter();
+            const bool controlClosed = pumpUntil ([&] { return um.getNumActionsInCurrentTransaction() == 0; }, 6000);
+            check (controlClosed, "control: Tracktion's timer has closed that step by itself (after "
+                                      + String (msSince (controlStart)) + " ms; limit 6000)");
             check (ok (command (ops, "undo")) && near (paramValue (ops, tid, eq, 0), v0), "undo the control edit");
 
+            // Hold the drag still for at least 1.5 s AND until the witness shows Tracktion's
+            // timer came due during the hold: a fixed pause whose tick landed after it would
+            // pass without testing the inhibitor. Stop 2 s after the call at most, well inside
+            // kGestureIdleMs (3 s), after which MoshOps ends an idle window itself.
+            UndoTimerWitness witness (um);
+            const auto holdStart = juce::Time::getMillisecondCounter();   // before the call, which starts the idle clock
             check (ok (drag ("drag-hold", 0.2)), "a drag starts");
             check (ops.gestureWindowOpenForTest(), "the open gesture window holds Tracktion's transaction timer");
-            pump (1500);
-            check (um.getNumActionsInCurrentTransaction() > 0, "after a 1.5 s pause the drag's step is still open");
+            const int holdLimit = (int) MoshOps::kGestureIdleMsForTest - 1000;
+            const bool holdDue = pumpUntil ([&] { return witness.fired() && msSince (holdStart) >= 1500; }, holdLimit);
+            const auto held = msSince (holdStart);
+            check (holdDue, "Tracktion's timer came due while the drag was held still (" + String (held) + " ms; limit "
+                                + String (holdLimit) + "), so the next check can fail");
+            check (um.getNumActionsInCurrentTransaction() > 0, "after a " + String (held) + " ms pause the drag's step is still open");
             check (ok (drag ("drag-hold", 0.3)) && ok (drag ("drag-hold", 0.4)), "the drag resumes");
             check (ok (command (ops, "undo")) && near (paramValue (ops, tid, eq, 0), v0),
-                   "ONE undo takes back a drag that paused 1.5 s mid-way");
+                   "ONE undo takes back a drag that paused " + String (held) + " ms mid-way");
             check (! ops.gestureWindowOpenForTest(), "the undo released the inhibitor");
 
-            // An idle window closes by itself (MoshOps::timerCallback), and the timer then
-            // closes the step: the next call of the same id is a new step.
+            // An idle window closes by itself (MoshOps::timerCallback) once kGestureIdleMs pass
+            // without a call, and its step with it: the next call of the same id is a new step.
+            // Wait for that (its tick can land late under load), and require that it was not
+            // before the timeout.
+            const auto idleStart = juce::Time::getMillisecondCounter();   // before the call, which starts the idle clock
             check (ok (drag ("drag-idle", 0.2)), "a drag starts and goes idle");
-            pump ((int) MoshOps::kGestureIdleMsForTest + 900);
-            check (! ops.gestureWindowOpenForTest(), "after the idle timeout the window is closed and the inhibitor released");
-            check (um.getNumActionsInCurrentTransaction() == 0, "...and Tracktion's timer has closed the step");
+            const int idleLimit = (int) MoshOps::kGestureIdleMsForTest + 6000;
+            const bool idleClosed = pumpUntil ([&] { return ! ops.gestureWindowOpenForTest(); }, idleLimit);
+            const auto idleMs = msSince (idleStart);
+            check (idleClosed && idleMs >= MoshOps::kGestureIdleMsForTest,
+                   "after the idle timeout the window is closed and the inhibitor released (after " + String (idleMs)
+                       + " ms; timeout " + String (MoshOps::kGestureIdleMsForTest) + ", limit " + String (idleLimit) + ")");
+            check (pumpUntil ([&] { return um.getNumActionsInCurrentTransaction() == 0; }, 6000),
+                   "...and Tracktion's timer has closed the step");
             check (ok (drag ("drag-idle", 0.3)), "the same id after the timeout");
             check (ok (command (ops, "undo")) && near (paramValue (ops, tid, eq, 0), 0.2),
                    "undo takes back only the call after the timeout");
@@ -2640,10 +2727,17 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
             // An anchor edit first; one undo after the command must restore plugin.sampler
             // exactly AND leave the anchor in place (two steps would not restore it; a merged
             // step would take the anchor with it). Tracktion's Edit::UndoTransactionTimer is
-            // made DUE first (the anchor's change reaches it in a pump, then 400 ms pass with
+            // made DUE first (the anchor's change broadcast reaches it, then 400 ms pass with
             // no pump, past its 350 ms), so a command that pumps the message loop mid-way
-            // (headless, the kit and sample loads do) would have its step split by it.
-            auto armUndoTimer = [] { pump (50); juce::Thread::sleep (400); };
+            // (headless, the kit and sample loads do) would have its step split by it. The
+            // broadcast is delivered by hand: a 50 ms pump alone can miss it under load, which
+            // leaves the timer unarmed and the checks below passing without testing anything.
+            auto armUndoTimer = [&]
+            {
+                pump (50);
+                eng.edit().getUndoManager().dispatchPendingMessages();
+                juce::Thread::sleep (400);
+            };
             const auto kickPath = sounds[0].getProperty ("path", var()).toString();
             auto samplerJson = [&] { return juce::JSON::toString (pluginAt (ops, dt, si).getProperty ("sampler", var()), true); };
             auto trackName = [&] { return trackVar (ops, dt).getProperty ("name", var()).toString(); };
