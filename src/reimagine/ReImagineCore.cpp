@@ -390,4 +390,17 @@ std::optional<PluginStateV1> deserializeState (const juce::String& json)
         result.intentions = *intentions;
     return result;
 }
+
+juce::File reimagineUserHome()
+{
+    const auto root = juce::SystemStats::getEnvironmentVariable ("MOSH_REIMAGINE_HOME", {});
+    return root.isNotEmpty() ? juce::File (root) : juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+}
+
+juce::File reimagineMusicDirectory()
+{
+    const auto root = juce::SystemStats::getEnvironmentVariable ("MOSH_REIMAGINE_HOME", {});
+    return root.isNotEmpty() ? juce::File (root).getChildFile ("Music")
+                             : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+}
 }

@@ -213,4 +213,10 @@ CrossfadeGains substitutionGainsForPosition (double ppq, double start, double en
                                              float mix, bool compareDry) noexcept;
 juce::String serializeState (const PluginStateV1&);
 std::optional<PluginStateV1> deserializeState (const juce::String&);
+
+// Roots for every per-user Re-Imagine path (helper state, assets, experience log,
+// exports). MOSH_REIMAGINE_HOME redirects them for hermetic harnesses; on macOS JUCE
+// resolves the home directory with NSHomeDirectory() and ignores $HOME.
+juce::File reimagineUserHome();
+juce::File reimagineMusicDirectory();
 }

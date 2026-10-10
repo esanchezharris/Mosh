@@ -1525,7 +1525,7 @@ juce::File ReImagineProcessor::exportSelected (juce::String& error)
         return {};
     }
     const auto meter = context.meterNumerator;
-    const auto directory = juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Mosh Exports");
+    const auto directory = reimagineMusicDirectory().getChildFile ("Mosh Exports");
     if (! directory.createDirectory())
     {
         error = "Could not create " + directory.getFullPathName();

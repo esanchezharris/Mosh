@@ -146,6 +146,7 @@ int main (int argc, char** argv)
                           .getNonexistentChildFile ("mosh-m1-e2e", "", false);
     home.createDirectory();
     setEnv ("HOME", home.getFullPathName());
+    setEnv ("MOSH_REIMAGINE_HOME", home.getFullPathName());   // macOS JUCE ignores $HOME
     const auto port = 18700 + juce::Random::getSystemRandom().nextInt (900);
     setEnv ("MOSH_SERVICE_HOST", "127.0.0.1");
     setEnv ("MOSH_SERVICE_PORT", juce::String (port));

@@ -76,7 +76,7 @@ juce::var serviceParamsForRack (const RackSettings& rack, bool lab)
 }
 
 AssetStore::AssetStore()
-    : AssetStore (juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+    : AssetStore (reimagineUserHome()
                       .getChildFile ("Library/Mosh/ReImagine/assets"))
 {
 }
@@ -157,8 +157,7 @@ bool AssetStore::relink (const juce::File& wav, const juce::String& expected,
 
 juce::File SharedServiceClient::stateDirectory()
 {
-    return juce::File::getSpecialLocation (juce::File::userHomeDirectory)
-        .getChildFile ("Library/Application Support/Mosh/ReImagine");
+    return reimagineUserHome().getChildFile ("Library/Application Support/Mosh/ReImagine");
 }
 
 bool isLoopbackServiceHost (const juce::String& host) noexcept

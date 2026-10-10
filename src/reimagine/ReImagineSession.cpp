@@ -671,7 +671,7 @@ juce::var exportSidecar (const TransferRegion& region, const RenderTake& take, c
 }
 
 ExperienceLog::ExperienceLog()
-    : ExperienceLog (juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+    : ExperienceLog (reimagineUserHome()
                          .getChildFile ("Library/Mosh/ReImagine/experience.jsonl"))
 {
 }
