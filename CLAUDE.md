@@ -1,5 +1,7 @@
 # Mosh pre-pivot run manifest
 
+> **Re-Imagine M1, 2026-10-10:** the [contextual generation loop](docs/reimagine-plugin/M1-CONTEXTUAL-LOOP.md) (context → generate → revise → keep/export in the VST3, local SA3 only, template controller) is implemented and fixture-tested; the real-model render and Live 11 audition remain owner steps.
+>
 > **General V3 repair, 2026-09-17:** [bounded workspace scope](docs/V3-WORKSPACE-SCOPE-2026-09-17.md) is a separate ordinary-UI verification pass; no new model execution.
 >
 > **V3 is the default shell:** the [V3 parity brief](docs/V3-PARITY-BRIEF-2026-09-17.md) gate closed and `uiShell` flipped from Pro Tools to V3 for fresh installs (owner direction 2026-09-17: presets, drop-in/generated beats, vocal recording, smooth multiplayer, native plugin suite).

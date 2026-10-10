@@ -7,6 +7,20 @@
 
 namespace mosh::reimagine
 {
+// Exports the selected version to a durable file on drag start and hands it to the OS
+// as an external file drag, so any DAW can receive it. Host placement is unobserved.
+class DragOutButton final : public juce::TextButton
+{
+public:
+    explicit DragOutButton (ReImagineProcessor& p) : juce::TextButton ("Drag WAV"), processor (p) {}
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent& e) override { dragStarted = false; juce::TextButton::mouseUp (e); }
+
+private:
+    ReImagineProcessor& processor;
+    bool dragStarted = false;
+};
+
 class ReImagineEditor final : public juce::AudioProcessorEditor,
                               private juce::Timer
 {
@@ -24,6 +38,9 @@ private:
     void syncLoraCatalog (const LoraCatalogSnapshot&);
     void updateLoraInfo();
     void configureLabel (juce::Label&, const juce::String&, float size, bool heading = false);
+    IntentionInput intentionFromControls() const;
+    void showMessages (const juce::StringArray&);
+    void loadContextFields();
     ReImagineProcessor& processorRef;
     ReImagineLookAndFeel lookAndFeel;
     juce::TextButton transfer { "Transfer" };
@@ -62,6 +79,22 @@ private:
     juce::ProgressBar progressBar;
     double progressValue = 0.0;
     std::unique_ptr<juce::FileChooser> fileChooser;
+    // M1 contextual loop column.
+    juce::Label contextHeading, intentionHeading, reviseHeading;
+    juce::TextEditor contextKey, contextChords, contextSection, contextProtected;
+    juce::TextButton saveContext { "Save context" };
+    juce::ComboBox candidateCount;
+    juce::TextButton generate { "Generate" };
+    juce::TextButton cancel { "Cancel" };
+    juce::TextEditor revision;
+    juce::ToggleButton reviseFromAudio { "From selected audio" };
+    juce::TextButton revise { "Revise" };
+    juce::TextButton keep { "Keep" };
+    juce::TextButton exportWav { "Export" };
+    DragOutButton dragOut { processorRef };
+    juce::Label report;
+    juce::String knownTakeSignature;
+    juce::String knownContextRegion;
     int knownTakeCount = -1;
     int knownRegionCount = -1;
     uint64_t knownLoraRevision = 0;

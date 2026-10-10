@@ -93,6 +93,7 @@ target_sources(MoshTests PRIVATE
     test_rt_guard.cpp
     test_generative_jobmanager.cpp
     test_reimagine_core.cpp
+    test_reimagine_session.cpp
     test_rave_engine.cpp
     test_stem_export.cpp
     test_telemetry.cpp
@@ -115,6 +116,7 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/generative/GenerativeJobManager.cpp
     ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineCore.cpp
     ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineService.cpp
+    ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineSession.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
     test_combined_audio_device.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/CombinedAudioDevice.cpp
