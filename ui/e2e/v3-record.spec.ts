@@ -117,7 +117,7 @@ test("set up a Lead, keep one pass and redo another — every pass is preserved,
 // myself" reads the Takes track's monitor mode back from the SNAPSHOT and writes it through
 // set_input_monitor, and the engineering readouts sit behind a collapsed Details.
 type BoothWindow = Window & { __moshStore?: { getState: () => {
-  snapshot?: { tracks: { id: string; name: string; type?: string; monitor?: string }[]; loop?: { takesTrackId?: string } };
+  snapshot?: { tracks: { id: string; name: string; type?: string; monitor?: string; plugins?: { preset?: { id: string } }[] }[]; loop?: { takesTrackId?: string } };
   exec: (command: string, args?: Record<string, unknown>) => Promise<{ ok: boolean; data?: unknown }>;
   refresh: () => Promise<void>;
   setSelectedTrack: (id: string | null) => void;
@@ -170,4 +170,8 @@ test("from a drum-only session the Booth adds a Vocal track as Lead, and Hear my
   await expect(tracks).toHaveCount(3);
   expect(await page.evaluate(() => (window as unknown as BoothWindow).__moshStore!.getState().snapshot?.tracks.map((t) => t.name)))
     .toEqual(["Drums", "Vocal", "Vocal · Takes"]);
+  // First-run default: the singer hears and keeps through the same vocal chain.
+  expect(await page.evaluate(() => (window as unknown as BoothWindow).__moshStore!.getState().snapshot?.tracks
+    .filter((t) => (t.plugins ?? []).some((p) => p.preset?.id === "mosh.clean-lead")).map((t) => t.name)))
+    .toEqual(["Vocal", "Vocal · Takes"]);
 });
