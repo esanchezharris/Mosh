@@ -105,6 +105,17 @@ brain proxy configuration (if present — see the note in §6), signs it (Harden
 drag-to-Applications DMG, signs/notarizes/staples *that* too, and zips the app for
 AirDrop. Output lands in `~/Desktop/Mosh-share/` (override with `MOSH_RELEASE_DIR`).
 
+Two traps, both hit cutting 0.1.2:
+
+- **The release refuses an env file that holds provider keys.** `run-mosh.sh` loads
+  `$MOSH_BRAIN_ENV` (default `ui/.env.local`) and refuses to bundle anything if
+  `OPENAI_API_KEY`, `XAI_API_KEY` or a sibling is set. A dev `.env.local` usually has
+  them. Point the release at a file holding only the two proxy lines, mode 600:
+  `MOSH_BRAIN_ENV=~/.config/mosh/release-brain.env ./run-mosh.sh release`.
+- **`MOSH_VERSION` is a CMake cache variable.** An existing build dir keeps the version
+  it was configured with. Cut a release from a fresh build dir (a fresh worktree), or
+  pass `-DMOSH_VERSION=…`, then confirm `CFBundleShortVersionString` in the output.
+
 The whole thing typically takes several minutes, most of it waiting on Apple's notary
 service (`--wait` blocks 1–5 minutes per submission, and there are two submissions —
 the app and the DMG).
