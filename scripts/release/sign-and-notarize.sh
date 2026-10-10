@@ -290,7 +290,13 @@ resolve_notary_creds() {
 preflight() {
   log "preflight:"
   resolve_identity || fail "identity preflight failed (see above)"
-  resolve_notary_creds || fail "notary credential preflight failed (see above)"
+  # --sign-only never talks to the notary service, so it needs no notary credential
+  # (its whole point is iterating on signing before that credential exists).
+  if [ "$SIGN_ONLY" -eq 1 ] && [ "$PREFLIGHT_ONLY" -eq 0 ]; then
+    log "  notary credentials: not needed (--sign-only)"
+  else
+    resolve_notary_creds || fail "notary credential preflight failed (see above)"
+  fi
   log "preflight: OK"
 }
 
