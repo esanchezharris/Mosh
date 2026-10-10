@@ -24,6 +24,8 @@ target_sources(MoshReImaginePlugin PRIVATE
   ../ReImagineCore.h
   ../ReImagineService.cpp
   ../ReImagineService.h
+  ../ReImagineSession.cpp
+  ../ReImagineSession.h
 )
 
 target_include_directories(MoshReImaginePlugin PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -78,3 +80,19 @@ add_test(NAME MoshReImagineEditorSmoke
   COMMAND MoshReImagineEditorSmoke
     "${CMAKE_CURRENT_BINARY_DIR}/MoshReImagineEditorSmoke.png")
 set_tests_properties(MoshReImagineEditorSmoke PROPERTIES TIMEOUT 30)
+
+# M1 contextual loop, headless end to end against service/server.py with the
+# direct-render TEST FIXTURE adapter (needs python3; no model, no musical evidence).
+add_executable(MoshReImagineLoopE2E ReImagineLoopE2E.cpp)
+target_compile_definitions(MoshReImagineLoopE2E PRIVATE
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+)
+target_link_libraries(MoshReImagineLoopE2E PRIVATE
+  MoshReImaginePlugin
+  juce::juce_audio_utils
+  juce::juce_recommended_config_flags
+)
+add_test(NAME MoshReImagineLoopE2E
+  COMMAND MoshReImagineLoopE2E "${CMAKE_SOURCE_DIR}")
+set_tests_properties(MoshReImagineLoopE2E PROPERTIES TIMEOUT 300)

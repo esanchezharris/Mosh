@@ -161,9 +161,16 @@ juce::File SharedServiceClient::stateDirectory()
         .getChildFile ("Library/Application Support/Mosh/ReImagine");
 }
 
+bool isLoopbackServiceHost (const juce::String& host) noexcept
+{
+    const auto h = host.trim().toLowerCase();
+    return h == "localhost" || h == "::1" || h == "[::1]" || h.startsWith ("127.");
+}
+
 SharedServiceClient::SharedServiceClient()
 {
     const auto host = juce::SystemStats::getEnvironmentVariable ("MOSH_SERVICE_HOST", "127.0.0.1");
+    serviceHost = host;
     const auto port = juce::SystemStats::getEnvironmentVariable ("MOSH_SERVICE_PORT", "8770");
     baseUrl = "http://" + host + ":" + port;
     adoptHandshake();
@@ -221,6 +228,13 @@ bool SharedServiceClient::health (int timeoutMs)
 
 bool SharedServiceClient::ensureRunning (juce::String& error)
 {
+    if (! isLoopbackServiceHost (serviceHost)
+        && juce::SystemStats::getEnvironmentVariable ("MOSH_SERVICE_ALLOW_LAN", {}) != "1")
+    {
+        error = "Re-Imagine helper host " + serviceHost + " is not this machine; audio stays local "
+                "(set MOSH_SERVICE_ALLOW_LAN=1 to opt in)";
+        return false;
+    }
     adoptHandshake();
     if (health())
         return true;
@@ -286,6 +300,30 @@ juce::String SharedServiceClient::submit (const juce::File& input, const juce::F
     if (! static_cast<bool> (response.getProperty ("ok", false)))
     {
         error = response.getProperty ("error", "Render submission failed").toString();
+        return {};
+    }
+    return response.getProperty ("jobId", {}).toString();
+}
+
+juce::String SharedServiceClient::submitDirect (const juce::File& input, const juce::File& output,
+                                                const juce::File& manifest, const juce::String& adapter,
+                                                const juce::var& params, juce::String& error)
+{
+    if (params.getProperty ("decision_policy", {}).toString() != "explicit")
+    {
+        error = "Direct submission requires the explicit decision policy";
+        return {};
+    }
+    auto* body = new juce::DynamicObject();
+    body->setProperty ("adapter", adapter);
+    body->setProperty ("inputWav", input.getFullPathName());
+    body->setProperty ("outputWav", output.getFullPathName());
+    body->setProperty ("manifest", manifest.getFullPathName());
+    body->setProperty ("params", params);
+    const auto response = post ("/submit", juce::var (body));
+    if (! static_cast<bool> (response.getProperty ("ok", false)))
+    {
+        error = response.getProperty ("error", "Render submission failed - is the local helper running?").toString();
         return {};
     }
     return response.getProperty ("jobId", {}).toString();

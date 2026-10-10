@@ -117,6 +117,9 @@ struct TransferRegion
     RegionStatus status = RegionStatus::ready;
     juce::String selectedTakeId;
     std::vector<RenderTake> takes;
+    // Additive (M1): the region's editable session context (ReImagineSession.h
+    // contextToVar). Void == nothing entered yet.
+    juce::var context;
 };
 
 enum class RegionOffer { accepted, needsOverlapDecision, invalid };
@@ -179,6 +182,9 @@ struct PluginStateV1
     bool labEnabled = false;
     float mix = 1.0f;
     std::vector<TransferRegion> regions;
+    // Additive (M1): intention records with attempt budgets (ReImagineSession.h
+    // intentionToVar). Older states load with none.
+    juce::Array<juce::var> intentions;
 };
 
 bool tempoMatches (const TempoMap&, double ppq, double hostBpm, double tolerance = 0.01) noexcept;
