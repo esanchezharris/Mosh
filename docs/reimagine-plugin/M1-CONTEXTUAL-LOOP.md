@@ -128,11 +128,49 @@ a scratch CMake project that compiles the same sources.
   - the experience log contains the expected events and signal tags
 - `MoshReImagineEditorSmoke` passes under Xvfb with the new 1180×690 layout.
 
+## Owner-Mac verification (2026-10-10, arm64, macOS 26.4.1, 64 GB)
+
+Automated and engineering-only. It says nothing about how anything sounds, and nothing
+about Live.
+
+- Repo build, `macos-arm64-release` preset with `-DMOSH_BUILD_REIMAGINE_PLUGIN=ON
+  -DMOSH_BUILD_TESTS=ON`: `MoshTests "[reimagine]"` **33 cases / 274 assertions passed**;
+  `ctest -R MoshReImagine` Bundle, Editor and LoopE2E **3/3 passed**; LoopE2E **PASS 3 of
+  3** (54 checks, about 10 s each).
+- LoopE2E first **failed** on macOS (ctest timeout). JUCE resolves the home directory with
+  `NSHomeDirectory()` and ignores `$HOME`. The test therefore read the owner's real
+  helper `service.port` and never reached its fixture helper. It also wrote to the real
+  experience log, asset store and `~/Music/Mosh Exports`. Fix `49a2e3b5`: the four
+  per-user roots honour `MOSH_REIMAGINE_HOME`, and LoopE2E sets it. With the variable
+  unset, behaviour is unchanged.
+- Canonical gate `scripts/auto-loop/gate.sh native <worktree> origin/main` on `49a2e3b5`:
+  **PASS**, 24/24 steps, `--selftest` ×3 at 5038/5038, ctest 12/12 (LoopE2E included),
+  `verify.py` 35/35, `direct_reimagine` PASS. An earlier run failed `build_app` only
+  because the verifier had briefly left an uncommitted doc edit in the worktree. The
+  Release identity check refuses a dirty tree; the failure was reproduced and is not a
+  defect in the PR.
+- One real render through the plug-in's request path. A headless `ReImagineProcessor`
+  ran against the owner's shared helper, with real HOME and no adapter or fixture env.
+  Source was the **4 s synthetic E2E fixture, engineering-only**. The run made 2
+  candidates and then 1 revision of candidate 2 from its audio (3 model attempts, no
+  retry):
+  - every version reports `backend: mlx`, `model_variant: sa3-medium` and no
+    `test_fixture`, at 8 steps, nl 0.35;
+  - technical checks are `usable`, with duration delta 0.000 s;
+  - the 8-row conditioning table is stored, and the revision is linked to its parent.
+  - `generationSeconds`: 4.13 (first, warm helper), 1.18, 1.52.
+  - SA3 returned **44.1 kHz** for the 48 kHz source. Playback resamples on load;
+    Export copies the raw 44.1 kHz file.
+- The bundle smoke passed against the copy installed in `~/Library/Audio/Plug-Ins/VST3`.
+- SA3 checkpoint provenance: the local MLX weights link to the Hugging Face cache of
+  `stabilityai/stable-audio-3-optimized` (snapshot `2204d508`, `MLX/`), fetched by
+  Stability-AI/stable-audio-3's own installer. That is an official Stability AI release
+  under the Stability AI Community License. The licence text is not cached locally.
+
 ## Not verified (owner steps)
 
-- A real SA3 render through this loop on the owner's Mac. Run one Generate on an
-  authorized 2–240 s phrase with SA3 installed, then check the `test_fixture` flag is
-  absent and `backend` reads `mlx` in the version report.
+- A real SA3 render of an **authorized musical phrase** (the run above used a synthetic
+  fixture).
 - Plug-in behaviour inside Live 11: transport, seek and loop-wrap audition, drag-out
   landing, and save/reopen of a Live Set. The playback code is unchanged from PR #666 and
   was not retested here at other sample rates or block sizes.
