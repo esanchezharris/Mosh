@@ -342,6 +342,105 @@ describe("v3 Booth — the desktop recording pad", () => {
     });
   });
 
+  // ── First-run defaults: the vocal chain and the speaker guard (vocalSetup.ts) ────────
+  describe("first-run defaults", () => {
+    const PRESET_FILE = "/presets/track-chain/mosh-clean-lead-v0.json";
+    const note = () => host.querySelector('[data-testid="v3-booth-note"]')?.textContent ?? "";
+    const withAudio = (snap: Snapshot, outputDevice: string): Snapshot =>
+      ({ ...snap, audio: { type: "CoreAudio", outputDevice, inputDevice: "MacBook Pro Microphone", sampleRate: 48000, bufferSize: 128 } }) as Snapshot;
+    // A backend that answers like the engine: loop_setup names its Takes lane, and the
+    // library lists the bundled chain.
+    const engineLike = (over: (command: string) => CommandResult | undefined = () => undefined) => vi.fn(
+      async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
+        calls.push({ command, args });
+        const forced = over(command);
+        if (forced) return forced;
+        if (command === "loop_setup") return { ok: true, command, data: { takesTrackId: "12" } };
+        if (command === "list_presets") {
+          return { ok: true, command, data: { presets: [
+            { name: "mosh-tuned-lead-v0", file: "/presets/track-chain/mosh-tuned-lead-v0.json" },
+            { name: "mosh-clean-lead-v0", file: PRESET_FILE },
+          ] } };
+        }
+        return { ok: true, command };
+      });
+    const setUp = (snap: Snapshot, exec = engineLike()) => {
+      useStore.setState({ snapshot: snap, exec });
+      render(snap);
+    };
+
+    it("a fresh Lead gets the default chain on Lead and Takes, each its own step", async () => {
+      setUp(withAudio(snapshot(), "External Headphones"));
+      await act(async () => { pad("v3-booth-setup")!.click(); });
+      expect(calls).toEqual([
+        { command: "loop_setup", args: { trackId: "11" } },
+        { command: "list_presets", args: { plugin: "track-chain" } },
+        { command: "apply_track_preset", args: { trackId: "11", file: PRESET_FILE } },
+        { command: "apply_track_preset", args: { trackId: "12", file: PRESET_FILE } },
+      ]);
+      expect(note()).toContain("Mosh Clean Lead v0");
+      expect(host.querySelector('[data-testid="v3-booth-speakers"]')).toBeNull();
+    });
+
+    it("never puts the default on top of the producer's own chain", async () => {
+      const snap = withAudio(snapshotWith([
+        track("11", "Vox", { plugins: [effect("EQ")] as Track["plugins"] }), track("12", "Vox · Takes"),
+      ]), "External Headphones");
+      setUp(snap);
+      await act(async () => { pad("v3-booth-setup")!.click(); });
+      expect(calls.map((c) => c.command)).toEqual(["loop_setup"]);
+    });
+
+    it("a failed setup adds nothing", async () => {
+      setUp(withAudio(snapshot(), "External Headphones"),
+        engineLike((c) => (c === "loop_setup" ? { ok: false, command: c, error: "no input" } : undefined)));
+      await act(async () => { pad("v3-booth-setup")!.click(); });
+      expect(calls.map((c) => c.command)).toEqual(["loop_setup"]);
+      expect(note()).toContain("no input");
+    });
+
+    it("says so when the chain is refused, and keeps the setup", async () => {
+      setUp(withAudio(snapshot(), "External Headphones"),
+        engineLike((c) => (c === "apply_track_preset" ? { ok: false, command: c, error: "preset file not found" } : undefined)));
+      await act(async () => { pad("v3-booth-setup")!.click(); });
+      expect(calls.map((c) => c.command)).toEqual(["loop_setup", "list_presets", "apply_track_preset"]);
+      expect(note()).toContain("Vocal chain not added to Keys: preset file not found");
+    });
+
+    it("on laptop speakers: warns, and setup starts with Hear myself off", async () => {
+      setUp(withAudio(snapshot(), "MacBook Pro Speakers"));
+      expect(host.querySelector('[data-testid="v3-booth-speakers"]')!.textContent).toContain("MacBook Pro Speakers");
+      await act(async () => { pad("v3-booth-setup")!.click(); });
+      expect(calls.slice(0, 2)).toEqual([
+        { command: "loop_setup", args: { trackId: "11" } },
+        { command: "set_input_monitor", args: { trackId: "12", mode: "off" } },
+      ]);
+      expect(note()).toContain("Hear myself is off");
+    });
+
+    it("turns Hear myself off when the output moves to the speakers, and not on headphones", async () => {
+      setUp(withAudio(snapshot(loopState(), "automatic"), "External Headphones"));
+      await act(async () => {});
+      expect(calls).toEqual([]);
+      const unplugged = withAudio(snapshot(loopState(), "automatic"), "MacBook Pro Speakers");
+      useStore.setState({ snapshot: unplugged });
+      await act(async () => { render(unplugged); });
+      expect(calls).toEqual([{ command: "set_input_monitor", args: { trackId: "12", mode: "off" } }]);
+      expect(note()).toContain("Plug in headphones");
+    });
+
+    it("stands down when the producer turns it back on over speakers", async () => {
+      const off = withAudio(snapshot(loopState(), "off"), "MacBook Pro Speakers");
+      setUp(off);
+      await act(async () => {});
+      expect(calls).toEqual([]);
+      await act(async () => { pad("v3-booth-monitor")!.click(); });
+      const on = withAudio(snapshot(loopState(), "automatic"), "MacBook Pro Speakers");
+      await act(async () => { render(on); });
+      expect(calls).toEqual([{ command: "set_input_monitor", args: { trackId: "12", mode: "automatic" } }]);
+    });
+  });
+
   // ── A14: Hear myself — read from the snapshot, written through set_input_monitor ─────
   describe("Hear myself", () => {
     const monitor = () => pad("v3-booth-monitor");
