@@ -2,6 +2,7 @@
 
 #include "../ReImagineCore.h"
 #include "../ReImagineService.h"
+#include "../ReImagineSession.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -66,6 +67,35 @@ public:
     bool hasPendingOverlap() const;
     void refreshLoraCatalog();
     LoraCatalogSnapshot loraCatalogSnapshot() const;
+    // Stores the rack without rendering. Edits never spend a model call; only
+    // Generate, Revise and New Take do.
+    void storeRack (RackSettings);
+
+    // ── M1 contextual generation loop (docs/reimagine-plugin/M1-CONTEXTUAL-LOOP.md) ──
+    // The selected region's stored context merged with host facts (host never
+    // overrides user values; unknown stays unknown).
+    SessionContext selectedContext() const;
+    // Validates and stores user context for the selected region. Returns errors;
+    // nothing is stored when any field is invalid.
+    juce::StringArray setSelectedContext (const juce::String& key, const juce::String& chords,
+                                          const juce::String& section, const juce::String& protectedChoices);
+    // Starts a new intention: freezes a SessionSnapshot, compiles the typed request
+    // and queues `candidateCount` candidates from the region's original source.
+    // Returns errors (nothing queued) or warnings (queued).
+    juce::StringArray generateCandidates (IntentionInput);
+    // Continues the selected take's intention with a revision linked to it. With
+    // `fromSelectedAudio` the selected take's audio is the init audio; otherwise the
+    // original source is used again.
+    juce::StringArray reviseSelected (IntentionInput, bool fromSelectedAudio);
+    void cancelGeneration();
+    // Marks the selected take as a durable kept version. Never writes the host timeline.
+    void keepSelected();
+    // Copies the selected take to ~/Music/Mosh Exports with a JSON sidecar. The copy is
+    // durable (not a cache) and safe to drag into any DAW.
+    juce::File exportSelected (juce::String& error);
+    juce::String selectedReport() const;
+    bool generationActive() const noexcept { return batchActive.load (std::memory_order_acquire) != 0; }
+    const juce::String& instanceIdentifier() const noexcept { return instanceId; }
 
     juce::AudioProcessorValueTreeState parameters;
 
@@ -103,6 +133,26 @@ private:
     const TransferRegion* selectedRegionUnsafe() const;
     void setStatus (juce::String);
 
+    struct GenerationBatch
+    {
+        uint64_t id = 0;
+        juce::String regionId;
+        juce::String sourceHash;
+        CompiledRequest request;
+        SessionSnapshot snapshot;
+        juce::String adapter;
+    };
+    juce::StringArray enqueueBatch (IntentionInput, bool revision, bool fromSelectedAudio);
+    void performBatch (const GenerationBatch&);
+    bool batchCancelled (uint64_t id) const noexcept
+    {
+        return cancelledThroughBatch.load (std::memory_order_acquire) >= id;
+    }
+    int intentionIndexUnsafe (const juce::String& id) const;
+    void storeIntentionUnsafe (const IntentionRecord&);
+    SessionContext contextForUnsafe (const TransferRegion&) const;
+    void logEvent (const juce::String& event, const juce::String& signal, const juce::var& payload) const;
+
     mutable juce::CriticalSection stateLock;
     PluginStateV1 pluginState;
     RegionCollection regionCollection;
@@ -136,6 +186,16 @@ private:
     std::atomic<const PlaybackSnapshot*> audibleSnapshot { nullptr };
     std::atomic<int> snapshotReaders { 0 };
     std::unique_ptr<PlaybackSnapshot> ownedPlaybackSnapshot;
+
+    // M1 loop state. pendingBatch is guarded by stateLock.
+    std::optional<GenerationBatch> pendingBatch;
+    std::atomic<int> batchRequested { 0 };
+    std::atomic<int> batchActive { 0 };
+    std::atomic<uint64_t> nextBatchId { 1 };
+    std::atomic<uint64_t> cancelledThroughBatch { 0 };
+    std::atomic<int> lastMeterNumerator { 0 };
+    const juce::String instanceId { juce::Uuid().toString() };
+    ExperienceLog experience;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ReImagineProcessor)
 };

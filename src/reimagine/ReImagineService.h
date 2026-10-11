@@ -9,6 +9,11 @@ namespace mosh::reimagine
 {
 juce::var serviceParamsForRack (const RackSettings&, bool lab);
 
+// Audio stays on this machine: the helper must be reached over loopback unless the
+// owner explicitly opts in with MOSH_SERVICE_ALLOW_LAN=1 (private addressing is not
+// authentication).
+bool isLoopbackServiceHost (const juce::String& host) noexcept;
+
 struct LoraCatalogItem
 {
     juce::String id;
@@ -70,6 +75,11 @@ public:
     juce::String submit (const juce::File& input, const juce::File& output,
                          const juce::File& manifest, const RackSettings&, bool lab,
                          juce::String& error);
+    // service/direct_render.py contract: explicit policy, frozen source hash, fresh
+    // artifact paths, no provider fallback. `params` comes from directServiceParams().
+    juce::String submitDirect (const juce::File& input, const juce::File& output,
+                               const juce::File& manifest, const juce::String& adapter,
+                               const juce::var& params, juce::String& error);
     juce::var status (const juce::String& jobId);
     bool cancel (const juce::String& jobId);
 
@@ -81,6 +91,7 @@ private:
     static juce::File stateDirectory();
 
     juce::String baseUrl;
+    juce::String serviceHost;
     juce::ChildProcess spawnedHelper;
     int protocolVersion = 0;
 };

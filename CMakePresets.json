@@ -147,7 +147,8 @@
       "targets": [
         "MoshTests",
         "MoshReImagineBundleSmoke",
-        "MoshReImagineEditorSmoke"
+        "MoshReImagineEditorSmoke",
+        "MoshReImagineLoopE2E"
       ]
     },
     {
@@ -177,7 +178,8 @@
       "targets": [
         "MoshTests",
         "MoshReImagineBundleSmoke",
-        "MoshReImagineEditorSmoke"
+        "MoshReImagineEditorSmoke",
+        "MoshReImagineLoopE2E"
       ]
     },
     {

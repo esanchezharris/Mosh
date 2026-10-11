@@ -340,9 +340,12 @@ juce::String serializeState (const PluginStateV1& state)
         for (const auto& take : region.takes)
             takes.add (takeToVar (take));
         r->setProperty ("takes", takes);
+        if (! region.context.isVoid())
+            r->setProperty ("context", region.context);
         regions.add (juce::var (r));
     }
     root->setProperty ("regions", regions);
+    root->setProperty ("intentions", state.intentions);
     return juce::JSON::toString (juce::var (root), true);
 }
 
@@ -380,8 +383,24 @@ std::optional<PluginStateV1> deserializeState (const juce::String& json)
                 if (auto* takes = r->getProperty ("takes").getArray())
                     for (const auto& take : *takes)
                         region.takes.push_back (takeFromVar (take));
+                region.context = r->getProperty ("context");
                 result.regions.push_back (std::move (region));
             }
+    if (auto* intentions = root->getProperty ("intentions").getArray())
+        result.intentions = *intentions;
     return result;
+}
+
+juce::File reimagineUserHome()
+{
+    const auto root = juce::SystemStats::getEnvironmentVariable ("MOSH_REIMAGINE_HOME", {});
+    return root.isNotEmpty() ? juce::File (root) : juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+}
+
+juce::File reimagineMusicDirectory()
+{
+    const auto root = juce::SystemStats::getEnvironmentVariable ("MOSH_REIMAGINE_HOME", {});
+    return root.isNotEmpty() ? juce::File (root).getChildFile ("Music")
+                             : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
 }
 }

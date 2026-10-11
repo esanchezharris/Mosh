@@ -4,7 +4,7 @@ namespace mosh::reimagine
 {
 namespace
 {
-constexpr int editorWidth = 780;
+constexpr int editorWidth = 1180;
 constexpr int editorHeight = 690;
 }
 
@@ -27,8 +27,70 @@ ReImagineEditor::ReImagineEditor (ReImagineProcessor& p)
     };
     for (auto* label : labels)
         addAndMakeVisible (label);
+    std::array<juce::Component*, 18> loopComponents {
+        &contextHeading, &intentionHeading, &reviseHeading, &contextKey, &contextChords, &contextSection,
+        &contextProtected, &saveContext, &candidateCount, &generate, &cancel, &revision, &reviseFromAudio,
+        &revise, &keep, &exportWav, &dragOut, &report
+    };
+    for (auto* component : loopComponents)
+        addAndMakeVisible (component);
+    configureLabel (contextHeading, "CONTEXT (THIS REGION)", 11.0f, true);
+    configureLabel (intentionHeading, "INTENTION - PROMPT FIELD IS THE REQUEST", 11.0f, true);
+    configureLabel (reviseHeading, "REVISE SELECTED VERSION", 11.0f, true);
+    configureLabel (report, {}, 11.5f);
+    report.setJustificationType (juce::Justification::topLeft);
+    report.setColour (juce::Label::textColourId, ReImagineLookAndFeel::text());
+    for (auto* field : { &contextKey, &contextChords, &contextSection, &contextProtected })
+        field->setFont (juce::FontOptions (13.0f));
+    contextKey.setTextToShowWhenEmpty ("Key, e.g. F minor (optional)", ReImagineLookAndFeel::muted());
+    contextChords.setTextToShowWhenEmpty ("Timed chords, e.g. 1:Fm7 3:Db 5:Ab 7:Eb", ReImagineLookAndFeel::muted());
+    contextSection.setTextToShowWhenEmpty ("Section label (optional)", ReImagineLookAndFeel::muted());
+    contextProtected.setTextToShowWhenEmpty ("Protected choices, comma-separated", ReImagineLookAndFeel::muted());
+    contextChords.setTooltip ("Bars are 1-based from the region start. Chords reach the model as text only; harmony is not enforced.");
+    saveContext.onClick = [this]
+    {
+        showMessages (processorRef.setSelectedContext (contextKey.getText(), contextChords.getText(),
+                                                       contextSection.getText(), contextProtected.getText()));
+    };
+    for (int n = 1; n <= kMaxCandidatesPerBatch; ++n)
+        candidateCount.addItem (juce::String (n) + (n == 1 ? " candidate" : " candidates"), n);
+    candidateCount.setSelectedId (2, juce::dontSendNotification);
+    generate.setComponentID ("primary");
+    generate.setColour (juce::TextButton::buttonColourId, ReImagineLookAndFeel::accent());
+    generate.setTooltip ("Start a new intention from the original source. At most 8 model attempts per intention.");
+    generate.onClick = [this]
+    {
+        processorRef.storeRack (rackFromControls());
+        showMessages (processorRef.generateCandidates (intentionFromControls()));
+    };
+    cancel.onClick = [this] { processorRef.cancelGeneration(); };
+    revision.setMultiLine (true);
+    revision.setReturnKeyStartsNewLine (false);
+    revision.setFont (juce::FontOptions (13.0f));
+    revision.setTextToShowWhenEmpty ("What to change, e.g. roughen the texture, keep the chord timing",
+                                     ReImagineLookAndFeel::muted());
+    reviseFromAudio.setToggleState (true, juce::dontSendNotification);
+    reviseFromAudio.setTooltip ("On: the selected version's audio is the starting point. Off: start again from the original source.");
+    revise.onClick = [this]
+    {
+        auto input = intentionFromControls();
+        input.revision = revision.getText();
+        showMessages (processorRef.reviseSelected (input, reviseFromAudio.getToggleState()));
+    };
+    keep.setTooltip ("Mark the audible version as kept. Does not write the DAW timeline.");
+    keep.onClick = [this] { processorRef.keepSelected(); };
+    exportWav.setTooltip ("Copy the audible version to ~/Music/Mosh Exports with a JSON sidecar.");
+    exportWav.onClick = [this]
+    {
+        juce::String error;
+        if (! processorRef.exportSelected (error).existsAsFile())
+            status.setText (error, juce::dontSendNotification);
+    };
+    dragOut.setTooltip ("Drag the audible version into your DAW (a durable copy is written first).");
+    cancel.setEnabled (false);
+    report.setText (processorRef.selectedReport(), juce::dontSendNotification);
 
-    configureLabel (promptLabel, "PROMPT", 11.0f, true);
+    configureLabel (promptLabel, "REQUEST / PROMPT", 11.0f, true);
     configureLabel (reimagineLabel, "KEEP / RE-IMAGINE", 11.0f, true);
     configureLabel (colorsLabel, "COLORS", 11.0f, true);
     configureLabel (lorasLabel, "LoRA STACK", 11.0f, true);
@@ -111,7 +173,8 @@ ReImagineEditor::ReImagineEditor (ReImagineProcessor& p)
 
     prompt.setMultiLine (true);
     prompt.setReturnKeyStartsNewLine (false);
-    prompt.setTextToShowWhenEmpty ("Describe the transformation", ReImagineLookAndFeel::muted());
+    prompt.setTextToShowWhenEmpty ("What should this become? e.g. hazy sampled-keyboard loop, less busy",
+                                   ReImagineLookAndFeel::muted());
     prompt.setFont (juce::FontOptions (14.0f));
     prompt.onReturnKey = [this] { commit(); };
     prompt.onFocusLost = [this] { commit(); };
@@ -174,7 +237,7 @@ ReImagineEditor::ReImagineEditor (ReImagineProcessor& p)
         const auto enabled = lab.getToggleState();
         processorRef.setLabEnabled (enabled);
         reimagine.setRange (0.15, enabled ? 1.5 : 0.5, 0.01);
-        commit();
+        commit();   // stores only; Generate keeps strength within the safe 0.01-0.5 contract
     };
     takes.onChange = [this] { processorRef.setSelectedTake (takes.getSelectedItemIndex()); };
     regions.onChange = [this]
@@ -233,8 +296,49 @@ RackSettings ReImagineEditor::rackFromControls() const
 
 void ReImagineEditor::commit()
 {
+    // Edits only store the rack. Model calls happen on Generate, Revise or New Take.
     if (! syncingLoras)
-        processorRef.commitRack (rackFromControls());
+        processorRef.storeRack (rackFromControls());
+}
+
+IntentionInput ReImagineEditor::intentionFromControls() const
+{
+    const auto rack = rackFromControls();
+    IntentionInput input;
+    input.request = rack.prompt;
+    input.strength = rack.reimagine;
+    input.candidateCount = juce::jlimit (1, kMaxCandidatesPerBatch, candidateCount.getSelectedId());
+    input.baseSeed = rack.seed;
+    input.colors = rack.colors;
+    input.loras = rack.loras;
+    return input;
+}
+
+void ReImagineEditor::showMessages (const juce::StringArray& messages)
+{
+    if (! messages.isEmpty())
+        status.setText (messages.joinIntoString ("; "), juce::dontSendNotification);
+}
+
+void ReImagineEditor::loadContextFields()
+{
+    const auto context = processorRef.selectedContext();
+    contextKey.setText (context.keyFrom == Provenance::user ? context.key : juce::String(), false);
+    contextChords.setText (formatChordList (context.chords), false);
+    contextSection.setText (context.sectionLabel, false);
+    contextProtected.setText (context.protectedChoices.joinIntoString (", "), false);
+}
+
+void DragOutButton::mouseDrag (const juce::MouseEvent& e)
+{
+    juce::TextButton::mouseDrag (e);
+    if (dragStarted || e.getDistanceFromDragStart() < 6)
+        return;
+    dragStarted = true;
+    juce::String error;
+    const auto file = processor.exportSelected (error);
+    if (file.existsAsFile())
+        juce::DragAndDropContainer::performExternalDragDropOfFiles ({ file.getFullPathName() }, false, this);
 }
 
 void ReImagineEditor::showLoraLoadingState()
@@ -363,19 +467,35 @@ void ReImagineEditor::timerCallback()
         return region.id == state.selectedRegionId;
     });
     const auto takeCount = found == state.regions.end() ? 0 : static_cast<int> (found->takes.size());
-    if (takeCount != knownTakeCount)
+    juce::StringArray labels;
+    if (found != state.regions.end())
+        for (int i = 0; i < takeCount; ++i)
+            labels.add (takeLabel (*found, static_cast<size_t> (i)));
+    const auto signature = labels.joinIntoString ("|") + "#" + (found != state.regions.end() ? found->selectedTakeId : juce::String());
+    if (takeCount != knownTakeCount || signature != knownTakeSignature)
     {
         knownTakeCount = takeCount;
+        knownTakeSignature = signature;
         takes.clear (juce::dontSendNotification);
         if (found != state.regions.end())
             for (int i = 0; i < takeCount; ++i)
             {
-                const auto& take = found->takes[static_cast<size_t> (i)];
-                takes.addItem ("Take " + juce::String (i + 1) + " - seed " + juce::String (take.seed), i + 1);
-                if (take.id == found->selectedTakeId)
+                takes.addItem (labels[i], i + 1);
+                if (found->takes[static_cast<size_t> (i)].id == found->selectedTakeId)
                     takes.setSelectedItemIndex (i, juce::dontSendNotification);
             }
     }
+    const auto regionId = found != state.regions.end() ? found->id : juce::String();
+    if (regionId != knownContextRegion)
+    {
+        knownContextRegion = regionId;
+        loadContextFields();
+    }
+    const auto busy = processorRef.generationActive();
+    generate.setEnabled (! busy);
+    revise.setEnabled (! busy);
+    cancel.setEnabled (busy);
+    report.setText (processorRef.selectedReport(), juce::dontSendNotification);
     repaint();
 }
 
@@ -421,6 +541,12 @@ void ReImagineEditor::paint (juce::Graphics& g)
     g.drawText ("RACK / TRANSFORM", 34, 134, 200, 12, juce::Justification::centredLeft);
     g.drawText ("OUTPUT / MONITOR", 568, 134, 180, 12, juce::Justification::centredLeft);
     g.drawLine (552.0f, 146.0f, 552.0f, 616.0f, 1.0f);
+    g.setColour (ReImagineLookAndFeel::panel());
+    g.fillRoundedRectangle (772.0f, 84.0f, 392.0f, 548.0f, 10.0f);
+    g.setColour (ReImagineLookAndFeel::border());
+    g.drawRoundedRectangle (772.5f, 84.5f, 391.0f, 547.0f, 10.0f, 1.0f);
+    g.setColour (ReImagineLookAndFeel::panelInset());
+    g.fillRoundedRectangle (780.0f, 448.0f, 376.0f, 176.0f, 8.0f);
     g.setColour (processorRef.transferActive() ? ReImagineLookAndFeel::accent()
                                                 : ReImagineLookAndFeel::success());
     g.fillEllipse (31.0f, 651.0f, 8.0f, 8.0f);
@@ -468,7 +594,26 @@ void ReImagineEditor::resized()
     labHelp.setBounds (568, 412, 164, 48);
     replace.setBounds (568, 478, 164, 30);
     discard.setBounds (568, 516, 164, 30);
-    status.setBounds (46, 642, 592, 26);
-    progressBar.setBounds (646, 649, 102, 10);
+    status.setBounds (46, 642, 1000, 26);
+    progressBar.setBounds (1056, 649, 102, 10);
+
+    contextHeading.setBounds (782, 92, 360, 18);
+    contextKey.setBounds (782, 112, 374, 26);
+    contextChords.setBounds (782, 142, 374, 26);
+    contextSection.setBounds (782, 172, 183, 26);
+    contextProtected.setBounds (973, 172, 183, 26);
+    saveContext.setBounds (1046, 204, 110, 26);
+    intentionHeading.setBounds (782, 238, 374, 18);
+    candidateCount.setBounds (782, 260, 140, 30);
+    generate.setBounds (930, 260, 120, 30);
+    cancel.setBounds (1058, 260, 98, 30);
+    reviseHeading.setBounds (782, 300, 374, 18);
+    revision.setBounds (782, 320, 374, 48);
+    reviseFromAudio.setBounds (782, 374, 200, 26);
+    revise.setBounds (1046, 372, 110, 30);
+    keep.setBounds (782, 410, 110, 30);
+    exportWav.setBounds (900, 410, 110, 30);
+    dragOut.setBounds (1018, 410, 138, 30);
+    report.setBounds (788, 452, 362, 168);
 }
 }

@@ -117,6 +117,9 @@ struct TransferRegion
     RegionStatus status = RegionStatus::ready;
     juce::String selectedTakeId;
     std::vector<RenderTake> takes;
+    // Additive (M1): the region's editable session context (ReImagineSession.h
+    // contextToVar). Void == nothing entered yet.
+    juce::var context;
 };
 
 enum class RegionOffer { accepted, needsOverlapDecision, invalid };
@@ -179,6 +182,9 @@ struct PluginStateV1
     bool labEnabled = false;
     float mix = 1.0f;
     std::vector<TransferRegion> regions;
+    // Additive (M1): intention records with attempt budgets (ReImagineSession.h
+    // intentionToVar). Older states load with none.
+    juce::Array<juce::var> intentions;
 };
 
 bool tempoMatches (const TempoMap&, double ppq, double hostBpm, double tolerance = 0.01) noexcept;
@@ -207,4 +213,10 @@ CrossfadeGains substitutionGainsForPosition (double ppq, double start, double en
                                              float mix, bool compareDry) noexcept;
 juce::String serializeState (const PluginStateV1&);
 std::optional<PluginStateV1> deserializeState (const juce::String&);
+
+// Roots for every per-user Re-Imagine path (helper state, assets, experience log,
+// exports). MOSH_REIMAGINE_HOME redirects them for hermetic harnesses; on macOS JUCE
+// resolves the home directory with NSHomeDirectory() and ignores $HOME.
+juce::File reimagineUserHome();
+juce::File reimagineMusicDirectory();
 }
