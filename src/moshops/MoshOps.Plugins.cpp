@@ -18,6 +18,7 @@
 #include "PluginScanPlan.h"
 #include "TrackPresetEngine.h"
 #include "PluginState.h"
+#include "plugins/hosting/SidechainBuses.h"
 #include "plugins/moshfx/MoshDelayLinePlugins.h"
 #include "ScanProgress.h"
 #include "state/Ids.h"
@@ -882,6 +883,8 @@ juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
     if (swapOut != nullptr) index = swapIndex;   // the swap fills the slot the old one left
     if (index < 0) index = track->pluginList.getPlugins().size();   // append (−1 does not append)
     track->pluginList.insertPlugin (plugin, index, nullptr);
+    if (auto* ext = dynamic_cast<te::ExternalPlugin*> (plugin.get()))
+        sidechain::disableUnroutedInputs (*ext);   // no silent key input (SidechainBuses.h)
     synchronisePlaybackGraph();
 
     auto* data = new DynamicObject();
@@ -1206,6 +1209,8 @@ juce::var MoshOps::cmdLoadMasterPlugin (const juce::var& args)
     int index = (int) args.getProperty ("index", -1);
     if (index < 0 || index > boundary) index = boundary;   // append before any internal tap
     list.insertPlugin (plugin, index, nullptr);
+    if (auto* ext = dynamic_cast<te::ExternalPlugin*> (plugin.get()))
+        sidechain::disableUnroutedInputs (*ext);   // no silent key input (SidechainBuses.h)
 
     // PluginList::insertPlugin SILENTLY no-ops (returns without inserting, no
     // exception) once te::EditLimits::maxNumMasterPlugins is hit — the internal

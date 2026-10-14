@@ -2,6 +2,7 @@
 #include "selftest/MultiplayerAudioRefSelfTest.h"
 #include "selftest/TunedLeadPresetSelfTest.h"
 #include "selftest/VocalPresetSelfTest.h"
+#include "plugins/hosting/SidechainBuses.h"
 #include "selftest/PluginPanelsSelfTest.h"
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
@@ -19214,6 +19215,72 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         eng, ops, { [] (const String& name) { section (name); },
                     [] (bool condition, const String& message) { check (condition, message); },
                     [&eng] (const String& leaf) { return selftestTempPath (eng, leaf); } });
+
+    // Unrouted sidechain inputs (SidechainBuses.h). Tracktion enables every bus of a hosted
+    // plugin and feeds an unrouted sidechain SILENCE, so a plugin keying from it (Waves C1
+    // gate) shut at any threshold. Pure layout logic on a probe processor: no project, no
+    // ids, so it cannot shift anything above. The hosted-plugin path is proven against the
+    // real C1 gate by scripts/verify-hardware/verify.py --c1-gate.
+    {
+        section ("unrouted sidechain inputs are turned off");
+        struct SidechainProbe final : juce::AudioProcessor
+        {
+            explicit SidechainProbe (bool withSidechain)
+                : juce::AudioProcessor (withSidechain
+                      ? BusesProperties().withInput ("Input", juce::AudioChannelSet::stereo())
+                                         .withOutput ("Output", juce::AudioChannelSet::stereo())
+                                         .withInput ("Sidechain", juce::AudioChannelSet::stereo())
+                      : BusesProperties().withInput ("Input", juce::AudioChannelSet::stereo())
+                                         .withOutput ("Output", juce::AudioChannelSet::stereo())) {}
+            bool isBusesLayoutSupported (const BusesLayout& l) const override
+            {
+                if (l.getMainInputChannelSet() != juce::AudioChannelSet::stereo()
+                    || l.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+                    return false;
+                for (int i = 1; i < l.inputBuses.size(); ++i)
+                    if (! l.inputBuses[i].isDisabled() && l.inputBuses[i] != juce::AudioChannelSet::stereo())
+                        return false;
+                return true;
+            }
+            const String getName() const override { return "SidechainProbe"; }
+            void prepareToPlay (double, int) override {}
+            void releaseResources() override {}
+            void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override {}
+            double getTailLengthSeconds() const override { return 0.0; }
+            bool acceptsMidi() const override { return false; }
+            bool producesMidi() const override { return false; }
+            juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+            bool hasEditor() const override { return false; }
+            int getNumPrograms() override { return 1; }
+            int getCurrentProgram() override { return 0; }
+            void setCurrentProgram (int) override {}
+            const String getProgramName (int) override { return {}; }
+            void changeProgramName (int, const String&) override {}
+            void getStateInformation (juce::MemoryBlock&) override {}
+            void setStateInformation (const void*, int) override {}
+        };
+
+        SidechainProbe keyed (true);
+        keyed.enableAllBuses();   // what te::ExternalPlugin does to every instance
+        check (keyed.getTotalNumInputChannels() == 4,
+               "probe: with every bus enabled the plugin takes 4 inputs (main + sidechain), as Tracktion hosts it");
+        auto layout = keyed.getBusesLayout();
+        check (sidechain::disableAuxInputBuses (layout), "the unrouted sidechain bus is marked for removal");
+        check (keyed.setBusesLayout (layout), "...and the plugin accepts the layout without it");
+        check (keyed.getTotalNumInputChannels() == 2 && keyed.getMainBusNumInputChannels() == 2,
+               "...leaving only the main stereo input, so the plugin keys from its own signal");
+        check (keyed.getChannelLayoutOfBus (true, 0) == juce::AudioChannelSet::stereo()
+                   && keyed.getTotalNumOutputChannels() == 2,
+               "...with the main input and the output untouched");
+        auto again = keyed.getBusesLayout();
+        check (! sidechain::disableAuxInputBuses (again), "a second pass finds nothing to change");
+
+        SidechainProbe plain (false);
+        plain.enableAllBuses();
+        auto plainLayout = plain.getBusesLayout();
+        check (! sidechain::disableAuxInputBuses (plainLayout) && plain.getTotalNumInputChannels() == 2,
+               "a plugin with no sidechain bus is left alone");
+    }
 
     finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks

@@ -15,6 +15,7 @@
 #include "plugins/moshfx/MoshLowPassPlugin.h"
 #include "plugins/moshfx/MoshSamplerPlugin.h"
 #include "state/SafeMode.h"
+#include "plugins/hosting/SidechainBuses.h"
 #include "app/MacMicrophonePermission.h"
 
 #include <atomic>
@@ -1084,6 +1085,15 @@ std::unique_ptr<te::Edit> MoshEngine::loadEditBracketed (const juce::File& file,
         [file] { return file; },
         {}
     });
+
+    // Projects saved before the sidechain fix store their plugins' key inputs enabled, and
+    // Tracktion restores that layout. A reopened Waves C1 gate happened to key from its own
+    // input anyway (only a FRESH load keyed from the silent bus, measured 2026-10-14), but
+    // another plugin may honour the stored layout, and every instance should be in the same
+    // state whether it was just loaded or reopened. Same normalisation as load_plugin
+    // (SidechainBuses.h); never an undo step.
+    if (ed != nullptr && ! safeMode)
+        mosh::sidechain::disableUnroutedInputs (*ed);
 
     // Survived the load — the breadcrumb has done its job. Deleting it here (not on quit)
     // is what makes it a LOAD-time pedal: a crash later in the session is the sentinel's
