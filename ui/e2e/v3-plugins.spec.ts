@@ -320,3 +320,27 @@ test("a plugin row minimizes to a one-line summary and expands again; minimizing
   await expect(row.getByTestId("v3-plugin-summary")).toHaveCount(0);
   expect(await sent()).toEqual([]);
 });
+
+// Owner report 2026-10-14: a track ended up with two C1 gates and six Mosh AutoTunes. The
+// whole Plugins row is the Load button, and a double-click on a list row is a natural
+// gesture, so it inserted two plugins (two load_plugin calls 50 ms apart in the log).
+test("double-clicking a plugin row adds it once; a deliberate second click still adds another", async ({ page }) => {
+  await bootV3(page);
+  await page.getByTestId("v3-add-audio").click();
+  const newTrack = page.getByTestId("v3-track").last();
+  await newTrack.getByRole("button", { name: /^Select track/ }).click();
+  const rows = page.getByTestId("v3-inspector").getByTestId("v3-plugin");
+  const rowsBefore = await rows.count();
+
+  await page.getByTestId("v3-add-plugin").click();
+  const dock = page.getByTestId("v2-plugin-dock");
+  await dock.getByTestId("v2-pb-search").fill("Compressor");
+  const row = dock.getByTestId("v2-pb-row").first();
+  await row.dblclick();
+  await expect(rows).toHaveCount(rowsBefore + 1);
+  await page.waitForTimeout(400);                           // let a second insert land, if one is coming
+  await expect(rows).toHaveCount(rowsBefore + 1);
+
+  await row.click();                                        // a separate click is a real second load
+  await expect(rows).toHaveCount(rowsBefore + 2);
+});
