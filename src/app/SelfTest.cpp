@@ -3,6 +3,7 @@
 #include "selftest/TunedLeadPresetSelfTest.h"
 #include "selftest/VocalPresetSelfTest.h"
 #include "plugins/hosting/SidechainBuses.h"
+#include "plugins/MoshPluginTypes.h"
 #include "selftest/PluginPanelsSelfTest.h"
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
@@ -19280,6 +19281,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto plainLayout = plain.getBusesLayout();
         check (! sidechain::disableAuxInputBuses (plainLayout) && plain.getTotalNumInputChannels() == 2,
                "a plugin with no sidechain bus is left alone");
+    }
+
+    // Mosh-owned plugin types must be known to the ENGINE, before any MoshOps/PluginHost
+    // exists: that is the state MoshEngine's ctor loads the last project in, and Tracktion
+    // drops an unknown type there with only a log line. Owner report 2026-10-14: every
+    // relaunch lost the vocal chain's Mosh AutoTune (MoshPluginTypes.h). A nested engine
+    // with NO MoshOps built on it is exactly that state.
+    {
+        section ("Mosh plugin types are known before the first project load");
+        MoshEngine coldEng (false, true, "session-plugin-types-cold", /*nestedEngine=*/true);
+        auto& coldPlugins = coldEng.engine().getPluginManager();
+        for (const auto& type : moshPluginTypeNames())
+            check (coldPlugins.createNewPlugin (coldEng.edit(), type, {}) != nullptr,
+                   "a bare engine (no MoshOps yet) can create '" + type + "', so a saved one survives a cold load");
     }
 
     finishSection();

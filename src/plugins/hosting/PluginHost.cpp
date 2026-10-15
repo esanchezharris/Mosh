@@ -4,6 +4,7 @@
 #include "plugins/mixer/TrackMutePlugin.h"
 #include "plugins/moshfx/MoshFxPlugins.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
+#include "plugins/MoshPluginTypes.h"
 #if MOSH_HAVE_ANIRA
  #include "plugins/transform/RaveInsertPlugin.h"
 #endif
@@ -287,25 +288,15 @@ void PluginHost::initialise()
     if (engine.getPluginManager().pluginFormatManager.getNumFormats() == 0)
         engine.getPluginManager().initialise();
 
-    // Register the master spectral tap (Moshi reactivity) — a pure-measure passthrough
-    // appended to the master plugin list, drained at 30 Hz to feed Moshi's body.
-    engine.getPluginManager().createBuiltInType<MasterSpectralTapPlugin>();
-    // CAP-AUT-006 — the per-track mute gate. Belt-and-braces: MoshEngine's ctor already
-    // registers it, because it has to be known BEFORE the persisted Edit is loaded there
-    // and PluginHost::initialise only runs later, from the MoshOps ctor.
-    // registerBuiltInType ignores a type it already has, so this is a no-op in the app
-    // and a safety net for any future path that builds a PluginHost on its own engine.
-    // Deliberately NOT in the curated `builtins` table: it must never appear in
-    // list_builtins for a user to load by hand.
-    engine.getPluginManager().createBuiltInType<TrackMutePlugin>();
-    engine.getPluginManager().createBuiltInType<MoshAutoTunePlugin>();
-    engine.getPluginManager().createBuiltInType<MoshOTTPlugin>();
-    engine.getPluginManager().createBuiltInType<MoshSoftClipPlugin>();
-    engine.getPluginManager().createBuiltInType<MoshXFeedbackPlugin>();
-   #if MOSH_HAVE_ANIRA
-    // Route C.2 — the real-time RAVE insert (only registered in the anira build).
-    engine.getPluginManager().createBuiltInType<RaveInsertPlugin>();
-   #endif
+    // Mosh-owned plugin types (mute gate, master spectral tap, AutoTune, OTT, Soft
+    // Clipper, X-FDBK, and the anira build's RAVE insert). Belt-and-braces: MoshEngine's
+    // ctor already registers them, because they must be known BEFORE the persisted Edit
+    // is loaded there and PluginHost::initialise only runs later, from the MoshOps ctor
+    // (MoshPluginTypes.h). registerBuiltInType ignores a type it already has, so this is a
+    // no-op in the app and a safety net for any path that builds a PluginHost on its own
+    // engine. The mute gate and the tap are deliberately NOT in the curated `builtins`
+    // table: they must never appear in list_builtins for a user to load by hand.
+    registerMoshPluginTypes (engine.getPluginManager());
 
     // FIT-003 — load persisted block reasons BEFORE recovery runs, so a fresh
     // "crash_or_hang" tag from THIS launch's recovery below is layered on top of
