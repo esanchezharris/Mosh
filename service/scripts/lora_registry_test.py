@@ -153,7 +153,10 @@ try:
             return True
     check("resolve unknown → ValueError", raises([{"name": "nope", "value": 50}]))
     check("resolve invalid file → ValueError", raises([{"name": "xs", "value": 50}]))
-    check("resolve negative → ValueError", raises([{"name": "kxc", "value": -5}]))
+    neg = registry.resolve([{"name": "kxc", "value": -5}])   # owner call 2026-10-07
+    check("resolve negative accepted = value/100", neg == [("kxc", sel[0][1], -0.05)], str(neg))
+    check("resolve non-number → ValueError", raises([{"name": "kxc", "value": "loud"}]))
+    check("resolve non-finite → ValueError", raises([{"name": "kxc", "value": float("nan")}]))
     check("resolve duplicate → ValueError",
           raises([{"name": "kxc", "value": 50}, {"name": "kxc", "value": 60}]))
     check("resolve 4-stack unbounded",
