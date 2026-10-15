@@ -88,8 +88,8 @@ case "$MODE" in
     RUNS="${MOSH_SELFTEST_RUNS:-3}"
     # Floors: the Linux check counts recorded on 2026-10-15 (see the spike doc). The mac
     # gate's MOSH_SELFTEST_BASELINE is a separate number for a separate platform.
-    FLOOR="${MOSH_LINUX_SELFTEST_FLOOR:-4667}"
-    UNDO_FLOOR="${MOSH_LINUX_SELFTEST_UNDO_FLOOR:-0}"
+    FLOOR="${MOSH_LINUX_SELFTEST_FLOOR:-5004}"
+    UNDO_FLOOR="${MOSH_LINUX_SELFTEST_UNDO_FLOOR:-92}"
     WRAP=()
     if [ -z "${DISPLAY:-}" ]; then
       command -v xvfb-run >/dev/null || { echo "no DISPLAY and no xvfb-run (apt install xvfb)" >&2; exit 1; }
