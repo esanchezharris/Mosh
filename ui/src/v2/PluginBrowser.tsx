@@ -116,7 +116,10 @@ function PluginList({ rows, favSet, activeLabel, emptyLabel, selectedTrackId, on
                 <button
                   className="v2-pb-add"
                   data-testid="v2-pb-row"
-                  onClick={() => onLoad(e)}
+                  // The whole row loads, and double-clicking a list row is a natural gesture:
+                  // its second click (detail 2, 3…) must not insert a second plugin. A key
+                  // press (detail 0) or a separate later click still loads.
+                  onClick={(ev) => { if (ev.detail <= 1) onLoad(e); }}
                   disabled={!selectedTrackId}
                   title={selectedTrackId ? `Add ${e.name}` : "Select a track first"}
                 >
