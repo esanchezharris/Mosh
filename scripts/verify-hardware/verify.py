@@ -2208,6 +2208,7 @@ def main():
     ap.add_argument("--sa3", action="store_true", help="also run the SA3 generative-transform check (needs the service)")
     ap.add_argument("--rave", action="store_true", help="also run the real RAVE transform-path check (needs the transform venv — setup-transform.sh)")
     ap.add_argument("--lora", action="store_true", help="also run the LoRA-rack real-merge check (needs the SA3 service + a lab adapter — see lora_check.py)")
+    ap.add_argument("--c1-gate", action="store_true", help="also check a hosted sidechain plugin keys from its own input (needs Waves C1; skips when absent)")
     ap.add_argument("--rave-insert", action="store_true", help="also run the real-time RAVE insert offline-render check (needs an anira build + the transform venv)")
     ap.add_argument("--gate", action="store_true", help="also enforce the golden-audio checksum baselines (pre-merge gate)")
     ap.add_argument("--update-golden", action="store_true", help="regenerate the golden baselines from this run (intentional DSP/adapter change)")
@@ -2243,6 +2244,13 @@ def main():
     if args.rave:
         from rave_check import check_rave   # noqa: lazy import, optional
         r = check_rave(ctx)
+        rows.append(r)
+        print(f"  [{'PASS' if r['pass'] else 'FAIL'}] {r['check']}")
+        print(f"         {json.dumps(r['detail'])}")
+
+    if args.c1_gate:
+        from c1_gate_check import check_c1_gate   # noqa: lazy import, optional
+        r = check_c1_gate(ctx, ART, run_script, stats, failed_commands)
         rows.append(r)
         print(f"  [{'PASS' if r['pass'] else 'FAIL'}] {r['check']}")
         print(f"         {json.dumps(r['detail'])}")
