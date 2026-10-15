@@ -267,6 +267,10 @@ if (MOSH_BUILD_APP)
         # WebView2 (Edge Chromium) backs the WebView on Windows. JUCE ignores this
         # on non-Windows, so it is safe to pass unconditionally.
         NEEDS_WEBVIEW2 TRUE
+        # WebKitGTK + GTK back the WebView on Linux. JUCE only links them (and only adds
+        # the gtk/webkit include dirs juce_gui_extra needs) when this is set, and reads
+        # it only on Linux/BSD, so it is a no-op on macOS/Windows.
+        NEEDS_WEB_BROWSER TRUE
         ${MOSH_APP_EXTRA_ARGS})
 
 # Source modules (00 §5). Added incrementally per build stage.
