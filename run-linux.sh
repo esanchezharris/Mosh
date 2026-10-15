@@ -8,8 +8,10 @@
 #                            it via ctest. Needs only build-essential + cmake + ninja
 #                            (no WebKitGTK / ALSA / node) — the "smallest real build".
 #   ./run-linux.sh app       build the full GUI app. Needs the WebKitGTK/ALSA/node
-#                            system deps (see `./run-linux.sh deps`). EXPLORATORY —
-#                            the full app is CI-tracked but not yet a supported target.
+#                            system deps (see `./run-linux.sh deps`). Required in linux-ci.
+#   ./run-linux.sh selftest  run the built app's --selftest ×3 + --selftest-undo (under
+#                            xvfb-run when there is no DISPLAY) against the Linux floors.
+#                            Use MOSH_LINUX_PRESET=linux-x64-release for the gate flavour.
 #   ./run-linux.sh service   start the cross-platform Python generative service
 #                            (FakeAdapter, stdlib only — forces MOSH_ENABLE_SA3=0).
 #   ./run-linux.sh deps      print the apt-get line for the full-app system deps.
@@ -62,10 +64,92 @@ case "$MODE" in
     ensure_git_https
     echo "configuring full app (needs WebKitGTK + ALSA + node — see './run-linux.sh deps')…"
     cmake --preset "$PRESET"
-    echo "building Mosh (exploratory — may not fully link on Linux yet)…"
+    echo "building Mosh…"
     cmake --build "$BUILD_DIR" --target Mosh
     echo "built Mosh → $BUILD_DIR. Launch it under an X11/Wayland session:"
-    echo "  \$(find '$BUILD_DIR' -name Mosh -type f -perm -u+x -print -quit) --selftest"
+    echo "  \$(find '$BUILD_DIR' -name Mosh -type f -perm -u+x -print -quit)"
+    echo "or run its headless self-tests: ./run-linux.sh selftest"
+    ;;
+
+  selftest)
+    # Linux counterpart of the native gate's run_selftest_x3 (scripts/auto-loop/gate.sh):
+    # --selftest ×N (default 3) then --selftest-undo once, against an already-built app
+    # (run `./run-linux.sh app` first). A run fails on a non-zero exit, any failed check, a
+    # missing summary (crash), a check count below the Linux floor, or counts that differ
+    # between runs. JUCE assertions fail a Release run (the gate's flavour, where jassert is
+    # compiled out, so any hit means a non-jassert abort path); in Debug they are reported
+    # but not fatal — see docs/2026-07-07-linux-build-spike.md for the recorded set.
+    # shellcheck source=scripts/auto-loop/lib.sh
+    source "$ROOT/scripts/auto-loop/lib.sh"   # parse_selftest_tally, count_juce_asserts
+    FLAVOR=Debug; [[ "$PRESET" == *release* ]] && FLAVOR=Release
+    BIN="${MOSH_LINUX_BIN:-$BUILD_DIR/Mosh_artefacts/$FLAVOR/Mosh}"
+    [ -x "$BIN" ] || { echo "no built app at $BIN — run './run-linux.sh app' first" >&2; exit 1; }
+    RUNS="${MOSH_SELFTEST_RUNS:-3}"
+    # Floors: the Linux check counts recorded on 2026-10-15 (see the spike doc). The mac
+    # gate's MOSH_SELFTEST_BASELINE is a separate number for a separate platform.
+    FLOOR="${MOSH_LINUX_SELFTEST_FLOOR:-4667}"
+    UNDO_FLOOR="${MOSH_LINUX_SELFTEST_UNDO_FLOOR:-0}"
+    WRAP=()
+    if [ -z "${DISPLAY:-}" ]; then
+      command -v xvfb-run >/dev/null || { echo "no DISPLAY and no xvfb-run (apt install xvfb)" >&2; exit 1; }
+      WRAP=(xvfb-run -a)
+    fi
+    LOG_DIR="${MOSH_SELFTEST_LOG_DIR:-$(mktemp -d)}"; mkdir -p "$LOG_DIR"
+    SESS_PREFIX="_harness/session-linux-selftest-$$"
+    STATUS=0; FIRST_N=""
+
+    # run_one <label> <flag> <summary-regex-prefix> <floor>
+    run_one() {
+      local label="$1" flag="$2" what="$3" floor="$4" log rc n f a
+      log="$LOG_DIR/$label.log"
+      echo "── $label: $flag"
+      set +e
+      MOSH_ENABLE_SA3=0 MOSH_ENABLE_TRANSFORM=0 MOSH_SELFTEST_SESSION="$SESS_PREFIX-$label" \
+        timeout "${MOSH_SELFTEST_TIMEOUT:-1800}" ${WRAP[@]+"${WRAP[@]}"} "$BIN" "$flag" >"$log" 2>&1
+      rc=$?
+      set -e
+      if [ "$what" = undo ]; then
+        # "===== P/T focused undo checks passed, F failed =====" — parse_selftest_tally's
+        # regex wants "N checks passed", so normalise the undo summary into that shape.
+        read -r n f < <(sed -E 's/ focused undo checks passed/ checks passed/' "$log" \
+                          | parse_selftest_tally /dev/stdin)
+      else
+        read -r n f < <(parse_selftest_tally "$log")
+      fi
+      a="$(count_juce_asserts "$log")"
+      local bad=""
+      [ "$rc" -ne 0 ] && bad="$bad rc=$rc"
+      [ "$n" = "-1" ] && bad="$bad no-summary"
+      [ "$f" != "0" ] && bad="$bad failed=$f"
+      [ "$n" != "-1" ] && [ "$n" -lt "$floor" ] && bad="$bad below-floor($n<$floor)"
+      [ "$FLAVOR" = Release ] && [ "$a" != "0" ] && bad="$bad asserts=$a"
+      echo "   passed=$n failed=$f asserts=$a rc=$rc floor=$floor log=$log"
+      if [ -n "$bad" ]; then
+        echo "   FAIL:$bad"
+        grep -E '^  FAIL ' "$log" | head -40 || true
+        grep 'JUCE Assertion' "$log" | sort | uniq -c | sort -rn | head -20 || true
+        tail -20 "$log"
+        STATUS=1
+      fi
+      LAST_N="$n"
+    }
+
+    for i in $(seq 1 "$RUNS"); do
+      run_one "r$i" --selftest full "$FLOOR"
+      if [ -z "$FIRST_N" ]; then FIRST_N="$LAST_N"
+      elif [ "$LAST_N" != "$FIRST_N" ]; then echo "   FAIL: non-deterministic check count ($LAST_N vs $FIRST_N)"; STATUS=1; fi
+    done
+    run_one undo --selftest-undo undo "$UNDO_FLOOR"
+
+    # Reclaim only the sessions this invocation created (the gate does the same after a
+    # pass); a failing run keeps them for inspection.
+    if [ "$STATUS" -eq 0 ]; then
+      rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/Mosh/$SESS_PREFIX"-*
+      echo "selftest: PASS ($RUNS× --selftest at $FIRST_N checks, --selftest-undo at $LAST_N; $FLAVOR)"
+    else
+      echo "selftest: FAIL — logs in $LOG_DIR" >&2
+    fi
+    exit "$STATUS"
     ;;
 
   service)
@@ -74,7 +158,7 @@ case "$MODE" in
     ;;
 
   *)
-    echo "usage: $0 [tests|app|service|deps]" >&2
+    echo "usage: $0 [tests|app|selftest|service|deps]" >&2
     exit 2
     ;;
 esac

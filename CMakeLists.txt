@@ -691,6 +691,14 @@ if (MOSH_BUILD_APP)
                     "$<TARGET_FILE_DIR:Mosh>/drumkits"
             COMMENT "Staging drum kits next to the Mosh executable"
             VERBATIM)
+        # P1 preset seam — MoshOps::presetsBundledRoot falls back to <exe dir>/presets off
+        # macOS. Without this the 4OSC and track-chain banks were missing on Linux.
+        add_custom_command(TARGET Mosh POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${CMAKE_SOURCE_DIR}/resources/presets"
+                    "$<TARGET_FILE_DIR:Mosh>/presets"
+            COMMENT "Staging instrument presets next to the Mosh executable"
+            VERBATIM)
 
         # Windows: stage the MSVC runtime redistributable DLLs (vcruntime140*, msvcp140)
         # next to Mosh.exe so a zipped self-contained build (run-mosh.ps1 -Package copies

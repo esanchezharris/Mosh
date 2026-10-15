@@ -2,10 +2,11 @@
 # The macOS dev box can't build for Linux, so CI is the proof. Two stages share one
 # tracktion/JUCE fetch (FETCHCONTENT_BASE_DIR is pinned to .cpm-cache/_fc in
 # CMakeLists.txt, independent of the build dir):
-#   1. Headless MoshTests — the REQUIRED gate. Configures with the app OFF, so it needs
-#      no WebKitGTK/ALSA/node and can't be blocked by a GUI-dep snag.
-#   2. Full GUI app — INFORMATIONAL (continue-on-error). Surfaces exactly how far the
-#      WebKitGTK + ALSA + JUCE-Linux-VST3 app gets without red-failing the spike.
+#   1. Headless MoshTests — REQUIRED. Configures with the app OFF, so it needs no
+#      WebKitGTK/ALSA/node and can't be blocked by a GUI-dep snag.
+#   2. Full GUI app — REQUIRED. Builds the Release app (the native gate's flavour) and
+#      runs its --selftest ×3 + --selftest-undo under Xvfb against the Linux floors
+#      (./run-linux.sh selftest). Not evidence for the macOS native gate.
 # See docs/2026-07-07-linux-build-spike.md.
 name: linux-ci
 
@@ -66,7 +67,7 @@ jobs:
             build-essential cmake ninja-build pkg-config \
             libwebkit2gtk-4.1-dev libgtk-3-dev libasound2-dev libfreetype6-dev \
             libx11-dev libxext-dev libxinerama-dev libxrandr-dev libxcursor-dev \
-            libxcomposite-dev libcurl4-openssl-dev
+            libxcomposite-dev libcurl4-openssl-dev xvfb
           cmake --version && ninja --version && node --version
 
       # Best-effort cache of the tracktion/JUCE FetchContent tree (shared by both stages).
@@ -135,16 +136,33 @@ jobs:
           kill "$SVC_PID" 2>/dev/null || true
           test -n "$HEALTHY" || { echo "service did not become healthy"; exit 1; }
 
-      # ── Stage 2 (INFORMATIONAL): the full GUI app ─────────────────────────────
+      # ── Stage 2 (REQUIRED): the full GUI app + its headless self-tests ────────
       # WebKitGTK webview + ALSA audio + JUCE Linux VST3 hosting + the Vite bundle.
-      # continue-on-error so a Linux-only snag (webkit 4.0-vs-4.1, a JUCE quirk) is
-      # SURFACED in the logs without failing the spike's required headless gate.
-      - name: Configure (full app)
-        id: configure_app
-        continue-on-error: true
-        run: cmake --preset linux-x64-debug -B build-linux-full
+      # Release, like the native gate (scripts/auto-loop/gate.sh builds
+      # macos-arm64-release), so jassert is compiled out there and here alike. The
+      # workflow's path filter above already limits this to src/cmake/CMakeLists*/
+      # tests/ui/service/run-linux.sh/workflow changes, so no extra filter is needed.
+      - name: Configure (full app, Release)
+        run: cmake --preset linux-x64-release
 
-      - name: Build Mosh app (exploratory)
-        if: steps.configure_app.outcome == 'success'
-        continue-on-error: true
-        run: cmake --build build-linux-full --target Mosh
+      - name: Build Mosh app
+        run: cmake --build build-linux-x64-release --target Mosh
+
+      # --selftest ×3 + --selftest-undo under xvfb-run, SA3/transform off (the selftest
+      # also forces both off itself). Logs land in selftest-logs/ for the artifact below.
+      - name: Self-test Mosh app under Xvfb
+        env:
+          MOSH_LINUX_PRESET: linux-x64-release
+          MOSH_ENABLE_SA3: "0"
+          MOSH_ENABLE_TRANSFORM: "0"
+          MOSH_SELFTEST_LOG_DIR: ${{ github.workspace }}/selftest-logs
+        run: ./run-linux.sh selftest
+
+      - name: Upload self-test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-selftest-logs
+          path: selftest-logs/
+          if-no-files-found: ignore
+          retention-days: 7
