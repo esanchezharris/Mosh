@@ -118,5 +118,5 @@ test("the Lab sits under V3's dialogs and follows the colourway", async ({ page 
     await expect.poll(background, { message: colorway }).toBe(rgb);
   }
   const close = labWindow.getByRole("button", { name: "Close window" });
-  expect(await close.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(142, 146, 142)");
+  await expect.poll(() => close.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(142, 146, 142)");
 });
