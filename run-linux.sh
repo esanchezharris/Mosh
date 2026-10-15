@@ -77,9 +77,9 @@ case "$MODE" in
     # --selftest ×N (default 3) then --selftest-undo once, against an already-built app
     # (run `./run-linux.sh app` first). A run fails on a non-zero exit, any failed check, a
     # missing summary (crash), a check count below the Linux floor, or counts that differ
-    # between runs. JUCE assertions fail a Release run (the gate's flavour, where jassert is
-    # compiled out, so any hit means a non-jassert abort path); in Debug they are reported
-    # but not fatal — see docs/2026-07-07-linux-build-spike.md for the recorded set.
+    # between runs. JUCE assertions are fatal only for a Release build, mirroring the gate's
+    # strict rule (jassert compiles out there, so it should never see one); in Debug they
+    # are live, reported but not fatal — see docs/2026-07-07-linux-build-spike.md.
     # shellcheck source=scripts/auto-loop/lib.sh
     source "$ROOT/scripts/auto-loop/lib.sh"   # parse_selftest_tally, count_juce_asserts
     FLAVOR=Debug; [[ "$PRESET" == *release* ]] && FLAVOR=Release
@@ -99,7 +99,7 @@ case "$MODE" in
     SESS_PREFIX="_harness/session-linux-selftest-$$"
     STATUS=0; FIRST_N=""
 
-    # run_one <label> <flag> <summary-regex-prefix> <floor>
+    # run_one <label> <flag> <full|undo> <floor>
     run_one() {
       local label="$1" flag="$2" what="$3" floor="$4" log rc n f a
       log="$LOG_DIR/$label.log"
