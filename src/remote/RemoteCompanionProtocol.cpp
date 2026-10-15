@@ -121,6 +121,14 @@ RemoteAuthResult RemoteCompanionProtocol::authorize (const juce::String& token, 
     return { true, {} };
 }
 
+RemoteAuthResult RemoteCompanionProtocol::authorizeAndRenew (const juce::String& token, juce::int64 nowMs)
+{
+    auto result = authorize (token, nowMs);
+    if (result.ok)
+        pairing.expiresAtMs = juce::jmax (pairing.expiresAtMs, nowMs + sessionIdleTtlMs());
+    return result;
+}
+
 void RemoteCompanionProtocol::clearPairing()
 {
     pairing = {};

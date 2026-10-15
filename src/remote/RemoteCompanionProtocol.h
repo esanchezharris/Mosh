@@ -28,7 +28,11 @@ class RemoteCompanionProtocol
 {
 public:
     static int defaultPort() { return 47873; }
+    /** How long a freshly shown QR stays scannable. */
     static juce::int64 pairingTtlMs() { return 5 * 60 * 1000; }
+    /** Once a phone has used the token, each authorized request keeps it alive this
+        long, so a recording session never expires mid-take while the phone is in use. */
+    static juce::int64 sessionIdleTtlMs() { return 2 * 60 * 60 * 1000; }
     static bool isRestrictedPort (int port);
 
     RemotePairingInfo beginPairing (const juce::String& host, int port,
@@ -36,6 +40,9 @@ public:
                                     const juce::String& tokenOverride = {},
                                     juce::int64 ttlOverrideMs = 0);
     RemoteAuthResult authorize (const juce::String& token, juce::int64 nowMs) const;
+    /** authorize(), and on success slide the expiry to at least nowMs + sessionIdleTtlMs().
+        Never shortens a longer expiry (the lab feed's 24 h token). */
+    RemoteAuthResult authorizeAndRenew (const juce::String& token, juce::int64 nowMs);
     RemotePairingInfo currentPairing() const { return pairing; }
     void clearPairing();
 
