@@ -88,8 +88,10 @@ test("the Lab sits under V3's dialogs and follows the colourway", async ({ page 
   const trigger = page.getByTestId("v3-training-trigger");
   await trigger.click();
   const dialog = page.getByTestId("v3-training-modal");
-  // The dialog's own width, not the 420px every .modal.glass gets.
-  expect((await dialog.boundingBox())!.width).toBeGreaterThan(500);
+  // The dialog's own width, not the 420px every .modal.glass gets. Wait for it first: a
+  // boundingBox() read straight after the click is null on a slow runner.
+  await expect(dialog).toBeVisible();
+  await expect.poll(async () => (await dialog.boundingBox())?.width ?? 0).toBeGreaterThan(500);
   await dialog.getByTestId("open-lora-lab").click();
   const labWindow = page.getByRole("dialog", { name: "LoRA Lab" });
   await expect(labWindow).toBeVisible();
@@ -117,5 +119,5 @@ test("the Lab sits under V3's dialogs and follows the colourway", async ({ page 
     await expect.poll(background, { message: colorway }).toBe(rgb);
   }
   const close = labWindow.getByRole("button", { name: "Close window" });
-  expect(await close.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(142, 146, 142)");
+  await expect.poll(() => close.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(142, 146, 142)");
 });
