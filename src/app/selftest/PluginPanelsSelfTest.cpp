@@ -2246,7 +2246,18 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
         // The voice mode: a load that returns it to poly reallocates the synth's voices, and
         // so do the load's undo and redo (Tracktion reallocates from a stale value unless the
         // change is resynced: ResyncFourOscVoicesAction). Heard as a two-note chord.
+        //
+        // Every chord is heard on mosh-keys, including the state the last undo returns to. Each
+        // 4OSC note starts its oscillators at random phases (MultiVoiceOscillator::start), and
+        // mosh-lead has two saws at one pitch at near-equal levels, so one note's fundamental
+        // can cancel to under a tenth of the other's: a poly mosh-lead chord fails `both` about
+        // 1.6% of the time in a model of it. That was the "C 0.01757, G 0.00159" gate failure
+        // (a mono 4OSC steals its one voice, so it sounds G, not C). mosh-keys' sine and
+        // octave-up triangle never share a frequency, so each fundamental comes from one
+        // oscillator and its level does not depend on phase. The load that returns to poly
+        // still resets the hand-set mono to the default (the property-removal path).
         {
+            check (ok (load (files["mosh-keys"])) && st ("voiceMode").toString() == "poly", "mosh-keys first, still poly");
             auto magnitude = [] (const juce::AudioBuffer<float>& b, double hz)
             {
                 const double w = juce::MathConstants<double>::twoPi * hz / 48000.0;
