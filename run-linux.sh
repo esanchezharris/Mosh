@@ -11,7 +11,8 @@
 #                            system deps (see `./run-linux.sh deps`). Required in linux-ci.
 #   ./run-linux.sh selftest  run the built app's --selftest ×3 + --selftest-undo (under
 #                            xvfb-run when there is no DISPLAY) against the Linux floors.
-#                            Use MOSH_LINUX_PRESET=linux-x64-release for the gate flavour.
+#                            Debug by default (what linux-ci runs). linux-x64-release is
+#                            the gate's flavour, but GCC -O3 on SelfTest.cpp takes >80 min.
 #   ./run-linux.sh service   start the cross-platform Python generative service
 #                            (FakeAdapter, stdlib only — forces MOSH_ENABLE_SA3=0).
 #   ./run-linux.sh deps      print the apt-get line for the full-app system deps.
@@ -123,7 +124,7 @@ case "$MODE" in
       [ "$f" != "0" ] && bad="$bad failed=$f"
       [ "$n" != "-1" ] && [ "$n" -lt "$floor" ] && bad="$bad below-floor($n<$floor)"
       [ "$FLAVOR" = Release ] && [ "$a" != "0" ] && bad="$bad asserts=$a"
-      echo "   passed=$n failed=$f asserts=$a rc=$rc floor=$floor log=$log"
+      echo "   checks=$n failed=$f asserts=$a rc=$rc floor=$floor log=$log"
       if [ -n "$bad" ]; then
         echo "   FAIL:$bad"
         grep -E '^  FAIL ' "$log" | head -40 || true

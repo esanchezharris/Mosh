@@ -4,9 +4,9 @@
 # CMakeLists.txt, independent of the build dir):
 #   1. Headless MoshTests — REQUIRED. Configures with the app OFF, so it needs no
 #      WebKitGTK/ALSA/node and can't be blocked by a GUI-dep snag.
-#   2. Full GUI app — REQUIRED. Builds the Release app (the native gate's flavour) and
-#      runs its --selftest ×3 + --selftest-undo under Xvfb against the Linux floors
-#      (./run-linux.sh selftest). Not evidence for the macOS native gate.
+#   2. Full GUI app — REQUIRED. Builds the Debug app and runs its --selftest ×3 +
+#      --selftest-undo under Xvfb against the Linux floors (./run-linux.sh selftest).
+#      Not evidence for the macOS native gate.
 # See docs/2026-07-07-linux-build-spike.md.
 name: linux-ci
 
@@ -138,21 +138,23 @@ jobs:
 
       # ── Stage 2 (REQUIRED): the full GUI app + its headless self-tests ────────
       # WebKitGTK webview + ALSA audio + JUCE Linux VST3 hosting + the Vite bundle.
-      # Release, like the native gate (scripts/auto-loop/gate.sh builds
-      # macos-arm64-release), so jassert is compiled out there and here alike. The
-      # workflow's path filter above already limits this to src/cmake/CMakeLists*/
-      # tests/ui/service/run-linux.sh/workflow changes, so no extra filter is needed.
-      - name: Configure (full app, Release)
-        run: cmake --preset linux-x64-release
+      # Debug, NOT the native gate's Release: GCC -O3 on src/app/SelfTest.cpp (~22k lines)
+      # alone ran >80 min on 4 vCPU and never finished, which cannot fit this job. In
+      # Debug, jassert is live, so ./run-linux.sh selftest reports JUCE assertions but
+      # does not fail on them (the gate's Release run cannot see them either). The
+      # workflow's path filter above already limits this to src/cmake/CMakeLists/tests/
+      # ui/service/run-linux.sh/workflow changes, so no extra filter is needed.
+      - name: Configure (full app)
+        run: cmake --preset linux-x64-debug
 
       - name: Build Mosh app
-        run: cmake --build build-linux-x64-release --target Mosh
+        run: cmake --build build-linux-x64 --target Mosh
 
       # --selftest ×3 + --selftest-undo under xvfb-run, SA3/transform off (the selftest
       # also forces both off itself). Logs land in selftest-logs/ for the artifact below.
       - name: Self-test Mosh app under Xvfb
         env:
-          MOSH_LINUX_PRESET: linux-x64-release
+          MOSH_LINUX_PRESET: linux-x64-debug
           MOSH_ENABLE_SA3: "0"
           MOSH_ENABLE_TRANSFORM: "0"
           MOSH_SELFTEST_LOG_DIR: ${{ github.workspace }}/selftest-logs
