@@ -60,6 +60,9 @@ struct ChordParseResult
 // strictly increasing, and (when regionBars > 0) start inside the region.
 ChordParseResult parseChordList (const juce::String& text, double regionBars = 0.0);
 juce::String formatChordList (const std::vector<ChordEvent>&);
+// Compact, deterministic prompt form of a timed chord list: "chords by bar: 1 Fm7, 3 Db".
+// Empty for an empty list.
+juce::String formatChordTimingForPrompt (const std::vector<ChordEvent>&);
 
 // Host facts the plug-in measured for the region. Fields it could not measure stay empty.
 struct RegionFacts
@@ -151,6 +154,11 @@ struct CompiledRequest
     std::vector<ColorSetting> colors;
     std::vector<LoraSetting> loras;
     juce::StringArray protectedChoices;
+    // Timed chord list exactly as the user entered it (bar 1 == region start), with its
+    // provenance. Sent to the service as structured data AND rendered into the prompt;
+    // neither the service nor SA3 enforces it.
+    std::vector<ChordEvent> chordTiming;
+    Provenance chordTimingFrom = Provenance::unknown;
     std::vector<ConditioningEntry> conditioning;
     int attemptsBefore = 0;
     int maxAttempts = kDefaultMaxAttemptsPerIntention;
@@ -227,6 +235,45 @@ struct TechnicalReport
 
 TechnicalReport checkCandidate (const AudioStats& candidate, double expectedSeconds, int expectedChannels);
 juce::var technicalReportToVar (const TechnicalReport&);
+
+// ── Tempo conformance (technical, NOT taste) ──────────────────────────────────────
+// Does the generated audio's beat period match the session BPM? Dependency-free method:
+//   1. first-difference (high-frequency emphasis) of every channel, 5 ms hops, log energy
+//      over a 20 ms window floored at -60 dB below the loudest window;
+//   2. onset envelope = rise in that log energy, gated at ~0.4 dB so ripple does not count;
+//   3. normalized autocorrelation of the mean-removed envelope, searched only within
+//      +-15% of the session beat period P (and of 2P, for half-time material), centroid-
+//      interpolated;
+//   4. refined on multiples of the beat (2, 4, 8 ... beats) so hop quantization shrinks.
+// Drift is (estimated beat period - session beat period) x beats per bar, in ms; positive
+// means the take runs slower than the session. Only the period is measured: phase
+// (where the downbeat lands) and swing are not checked. A missing or assumed tempo,
+// too little audio, or no clear periodic pulse yields `undetermined`, never a guess.
+enum class TempoVerdict { undetermined, conforms, drifts };
+juce::String tempoVerdictName (TempoVerdict) noexcept;
+
+constexpr double kTempoConformsMsPerBar = 5.0;  // |drift| at or below this conforms
+constexpr double kTempoMinPulseStrength = 0.3;  // normalized autocorrelation at the beat lag
+
+struct TempoConformanceReport
+{
+    TempoVerdict verdict = TempoVerdict::undetermined;
+    std::optional<double> sessionBpm;
+    Provenance bpmFrom = Provenance::unknown;
+    std::optional<double> estimatedBpm;
+    double driftMsPerBar = 0.0;
+    double beatsPerBar = 0.0;
+    bool meterAssumed = false;                // meter unknown: 4 beats per bar assumed
+    double pulseStrength = 0.0;               // 0..1, normalized autocorrelation
+    juce::String reason;                      // why undetermined, or the method's caveat
+};
+
+TempoConformanceReport checkTempoConformance (const float* const* channels, int numChannels, int64_t frames,
+                                              double sampleRate, const SessionContext& context);
+juce::String describeTempoConformance (const TempoConformanceReport&);
+juce::var tempoConformanceToVar (const TempoConformanceReport&);
+// One report line from a stored m1.tempoConformance (void == predates the check).
+juce::String describeStoredTempoConformance (const juce::var&);
 
 // ── Versions (lineage on RenderTake) ──────────────────────────────────────────────
 // Takes created by this loop carry lineage in their manifest under "m1" so the

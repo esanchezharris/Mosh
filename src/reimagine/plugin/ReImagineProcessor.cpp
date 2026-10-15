@@ -1339,12 +1339,16 @@ void ReImagineProcessor::performBatch (const GenerationBatch& batch)
         // Technical checks on what actually came back (not a taste judgement).
         auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (output));
         AudioStats stats;
+        TempoConformanceReport tempo;
         if (reader && reader->lengthInSamples > 0 && reader->lengthInSamples <= std::numeric_limits<int>::max())
         {
             juce::AudioBuffer<float> audio (static_cast<int> (reader->numChannels), static_cast<int> (reader->lengthInSamples));
             reader->read (&audio, 0, audio.getNumSamples(), 0, true, true);
             stats = measureAudio (audio.getArrayOfReadPointers(), audio.getNumChannels(), audio.getNumSamples(),
                                   reader->sampleRate);
+            // Reported beside the checks, never folded into them: a drifting take stays usable.
+            tempo = checkTempoConformance (audio.getArrayOfReadPointers(), audio.getNumChannels(), audio.getNumSamples(),
+                                           reader->sampleRate, batch.snapshot.context);
         }
         reader.reset();
         const auto report = checkCandidate (stats, expectedSeconds, batch.snapshot.channels);
@@ -1395,6 +1399,7 @@ void ReImagineProcessor::performBatch (const GenerationBatch& batch)
             m1->setProperty ("adapter", batch.adapter);
             m1->setProperty ("generationSeconds", seconds);
             m1->setProperty ("checks", technicalReportToVar (report));
+            m1->setProperty ("tempoConformance", tempoConformanceToVar (tempo));
             m1->setProperty ("request", compiledRequestToVar (batch.request));
         }
 
@@ -1434,6 +1439,7 @@ void ReImagineProcessor::performBatch (const GenerationBatch& batch)
         payload->setProperty ("assetSha256", hash);
         payload->setProperty ("rawAssetSha256", hash);   // no conforming in M1: raw == stored
         payload->setProperty ("checks", technicalReportToVar (report));
+        payload->setProperty ("tempoConformance", tempoConformanceToVar (tempo));
         payload->setProperty ("testFixture", fixture);
         const juce::var presented (payload);   // one owner: the object is ref-counted
         logAttempt (index, "ok", label, seconds, presented);
@@ -1599,6 +1605,8 @@ juce::String ReImagineProcessor::selectedReport() const
     }
     else if (m1.isObject())
         lines.add ("Checks: decodes, finite, not silent (technical only - not a taste judgement)");
+    if (m1.isObject())
+        lines.add ("Tempo conformance (technical): " + describeStoredTempoConformance (m1.getProperty ("tempoConformance", {})));
     if (auto* conditioning = m1.getProperty ("request", {}).getProperty ("conditioning", {}).getArray())
     {
         juce::StringArray notEnforced;
