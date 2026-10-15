@@ -82,10 +82,48 @@ evidence. It claims nothing about how the music sounds.
 |---|---|---|
 | Source audio, or the parent version's audio | init audio at strength 0.01–0.5 | applied, but resemblance is not preservation |
 | Duration | requested length equals the input length | yes, by the service contract |
-| Tempo (BPM) | text in the prompt | no; beat alignment is not enforced |
+| Tempo (BPM) | text in the prompt | no; beat alignment is not enforced. The take's beat period is **measured** afterwards (see below), which reports drift but changes nothing |
 | Key | text in the prompt | no |
-| Chords | chord names in the prompt; change timing is **not** sent | no |
+| Chords | chord names **and change bars** in the prompt (`chords by bar: 1 Fm7, 3 Db`) and as the structured `chord_timing` request field (bars from the region start, with provenance); the service records it in the render manifest | no; neither harmony nor change timing is enforced, and the service's manifest copy always says `enforced: false` |
 | Meter, section, protected choices | stored and logged only | no |
+
+### Chord timing and tempo conformance (2026-10-15)
+
+- **Chord timing is sent, not enforced.** `compileIntention` copies the timed chord list
+  and its provenance into `CompiledRequest::chordTiming`. The prompt renders it compactly
+  and deterministically: `chords by bar: 1 Fm7, 3 Db, 4.50 Eb/G` (fractional bars use two
+  decimals). `directServiceParams` adds `chord_timing` (`unit: bar`, `origin:
+  region-start`, `provenance`, `enforced: false`, `events: [{bar, symbol}]`) only when
+  chords are known, so requests without chords are unchanged. `service/direct_render.py`
+  accepts the field as optional, rejects a malformed one (non-increasing or sub-1 bars,
+  non-chord symbols, more than 64 events, other units or provenance names), and records a
+  normalized copy in the manifest with `enforced: false`. Older requests stay valid. SA3
+  sees only the prompt text, and nothing checks whether the take follows the changes.
+- **Tempo conformance is a technical check, not taste.** After the existing checks, the
+  worker measures the generated audio's beat period with `checkTempoConformance`. It is
+  dependency-free. The audio is first-differenced (high-frequency emphasis, so steady low
+  tones do not ripple into fake pulses). The method then takes 20 ms log energy on 5 ms
+  hops, floored 60 dB below the loudest window, and builds an onset envelope from rises
+  gated at about 0.4 dB. A normalized autocorrelation is searched only within ±15% of the
+  session beat period, or of 2 beats for half-time material. The 4-beat lag is not used:
+  4 beats at 120 BPM equal 3 beats at 90, so it would pass a wrong tempo. The estimate is
+  then refined on 2, 4, 8 ... beat lags.
+  The verdict is one of the following, stored as `manifest.m1.tempoConformance` and shown
+  in the report column as "Tempo conformance (technical): ...":
+  - `conforms`: |drift| ≤ 5 ms per bar;
+  - `drifts N ms per bar slower/faster`;
+  - `undetermined`, with a reason. This is the result when the BPM is missing or its
+    provenance is unknown, when the tempo map is `tempoMapAssumed`, when the audio is
+    shorter than 4 beats, or when no clear pulse exists.
+
+  Only the period is measured. Downbeat phase and swing are not checked. With an unknown
+  meter, 4 beats per bar is assumed and the line says so. A drifting take stays usable,
+  because the check never rejects a take or stretches audio. Takes saved before this
+  change report "not measured (version predates the check)". Evidence comes from
+  synthetic click tracks only: steady (48 and 44.1 kHz, 90/120/143 BPM, 4 s and 16 s),
+  over a sustained pad, at another tempo, in 3/4, accelerating, half-time, at 90 BPM
+  against a 120 session, and against noise, a steady tone and silence. Loud broadband
+  noise over clicks comes out `undetermined`, not `conforms`. How well the check behaves on real SA3 output is unmeasured.
 
 ## Commands
 

@@ -69,6 +69,26 @@ juce::var stringArrayToVar (const juce::StringArray& strings)
     return values;
 }
 
+// The structured chord-timing field shared by the service request and the stored request.
+juce::var chordTimingToVar (const std::vector<ChordEvent>& chords, Provenance from)
+{
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("unit", "bar");
+    o->setProperty ("origin", "region-start");   // bar 1 == the first sample of the input
+    o->setProperty ("provenance", provenanceName (from));
+    o->setProperty ("enforced", false);
+    juce::Array<juce::var> events;
+    for (const auto& chord : chords)
+    {
+        auto* row = new juce::DynamicObject();
+        row->setProperty ("bar", chord.bar);
+        row->setProperty ("symbol", chord.symbol);
+        events.add (juce::var (row));
+    }
+    o->setProperty ("events", events);
+    return juce::var (o);
+}
+
 juce::StringArray stringArrayFromVar (const juce::var& v)
 {
     juce::StringArray result;
@@ -155,6 +175,16 @@ juce::String formatChordList (const std::vector<ChordEvent>& chords)
     return parts.joinIntoString (" ");
 }
 
+juce::String formatChordTimingForPrompt (const std::vector<ChordEvent>& chords)
+{
+    if (chords.empty())
+        return {};
+    juce::StringArray parts;
+    for (const auto& chord : chords)
+        parts.add (formatBar (chord.bar) + " " + chord.symbol);
+    return "chords by bar: " + parts.joinIntoString (", ");
+}
+
 bool isConstantTempo (const TempoMap& map, double tolerance) noexcept
 {
     if (map.empty())
@@ -237,13 +267,8 @@ CompileResult compileIntention (const IntentionInput& input, const SessionSnapsh
         promptParts.add ("in " + snapshot.context.key);
     if (timingKnown)
         promptParts.add (juce::String (*snapshot.context.bpm, 0) + " BPM");
-    if (! snapshot.context.chords.empty())
-    {
-        juce::StringArray names;
-        for (const auto& chord : snapshot.context.chords)
-            names.add (chord.symbol);
-        promptParts.add ("chords " + names.joinIntoString (" "));
-    }
+    // Chords last: their timed form contains ", " separators of its own.
+    promptParts.add (formatChordTimingForPrompt (snapshot.context.chords));
     promptParts.removeEmptyStrings();
     const auto prompt = promptParts.joinIntoString (", ");
     if (prompt.length() > kMaxPromptChars)
@@ -253,7 +278,8 @@ CompileResult compileIntention (const IntentionInput& input, const SessionSnapsh
     if (! timingKnown)
         result.warnings.add ("Tempo unknown - alignment with the host timeline is not verified");
     if (! snapshot.context.chords.empty())
-        result.warnings.add ("Chords go to the model as text only - harmony is not enforced");
+        result.warnings.add ("Chords and their change bars go to the model as text only - harmony is not enforced, "
+                             "nor is change timing");
     if (! snapshot.context.protectedChoices.isEmpty())
         result.warnings.add ("Protected choices are recorded for review; the model is not constrained by them");
     if (! result.errors.isEmpty())
@@ -272,6 +298,8 @@ CompileResult compileIntention (const IntentionInput& input, const SessionSnapsh
     compiled.colors = input.colors;
     compiled.loras = input.loras;
     compiled.protectedChoices = snapshot.context.protectedChoices;
+    compiled.chordTiming = snapshot.context.chords;
+    compiled.chordTimingFrom = snapshot.context.chords.empty() ? Provenance::unknown : snapshot.context.chordsFrom;
     compiled.attemptsBefore = attemptsSoFar;
     compiled.maxAttempts = maxAttempts;
 
@@ -289,10 +317,12 @@ CompileResult compileIntention (const IntentionInput& input, const SessionSnapsh
                                        ctx.meterNumerator ? "stored (" + provenanceName (ctx.meterFrom) + ")" : "unknown" });
     compiled.conditioning.push_back ({ "key", ctx.key.isNotEmpty(), ctx.key.isNotEmpty() ? "text-prompt" : "not-sent", false,
                                        ctx.key.isNotEmpty() ? "named in the prompt (" + provenanceName (ctx.keyFrom) + ")" : "unknown" });
-    compiled.conditioning.push_back ({ "chords", ! ctx.chords.empty(), ctx.chords.empty() ? "not-sent" : "text-prompt", false,
+    compiled.conditioning.push_back ({ "chords", ! ctx.chords.empty(), ctx.chords.empty() ? "not-sent" : "text-prompt+structured", false,
                                        ctx.chords.empty() ? "unknown"
-                                                          : "chord names in the prompt; change timing ("
-                                                                + formatChordList (ctx.chords) + ") is not sent" });
+                                                          : "chord names and change bars (" + formatChordList (ctx.chords)
+                                                                + ", " + provenanceName (ctx.chordsFrom)
+                                                                + ") sent in the prompt and as chord_timing; "
+                                                                  "neither harmony nor change timing is enforced" });
     compiled.conditioning.push_back ({ "section", ctx.sectionLabel.isNotEmpty(), "not-sent", false,
                                        ctx.sectionLabel.isNotEmpty() ? "stored only" : "unknown" });
     compiled.conditioning.push_back ({ "protected-choices", ! ctx.protectedChoices.isEmpty(), "not-sent", false,
@@ -334,6 +364,16 @@ juce::StringArray validateRequest (const CompiledRequest& r)
     for (const auto& lora : r.loras)
         if (lora.id.isEmpty() || ! std::isfinite (lora.scale) || lora.scale < 0.0f || lora.scale > 1.5f)
             problems.add ("Invalid LoRA setting");
+    double previousBar = 0.0;
+    for (const auto& chord : r.chordTiming)
+    {
+        if (! std::isfinite (chord.bar) || chord.bar < 1.0 || chord.bar <= previousBar || ! isChordSymbol (chord.symbol))
+        {
+            problems.add ("Invalid chord timing (bars must be >= 1 and increasing, symbols must be chords)");
+            break;
+        }
+        previousBar = chord.bar;
+    }
     return problems;
 }
 
@@ -353,6 +393,10 @@ juce::var directServiceParams (const CompiledRequest& r, size_t candidateIndex,
     params->setProperty ("source_sha256", inputSha256);
     params->setProperty ("colors", settingsArray (r.colors));
     params->setProperty ("loras", settingsArray (r.loras));
+    // Additive and optional (service/direct_render.py): absent when no chords are known,
+    // so requests without chords are byte-for-byte what they were before.
+    if (! r.chordTiming.empty())
+        params->setProperty ("chord_timing", chordTimingToVar (r.chordTiming, r.chordTimingFrom));
     return juce::var (params);
 }
 
@@ -451,6 +495,7 @@ juce::var compiledRequestToVar (const CompiledRequest& r)
     o->setProperty ("colors", settingsArray (r.colors));
     o->setProperty ("loras", settingsArray (r.loras));
     o->setProperty ("protected", stringArrayToVar (r.protectedChoices));
+    o->setProperty ("chordTiming", r.chordTiming.empty() ? juce::var() : chordTimingToVar (r.chordTiming, r.chordTimingFrom));
     juce::Array<juce::var> conditioning;
     for (const auto& entry : r.conditioning)
     {
@@ -574,6 +619,237 @@ juce::var technicalReportToVar (const TechnicalReport& r)
     o->setProperty ("warnings", stringArrayToVar (r.warnings));
     o->setProperty ("durationDeltaSeconds", r.durationDeltaSeconds);
     return juce::var (o);
+}
+
+juce::String tempoVerdictName (TempoVerdict v) noexcept
+{
+    switch (v)
+    {
+        case TempoVerdict::conforms: return "conforms";
+        case TempoVerdict::drifts: return "drifts";
+        case TempoVerdict::undetermined: break;
+    }
+    return "undetermined";
+}
+
+namespace
+{
+constexpr double kTempoHopSeconds = 0.005;
+constexpr double kTempoSearchFraction = 0.15;  // look for the pulse within +-15% of the session period
+constexpr double kTempoMinBeats = 4.0;
+constexpr int64_t kTempoWindowHops = 4;          // 20 ms energy window
+constexpr double kTempoRiseGate = 0.1;           // natural-log rise ignored below ~0.4 dB
+
+// Normalized, overlap-corrected autocorrelation of a mean-removed envelope at one lag.
+double autocorrelationAt (const std::vector<double>& x, double energy, int lag) noexcept
+{
+    const auto n = static_cast<int> (x.size());
+    if (lag <= 0 || lag >= n || energy <= 0.0)
+        return 0.0;
+    double sum = 0.0;
+    for (int i = 0; i + lag < n; ++i)
+        sum += x[static_cast<size_t> (i)] * x[static_cast<size_t> (i + lag)];
+    return (sum / static_cast<double> (n - lag)) / (energy / static_cast<double> (n));
+}
+
+struct LagPeak
+{
+    bool found = false;
+    double lag = 0.0;                            // fractional, in hops
+    double strength = 0.0;
+};
+
+// Strongest lag inside [lo, hi]; rejected when the maximum sits on the window edge (the
+// true peak lies outside, so the window says nothing). Fractional position by the
+// centroid of the peak and its two neighbours, which undoes hop quantization of onsets.
+LagPeak findPeak (const std::vector<double>& x, double energy, int lo, int hi)
+{
+    LagPeak peak;
+    lo = std::max (lo, 1);
+    hi = std::min (hi, static_cast<int> (x.size()) - 2);
+    if (hi - lo < 2)
+        return peak;
+    std::vector<double> values;
+    values.reserve (static_cast<size_t> (hi - lo + 1));
+    for (int lag = lo; lag <= hi; ++lag)
+        values.push_back (autocorrelationAt (x, energy, lag));
+    const auto best = std::max_element (values.begin(), values.end());
+    const auto index = static_cast<int> (std::distance (values.begin(), best));
+    if (index == 0 || index == static_cast<int> (values.size()) - 1)
+        return peak;
+    const auto left = std::max (0.0, values[static_cast<size_t> (index - 1)]);
+    const auto centre = std::max (0.0, *best);
+    const auto right = std::max (0.0, values[static_cast<size_t> (index + 1)]);
+    const auto mass = left + centre + right;
+    if (! (mass > 0.0))
+        return peak;
+    peak.found = true;
+    peak.lag = lo + index + (right - left) / mass;
+    peak.strength = *best;
+    return peak;
+}
+}
+
+TempoConformanceReport checkTempoConformance (const float* const* channels, int numChannels, int64_t frames,
+                                              double sampleRate, const SessionContext& context)
+{
+    TempoConformanceReport r;
+    r.sessionBpm = context.bpm;
+    r.bpmFrom = context.bpm ? context.bpmFrom : Provenance::unknown;
+    r.meterAssumed = ! (context.meterNumerator && *context.meterNumerator > 0);
+    r.beatsPerBar = r.meterAssumed ? 4.0 : static_cast<double> (*context.meterNumerator);
+    const auto undetermined = [&r] (const juce::String& why)
+    {
+        r.verdict = TempoVerdict::undetermined;
+        r.estimatedBpm.reset();
+        r.driftMsPerBar = 0.0;
+        r.reason = why;
+        return r;
+    };
+    if (context.tempoAssumed)
+        return undetermined ("the region's tempo map was assumed (import before host timing), so there is no session tempo to compare against");
+    if (! context.bpm || r.bpmFrom == Provenance::unknown || ! std::isfinite (*context.bpm) || *context.bpm <= 0.0)
+        return undetermined ("session BPM unknown");
+    if (channels == nullptr || numChannels <= 0 || frames <= 0 || ! (sampleRate > 0.0))
+        return undetermined ("no decoded audio");
+
+    const auto hop = std::max (1, static_cast<int> (std::lround (sampleRate * kTempoHopSeconds)));
+    const auto hopSeconds = static_cast<double> (hop) / sampleRate;
+    const auto beatSeconds = 60.0 / *context.bpm;
+    const auto hops = static_cast<int64_t> (frames / hop);
+    if (static_cast<double> (frames) / sampleRate < kTempoMinBeats * beatSeconds || hops < 16)
+        return undetermined ("shorter than " + juce::String (kTempoMinBeats, 0) + " beats at the session tempo");
+
+    // Per-hop energy of the first difference (high-frequency emphasis): transients pass,
+    // steady low tones and their window ripple are strongly attenuated.
+    std::vector<double> hopEnergy (static_cast<size_t> (hops), 0.0);
+    for (int c = 0; c < numChannels; ++c)
+    {
+        const auto* data = channels[c];
+        if (data == nullptr)
+            continue;
+        float last = 0.0f;
+        for (int64_t i = 0; i < hops * hop; ++i)
+        {
+            const auto sample = std::isfinite (data[i]) ? data[i] : 0.0f;
+            const auto diff = static_cast<double> (sample) - last;
+            last = sample;
+            hopEnergy[static_cast<size_t> (i / hop)] += diff * diff;
+        }
+    }
+    // Log energy over a sliding window ending at each hop, floored at -60 dB below the
+    // loudest window; the onset envelope is its rise, gated so ripple and noise do not count.
+    std::vector<double> level (static_cast<size_t> (hops), 0.0);
+    double loudest = 0.0;
+    for (int64_t h = 0; h < hops; ++h)
+    {
+        double sum = 0.0;
+        for (int64_t k = std::max<int64_t> (0, h - kTempoWindowHops + 1); k <= h; ++k)
+            sum += hopEnergy[static_cast<size_t> (k)];
+        level[static_cast<size_t> (h)] = sum;
+        loudest = std::max (loudest, sum);
+    }
+    if (! (loudest > 0.0))
+        return undetermined ("no onsets (silent audio)");
+    std::vector<double> envelope (static_cast<size_t> (hops), 0.0);
+    for (size_t h = 0; h < level.size(); ++h)
+        level[h] = std::log (std::max (level[h], loudest * 1.0e-6));
+    for (size_t h = 1; h < level.size(); ++h)
+        envelope[h] = std::max (0.0, level[h] - level[h - 1] - kTempoRiseGate);
+    double mean = 0.0;
+    for (auto v : envelope)
+        mean += v;
+    mean /= static_cast<double> (envelope.size());
+    double energy = 0.0;
+    for (auto& v : envelope)
+    {
+        v -= mean;
+        energy += v * v;
+    }
+    if (! (energy > 1.0e-12))
+        return undetermined ("no onsets (steady or silent audio)");
+
+    // Coarse: the beat lag, or 2 beats for a half-time pulse. Longer lags are not used:
+    // 4 beats at 120 BPM equal 3 beats at 90, so a 4-beat match would pass a wrong tempo.
+    const auto period = beatSeconds / hopSeconds;   // in hops
+    const auto maxLag = static_cast<double> (hops) * 0.75;
+    double estimate = 0.0;
+    for (const int beats : { 1, 2 })
+    {
+        const auto target = period * beats;
+        if (target * (1.0 + kTempoSearchFraction) >= maxLag)
+            break;
+        const auto spread = std::max (2.0, target * kTempoSearchFraction);
+        const auto peak = findPeak (envelope, energy, static_cast<int> (std::floor (target - spread)),
+                                    static_cast<int> (std::ceil (target + spread)));
+        if (peak.found && peak.strength >= kTempoMinPulseStrength)
+        {
+            estimate = peak.lag / beats;
+            r.pulseStrength = juce::jlimit (0.0, 1.0, peak.strength);
+            break;
+        }
+    }
+    if (! (estimate > 0.0))
+        return undetermined ("no clear periodic pulse within " + juce::String (kTempoSearchFraction * 100.0, 0)
+                             + "% of the session tempo");
+
+    // Refine on longer lags: hop quantization is divided by the number of beats spanned.
+    for (int beats = 2; estimate * beats + 3.0 < maxLag; beats *= 2)
+    {
+        const auto target = estimate * beats;
+        const auto peak = findPeak (envelope, energy, static_cast<int> (std::floor (target - 3.0)),
+                                    static_cast<int> (std::ceil (target + 3.0)));
+        if (! peak.found || peak.strength < kTempoMinPulseStrength * 0.5)
+            break;
+        estimate = peak.lag / beats;
+    }
+
+    const auto estimatedBeatSeconds = estimate * hopSeconds;
+    r.estimatedBpm = 60.0 / estimatedBeatSeconds;
+    r.driftMsPerBar = (estimatedBeatSeconds - beatSeconds) * r.beatsPerBar * 1000.0;
+    r.verdict = std::abs (r.driftMsPerBar) <= kTempoConformsMsPerBar ? TempoVerdict::conforms : TempoVerdict::drifts;
+    r.reason = "beat period only; downbeat phase and swing are not checked";
+    return r;
+}
+
+juce::String describeTempoConformance (const TempoConformanceReport& r)
+{
+    if (r.verdict == TempoVerdict::undetermined)
+        return "undetermined - " + r.reason;
+    const auto session = juce::String (r.sessionBpm.value_or (0.0), 2) + " BPM (" + provenanceName (r.bpmFrom) + ")";
+    const auto estimated = juce::String (r.estimatedBpm.value_or (0.0), 2) + " BPM";
+    const auto meter = r.meterAssumed ? juce::String (", 4 beats/bar assumed") : juce::String();
+    if (r.verdict == TempoVerdict::conforms)
+        return "conforms to " + session + " (measured " + estimated + ", "
+               + juce::String (r.driftMsPerBar, 1) + " ms per bar" + meter + ")";
+    return "drifts " + juce::String (std::abs (r.driftMsPerBar), 1) + " ms per bar "
+           + (r.driftMsPerBar > 0.0 ? "slower" : "faster") + " than " + session + " (measured " + estimated + meter + ")";
+}
+
+juce::var tempoConformanceToVar (const TempoConformanceReport& r)
+{
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("kind", "tempo-conformance (technical, not a taste judgement)");
+    o->setProperty ("method", "onset-autocorrelation/1");
+    o->setProperty ("verdict", tempoVerdictName (r.verdict));
+    o->setProperty ("sessionBpm", r.sessionBpm ? juce::var (*r.sessionBpm) : juce::var());
+    o->setProperty ("bpmFrom", provenanceName (r.bpmFrom));
+    o->setProperty ("estimatedBpm", r.estimatedBpm ? juce::var (*r.estimatedBpm) : juce::var());
+    o->setProperty ("driftMsPerBar", r.verdict == TempoVerdict::undetermined ? juce::var() : juce::var (r.driftMsPerBar));
+    o->setProperty ("beatsPerBar", r.beatsPerBar);
+    o->setProperty ("meterAssumed", r.meterAssumed);
+    o->setProperty ("toleranceMsPerBar", kTempoConformsMsPerBar);
+    o->setProperty ("pulseStrength", r.pulseStrength);
+    o->setProperty ("phaseChecked", false);
+    o->setProperty ("reason", r.reason);
+    o->setProperty ("summary", describeTempoConformance (r));
+    return juce::var (o);
+}
+
+juce::String describeStoredTempoConformance (const juce::var& stored)
+{
+    const auto summary = stored.getProperty ("summary", {}).toString();
+    return summary.isNotEmpty() ? summary : juce::String ("not measured (version predates the check)");
 }
 
 TakeLineage lineageOf (const RenderTake& take)
