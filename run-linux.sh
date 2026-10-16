@@ -64,6 +64,11 @@ case "$MODE" in
   app)
     ensure_git_https
     echo "configuring full app (needs WebKitGTK + ALSA + node — see './run-linux.sh deps')…"
+    # MoshSkillIdentityGate runs tsx from ui/node_modules before the build installs ui deps.
+    if [ ! -d "$ROOT/ui/node_modules" ]; then
+      echo "installing ui deps (npm ci)…"
+      (cd "$ROOT/ui" && npm ci --no-audit --no-fund)
+    fi
     cmake --preset "$PRESET"
     echo "building Mosh…"
     cmake --build "$BUILD_DIR" --target Mosh

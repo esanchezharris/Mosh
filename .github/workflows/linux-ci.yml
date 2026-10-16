@@ -144,6 +144,13 @@ jobs:
       # does not fail on them (the gate's Release run cannot see them either). The
       # workflow's path filter above already limits this to src/cmake/CMakeLists/tests/
       # ui/service/run-linux.sh/workflow changes, so no extra filter is needed.
+      # The app build's MoshSkillIdentityGate target runs `npm run verify:skill-identities`
+      # (tsx from ui/node_modules) before anything in the build installs ui deps, so a fresh
+      # checkout fails with "tsx: not found". Install them first, as the cheap gate does.
+      - name: Install UI deps (npm ci)
+        working-directory: ui
+        run: npm ci --no-audit --no-fund
+
       - name: Configure (full app)
         run: cmake --preset linux-x64-debug
 
