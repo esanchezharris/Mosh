@@ -5,7 +5,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SUBJECT="$REPO/scripts/auto-loop/memory-preflight.sh"
 GATE="$REPO/scripts/auto-loop/gate.sh"
 HOST_PATH="$PATH"
-FIXTURE_ROOT="$(mktemp -d "${TMPDIR:-/private/tmp}/mosh-memory-preflight.XXXXXX")"
+FIXTURE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mosh-memory-preflight.XXXXXX")"
 BIN="$FIXTURE_ROOT/bin"
 mkdir -p "$BIN"
 trap 'rm -rf -- "$FIXTURE_ROOT"' EXIT
