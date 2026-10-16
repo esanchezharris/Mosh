@@ -2255,13 +2255,24 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                 for (int i = 0; i < b.getNumSamples(); ++i) { re += x[i] * std::cos (w * i); im -= x[i] * std::sin (w * i); }
                 return std::sqrt (re * re + im * im) / juce::jmax (1, b.getNumSamples());
             };
+            // A note's presence is its fundamental AND 2nd harmonic. Each 4OSC oscillator (and
+            // unison voice) starts at a random phase (tracktion MultiVoiceOscillator::start),
+            // and mosh-lead stacks two saws at one pitch: a relative phase near pi cancels the
+            // fundamental to ~3% (seen: G 0.00116 vs ~0.035), but leaves the 2nd harmonic
+            // (2*pi) in phase, so the pair can't vanish. C's and G's 1st/2nd harmonics are
+            // clear of each other (G's 2nd sits on C's 3rd, which is not measured for C).
+            auto presence = [&] (const juce::AudioBuffer<float>& b, double hz)
+            {
+                const double h1 = magnitude (b, hz), h2 = magnitude (b, 2.0 * hz);
+                return std::sqrt (h1 * h1 + h2 * h2);
+            };
             auto chord = [&]
             {
                 LiveInstrument live (*synth, 256);
                 const auto out = live.play (0.4, { { 0, juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100) },
                                                    { 0, juce::MidiMessage::noteOn (1, 67, (juce::uint8) 100) } });
                 live.play (0.8, { { 0, juce::MidiMessage::noteOff (1, 60) }, { 0, juce::MidiMessage::noteOff (1, 67) } });
-                const double c = magnitude (out, 261.626), g = magnitude (out, 391.995);
+                const double c = presence (out, 261.626), g = presence (out, 391.995);
                 return std::make_pair (c, g);
             };
             auto both = [] (std::pair<double, double> m) { return juce::jmin (m.first, m.second) > 0.1 * juce::jmax (m.first, m.second); };

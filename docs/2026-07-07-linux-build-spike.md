@@ -1,6 +1,7 @@
 # Linux build spike (FIT-011)
 
 *Date: 2026-07-07 · Status: **config landed, headless path CI-tracked, full GUI app unverified***
+*Updated 2026-10-15 · Status: **full GUI app builds on Linux and its `--selftest` ×3 + `--selftest-undo` run under Xvfb as a required linux-ci stage** — see [Full app status](#full-app-status-2026-10-15).*
 
 Exploratory spike to open a **Linux (x86_64)** build path for Mosh alongside the
 canonical macOS/arm64 target and the additive Windows/CUDA port. Per the prime
@@ -21,6 +22,66 @@ real build that proves the path — it does **not** aim for macOS parity.
 - **This Mac can't build for Linux** (arm64 macOS host, no Docker/VM). So everything
   except the CI job is **config that is only statically sanity-checked here**. The CI
   job on `ubuntu-latest` is the actual proof — **its first run is the real verdict.**
+
+## Full app status (2026-10-15)
+
+Measured in an Ubuntu container (x86_64, 4 vCPU, GCC, WebKitGTK 4.1) at this branch's
+head, with `MOSH_ENABLE_SA3=0 MOSH_ENABLE_TRANSFORM=0`, no `DISPLAY` (so `xvfb-run -a`),
+and a bare `python3` (no numpy/pydantic) like the CI runner's.
+
+| Item | Result |
+|---|---|
+| `./run-linux.sh app` (linux-x64-debug) | **Builds and links `Mosh`.** ~9 min from scratch at `-j4` (tracktion/JUCE already fetched). |
+| `--selftest`, Debug | **5004 checks, 0 failed**, identical count every run (5 consecutive runs after the fixes below). |
+| `--selftest-undo`, Debug | **92 focused undo checks, 0 failed.** |
+| JUCE assertions, Debug | 17 per `--selftest` run, 1 per `--selftest-undo` run, the same set every run (below). Reported, not fatal. |
+| linux-x64-release | Not usable in CI: GCC `-O3` on `src/app/SelfTest.cpp` (~22k lines) alone ran >80 min on 4 vCPU without finishing. |
+
+**Linux floors** (`run-linux.sh`, overridable): `MOSH_LINUX_SELFTEST_FLOOR=5004`,
+`MOSH_LINUX_SELFTEST_UNDO_FLOOR=92`. These are not the mac gate's `MOSH_SELFTEST_BASELINE`
+(set in the owner machine's environment, not in the repo; quoted as 1656). That is a floor
+for another platform and build, not a count to match. No
+selftest section was found to be macOS-only on Linux. Every check that runs here passes, so
+the Linux count is the honest Linux number.
+
+**Debug vs the native gate's Release.** `scripts/auto-loop/gate.sh` self-tests a
+`macos-arm64-release` build, where `jassert` compiles out, so the gate never sees JUCE
+assertions. linux-ci runs Debug (Release cannot fit the job, above), so assertions are live.
+`./run-linux.sh selftest` prints them and fails on them only for a Release build. The recorded
+Debug set (not investigated in this lane; all but the MIDI one are Tracktion/JUCE internals
+reached by platform-neutral code):
+
+| Count/run | Assertion | Note |
+|---|---|---|
+| 9 | `tracktion_AutomationCurve.h:50` | |
+| 3 | `juce_UndoManager.cpp:128` | |
+| 2 | `tracktion_ValueTreeUtilities.h:163` | |
+| 2 | `tracktion_LoopInfo.cpp:79` | |
+| 1 (+1 in undo) | `juce_Midi_linux.cpp:539` | Environmental: no ALSA sequencer (`/dev/snd/seq`) in a container/CI runner. |
+
+**What it took** (the smallest fixes; nothing stubbed):
+
+1. `CMakeLists.txt`: `NEEDS_WEB_BROWSER TRUE` on the app. JUCE only links WebKitGTK/GTK, and
+   only adds their include dirs, when this is set (`juce_gui_extra` failed on `gtk/gtk.h`).
+   JUCE reads it only on Linux/BSD. Risk 1 below is resolved: the pinned JUCE finds 4.1.
+2. `src/moshops/MoshOps.ProjectIo.cpp`: an explicit `jmax<juce::int64>` made overload
+   resolution instantiate juce_dsp's `SIMDRegister<long long>`, which has no `SIMDNativeOps`
+   on Linux (`int64_t` is `long` there). Deducing the type gives the same value.
+3. `CMakeLists.txt`: stage `resources/presets` next to the executable off macOS, like
+   drumkits. `MoshOps::presetsBundledRoot` already fell back to `<exe dir>/presets`, but
+   nothing put the bank there: 31 checks failed (4OSC and track-chain presets missing). This
+   also applies to the Windows build.
+4. `src/app/selftest/PluginPanelsSelfTest.cpp`: the 4OSC voice-mode check failed on 1 of 3
+   runs (`G 0.00116` vs ~0.035). Root cause: each 4OSC oscillator starts at a random phase
+   (Tracktion `MultiVoiceOscillator::start`), and `mosh-lead` stacks two saws at one pitch.
+   A relative phase near π cancels their fundamental to ~3%, and the ±1.4 Hz unison detune is
+   inside a 0.4 s window's resolution. The check now measures fundamental + 2nd harmonic,
+   which a single phase offset cannot cancel together. The test is platform-neutral, so the
+   same race can hit macOS too. That is not verified here.
+
+**What this does not prove:** the macOS native gate, audibility, an audio device (headless
+selftests run with no device), real VST3 plug-in hosting/editors, the iPhone companion,
+Ableton Live 11, the installed app, or real SA3 renders.
 
 ## What changed
 
@@ -71,7 +132,8 @@ CI runs automatically on push/PR touching build-relevant paths, and via
 
 ## Known risks / open questions (for the follow-up)
 
-1. **WebKitGTK 4.0 vs 4.1.** Ubuntu 24.04 ships `libwebkit2gtk-4.1-dev` (4.0 was
+1. **WebKitGTK 4.0 vs 4.1.** *(Resolved 2026-10-15: the pinned JUCE finds 4.1; the app
+   just has to set `NEEDS_WEB_BROWSER`.)* Ubuntu 24.04 ships `libwebkit2gtk-4.1-dev` (4.0 was
    removed); older JUCE pkg-checks `webkit2gtk-4.0`. If the pinned JUCE
    (`7c89e11f`) only probes 4.0, the full-app *configure* fails on 24.04. CI installs
    `-4.1-dev`; the first run tells us whether JUCE finds it. Mitigation if not: install
@@ -88,12 +150,14 @@ CI runs automatically on push/PR touching build-relevant paths, and via
 
 ## Next steps
 
-1. Land this, watch the **first `linux-ci` run** — that is the real bring-up verdict.
-2. Triage the informational full-app stage: resolve the WebKitGTK version probe, any
-   JUCE Linux link snags, and ALSA/X11 headers, until `Mosh` links.
-3. Once the app links, reach `Mosh --selftest` on Linux (headless via `xvfb-run` for the
-   WebView) and make it a required CI gate.
-4. Consider aarch64-linux and a JACK-enabled variant.
+1. ~~Watch the first `linux-ci` run.~~ Done.
+2. ~~Get the informational full-app stage to link `Mosh`.~~ Done 2026-10-15.
+3. ~~Reach `Mosh --selftest` on Linux under `xvfb-run` and make it a required CI gate.~~
+   Done 2026-10-15 (`./run-linux.sh selftest`, linux-ci stage 2).
+4. Triage the recorded Debug JUCE assertions (above).
+5. A Release Linux build needs `SelfTest.cpp` to compile in reasonable time under GCC -O3
+   (for example, per-file optimisation or splitting the TU) before it can gate.
+6. Consider aarch64-linux and a JACK-enabled variant.
 
 > Prime-directive note: this flips "No Linux build path is exercised yet" to
 > "Linux is an exploratory spike — headless + service build; full GUI app is CI-tracked,
