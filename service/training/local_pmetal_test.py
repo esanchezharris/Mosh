@@ -147,12 +147,32 @@ def test_cancel_kills_the_whole_process_group() -> None:
     child_pid_file = tmp_path / "child_pid.txt"
     if child_pid_file.is_file():
         pid = int(child_pid_file.read_text().strip())
-        alive = True
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            alive = False
-        assert not alive, f"child leg {pid} survived cancel — killpg did not reach it"
+        # SIGKILL to the group lands asynchronously, so allow it a moment to take.
+        deadline = time.time() + 2.0
+        while _pid_alive(pid) and time.time() < deadline:
+            time.sleep(0.05)
+        assert not _pid_alive(pid), f"child leg {pid} survived cancel — killpg did not reach it"
+
+
+def _pid_alive(pid: int) -> bool:
+    """True while `pid` is a running process.
+
+    os.kill(pid, 0) also succeeds on a zombie. The killed leg's parent dies with it,
+    so the leg is reparented to PID 1; when PID 1 does not reap (a container's
+    process supervisor) the dead leg stays a zombie forever. A zombie holds no
+    memory or GPU, so it counts as gone. /proc exists on Linux only; macOS's
+    launchd reaps orphans, so the plain probe is enough there.
+    """
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return True
+    # The state field follows the parenthesised command name, which may contain spaces.
+    return stat.rpartition(")")[2].split()[0] != "Z"
 
 
 def test_progress_json_is_written_and_parseable() -> None:

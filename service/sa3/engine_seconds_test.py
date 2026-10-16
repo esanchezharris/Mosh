@@ -38,11 +38,15 @@ def main():
 
     original_path = os.environ.get("PATH")
     try:
-        with tempfile.TemporaryDirectory(prefix="mosh-ffmpeg-path-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="mosh-ffmpeg-path-") as temp_dir, \
+                tempfile.TemporaryDirectory(prefix="mosh-restricted-path-") as restricted_dir:
             executable = Path(temp_dir) / "ffmpeg"
             executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             executable.chmod(0o755)
-            os.environ["PATH"] = "/usr/bin:/bin"
+            # A GUI-launched macOS app gets PATH=/usr/bin:/bin, which has no ffmpeg there.
+            # Linux distros install ffmpeg into /usr/bin, so stand the restricted PATH up
+            # as an empty directory: the case under test is "not on PATH", on any host.
+            os.environ["PATH"] = restricted_dir
             resolved = engine._ensure_command_on_path("ffmpeg", (temp_dir,))
             assert resolved == str(executable), "fallback executable is discovered"
             assert os.environ["PATH"].split(os.pathsep)[0] == temp_dir, "fallback dir is published to subprocesses"

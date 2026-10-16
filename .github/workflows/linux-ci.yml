@@ -27,6 +27,11 @@ on:
       - "ui/**"
       - "run-linux.sh"
       - ".github/workflows/linux-ci.yml"
+      # Conformance-check inputs outside the paths above (the conformance job below).
+      - "scripts/daw-conformance/**"
+      - "scripts/verify-hardware/**"
+      - "docs/reality-pack/**"
+      - "docs/FEATURE_AUDIT.md"
   pull_request:
     paths:
       - "CMakeLists.txt"
@@ -38,6 +43,11 @@ on:
       - "ui/**"
       - "run-linux.sh"
       - ".github/workflows/linux-ci.yml"
+      # Conformance-check inputs outside the paths above (the conformance job below).
+      - "scripts/daw-conformance/**"
+      - "scripts/verify-hardware/**"
+      - "docs/reality-pack/**"
+      - "docs/FEATURE_AUDIT.md"
   workflow_dispatch:
 
 concurrency:
@@ -148,3 +158,45 @@ jobs:
         if: steps.configure_app.outcome == 'success'
         continue-on-error: true
         run: cmake --build build-linux-full --target Mosh
+
+  # ── DAW-parity conformance checks (path-filtered, separate job, seconds) ──────
+  # The same three stdlib-only checks gate.sh's run_parity_checks runs in both lanes:
+  # the model lint, the dispatch-command coverage ledger, and the scoreboard freshness
+  # check (a stale docs/FEATURE_AUDIT.md). Running them here surfaces scoreboard drift
+  # on ubuntu instead of waiting for the macOS cheap gate. No build, no deps beyond the
+  # runner's python3. The filter lists exactly the files those scripts read.
+  conformance-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect conformance-input changes
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "$EVENT" = "pull_request" ]; then base="$BASE_SHA"; else base="$BEFORE_SHA"; fi
+          # Unknown/zero base (new branch, force-push) → run rather than silently skip.
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          changed="$(git diff --name-only "$base"...HEAD)"
+          if echo "$changed" | grep -qE '^(scripts/daw-conformance/|scripts/verify-hardware/|docs/reality-pack/|docs/FEATURE_AUDIT\.md$|src/moshops/|src/app/|ui/e2e/|\.github/workflows/linux-ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Model lint
+        if: steps.filter.outputs.run == 'true'
+        run: python3 scripts/daw-conformance/model_lint.py
+      - name: Dispatch-command coverage
+        if: steps.filter.outputs.run == 'true'
+        run: python3 scripts/daw-conformance/coverage_check.py
+      - name: Scoreboard freshness (docs/FEATURE_AUDIT.md)
+        if: steps.filter.outputs.run == 'true'
+        run: python3 scripts/daw-conformance/scoreboard.py --check
