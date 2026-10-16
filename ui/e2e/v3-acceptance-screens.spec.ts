@@ -103,6 +103,10 @@ test.describe("V3-feel: every surface in every colorway", () => {
   test("the four colorways render four different accents (the screenshots are not the same page in four folders)", async ({ page }) => {
     // Anti-vacuity for the walk above: read each accent fresh here so this test does not
     // depend on the walk's order, then require them pairwise distinct by a real margin.
+    // Four full shell boots, where every other test here does one: give each boot the
+    // default per-test budget. Under a loaded full run one V3 boot measured 7–13 s, so
+    // four of them overran a single 30 s budget on the fourth goto.
+    test.setTimeout(COLORWAYS.length * 30_000);
     const rgb: Record<string, [number, number, number]> = {};
     for (const cw of COLORWAYS) { await bootColorway(page, cw); rgb[cw] = await accentRgb(page); }
     const dist = (a: number[], b: number[]) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
