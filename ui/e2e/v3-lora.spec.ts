@@ -89,7 +89,8 @@ test("the Lab sits under V3's dialogs and follows the colourway", async ({ page 
   await trigger.click();
   const dialog = page.getByTestId("v3-training-modal");
   // The dialog's own width, not the 420px every .modal.glass gets.
-  expect((await dialog.boundingBox())!.width).toBeGreaterThan(500);
+  // Polled: v3ModalIn enters at scale(.96), so a first-frame read of ~520px is 499.2.
+  await expect.poll(async () => (await dialog.boundingBox())?.width ?? 0).toBeGreaterThan(500);
   await dialog.getByTestId("open-lora-lab").click();
   const labWindow = page.getByRole("dialog", { name: "LoRA Lab" });
   await expect(labWindow).toBeVisible();
