@@ -82,7 +82,7 @@ evidence. It claims nothing about how the music sounds.
 |---|---|---|
 | Source audio, or the parent version's audio | init audio at strength 0.01–0.5 | applied, but resemblance is not preservation |
 | Duration | requested length equals the input length | yes, by the service contract |
-| Tempo (BPM) | text in the prompt | no; beat alignment is not enforced. The take's beat period is **measured** afterwards (see below), which reports drift but changes nothing |
+| Tempo (BPM) | text in the prompt | no; beat alignment is not enforced. The take's beat period is **measured** afterwards (see below), which reports drift but changes nothing. An optional, explicit **conform** can stretch a drifting version afterwards; that edits the version, it does not condition the model |
 | Key | text in the prompt | no |
 | Chords | chord names **and change bars** in the prompt (`chords by bar: 1 Fm7, 3 Db`) and as the structured `chord_timing` request field (bars from the region start, with provenance); the service records it in the render manifest | no; neither harmony nor change timing is enforced, and the service's manifest copy always says `enforced: false` |
 | Meter, section, protected choices | stored and logged only | no |
@@ -125,6 +125,59 @@ evidence. It claims nothing about how the music sounds.
   against a 120 session, and against noise, a steady tone and silence. Loud broadband
   noise over clicks comes out `undetermined`, not `conforms`. How well the check behaves on real SA3 output is unmeasured.
 
+### Conform and free audition (2026-10-19)
+
+- **Conform is explicit, optional and timing-only.** "Conform tempo" (editor monitor
+  column, `ReImagineProcessor::conformSelected`) queues a job on the plug-in's worker
+  thread, never the audio thread. The job decodes the selected version and measures it
+  again with `checkTempoConformance` against the session as it is now (a stored report may
+  be stale). It then asks `planConform` for a ratio. `stretchRatio` = measured BPM /
+  session BPM = stretched length / input length, so a 121 BPM take in a 120 BPM session is
+  lengthened by 121/120. The new version then keeps its parent's exact length, because it
+  replaces the same region: a sped-up take is padded with silence (otherwise the dry source
+  would play through the end of the region) and a slowed one is trimmed. `paddedFrames` and
+  `trimmedFrames` are recorded on the version and in `version.conformed`, and the technical
+  checks are re-run on the conformed audio.
+- **Refusals, each with its reason in the status line and the experience log
+  (`conform.refused`):** the tempo map is `tempoMapAssumed`; the session BPM is missing or
+  its provenance is unknown (host- and user-set BPM are both accepted); the measurement is
+  `undetermined` (its reason is quoted); it was taken against a different BPM; the version
+  already conforms; |stretchRatio - 1| is above 8%, which more likely means another tempo or
+  feel than drift. A generation and a conform never run at the same time.
+- **Stretcher:** the SoundTouch library vendored inside Tracktion Engine, with Tracktion's
+  `soundtouchBetter` settings. This is the stretcher the main app's warp uses. The plug-in
+  does not link the engine, so `src/reimagine/ReImagineConform.cpp` compiles those sources
+  into its own namespace. Pitch is kept. The output has exactly round(frames x ratio)
+  frames at the version's own sample rate.
+- **The result is a new version.** The original take and its asset are never overwritten.
+  The new take copies the parent's manifest and adds lineage in `manifest.m1`: `role:
+  conform`, `parentTakeId`, `conformedFrom`, `stretchRatio`, and a `conform` record (the
+  plan, the method, the measurement before, the parent's asset hash). Its
+  `tempoConformance` is measured on the stretched audio. It is selected, and the report
+  column shows "Conform: x1.0083 (121.00 -> 120.00 BPM); timing only - downbeats not
+  aligned, not checked by ear". The new keys are only written on conformed takes, so older
+  takes and states load unchanged (`PluginStateV1` is still schema 1).
+- **Undo** removes the selected version when it is the newest version, a conform, and not
+  kept, then reselects its parent. The stored asset stays in the content-addressed store.
+  The plug-in has no Tracktion UndoManager; this is its own one-step undo for this edit.
+- **Experience log:** `conform.requested` and `version.conformed` are `explicit`;
+  `version.conform-undone` is `explicit`; refusals are `system`.
+- **What conform does not do.** It changes the beat period only. It does not move the
+  downbeat, so a take that starts off the grid still starts off the grid. It does not fix
+  swing, tempo changes inside the take, or musical alignment with the chords. It was not
+  checked by ear, and SoundTouch artefacts on real SA3 output are unmeasured.
+- **Free audition.** "Free preview" plays the selected version locally when the host gives
+  no transport or timing (or is stopped). It starts from the version's first sample, plays
+  once and stops; it never follows the host timeline. The state machine is
+  `FreeAudition` (lock-free; started by the worker after it loads the selection, advanced
+  on the audio thread). The preview replaces the input, like the replace route; it never
+  adds to it. It refuses to start while the host plays, and it stops itself in the same
+  block in which host-synced replace playback becomes active, or when the selection's
+  audio is reloaded. So the region is never audible twice. The report column says
+  "Audition: FREE-RUNNING local preview - not host-synced, does not follow the timeline",
+  and the experience log records `version.auditioned` with `mode: free-running`
+  (implicit).
+
 ## Commands
 
 macOS, through the repository's build:
@@ -165,6 +218,42 @@ a scratch CMake project that compiles the same sources.
   - the source file is byte-identical
   - the experience log contains the expected events and signal tags
 - `MoshReImagineEditorSmoke` passes under Xvfb with the new 1180×690 layout.
+
+### Conform and free audition evidence (2026-10-19, Linux cloud container)
+
+Same method as above (local-only CMake patch so the plug-in targets configure on Linux;
+not committed). Engineering evidence only: synthetic clicks, no model, no listening.
+
+- `[reimagine]` Catch2: **43 test cases / 511 assertions passed**. New cases cover:
+  - the ratio math and the inclusive 8% bound, both directions;
+  - every refusal (assumed tempo map, unknown or unproven BPM, undetermined, already
+    conforms, a measurement against another BPM, out of bounds);
+  - a synthetic click at 121, 118 and 126 BPM, at 48 and 44.1 kHz, stretched with the plan's
+    ratio. D1's checker then reports `conforms` to 120 BPM within 0.15 BPM, and the length
+    is exact;
+  - lineage and `PluginStateV1` round-trip, with an older state still loading;
+  - the free-audition state transitions.
+- `MoshReImagineLoopE2E`: **PASS, 3 of 3 runs** (85 checks after the review fixes; the 31 conform/preview checks need no helper).
+  It covers:
+  - an assumed-tempo import is refused;
+  - an import under a fake 120 BPM host playhead conforms a 121 BPM click into a new
+    version that measures `conforms`, keeps the parent's exact length (the trim is
+    recorded), is labelled "conform of v1" rather than "import", and leaves the original
+    asset intact;
+  - conforming that version again is refused ("already conforms");
+  - free preview is audible with no playhead;
+  - when the fake host starts playing, the preview stops in that block. (The output peak
+    of 0.736 equals one copy, but the preview copies rather than adds, so the peak alone
+    could not reveal double playback; the evidence is that the preview reports stopped.)
+  - the preview is refused while the host plays;
+  - undo restores the original;
+  - the experience log has the conform events.
+- `MoshReImagineEditorSmoke` passes under Xvfb; the conform, undo and preview buttons sit
+  in the monitor column. `MoshReImagineBundleSmoke` is macOS-only (it runs `plutil` and
+  `lipo`) and fails on Linux whatever the change.
+- Licence note: SoundTouch is LGPL-2.1. It is not listed in
+  [DEPENDENCY_BOM.md](../DEPENDENCY_BOM.md) for either the app (which already ships it for
+  warp) or this plug-in. That is an open item for the owner, not resolved here.
 
 ## Owner-Mac verification (2026-10-10, arm64, macOS 26.4.1, 64 GB)
 
@@ -214,7 +303,9 @@ about Live.
   was not retested here at other sample rates or block sizes.
 - Any musical judgement: is a candidate useful, does it follow the chords. The comparison
   against direct use of Gary, with the same source and budget, has not been run.
-- Free audition when host timing is unavailable is **not implemented**. Playback is
-  host-synced only.
-- No time-stretch or conforming: raw output equals the stored version, and length
-  differences are only flagged.
+- Free audition inside a real host with no transport, and its hand-off to host playback
+  in Live: only a fake playhead was used.
+- Conform on real SA3 output: how often the measurement allows it, and how SoundTouch
+  sounds on it. It was not checked by ear. Conform aligns the beat period only, never the
+  downbeat, and does not make a take musically fit the chords. Unconformed versions still
+  play raw.

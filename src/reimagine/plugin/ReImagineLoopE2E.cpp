@@ -3,6 +3,8 @@
 // no weights, no musical evidence). Proves the plumbing: import -> context -> generate ->
 // revise -> keep -> export -> save/reopen, plus backend-down, LAN refusal, cancellation,
 // budget exhaustion, missing assets, source immutability and two-instance isolation.
+// Conform and free audition run before the helper starts and need no service: a fake
+// playhead stands in for host timing (no real host, no listening).
 //
 // usage: MoshReImagineLoopE2E <repo-root>
 
@@ -67,6 +69,59 @@ bool writeFixtureWav (const juce::File& file, double seconds)
     auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions().withSampleRate (rate)
                                                    .withNumChannels (2).withBitsPerSample (24));
     return writer != nullptr && writer->writeFromAudioSampleBuffer (audio, 0, frames);
+}
+
+// A 121 BPM style click (12 ms decaying 1 kHz burst per beat), for conform.
+bool writeClickWav (const juce::File& file, double bpm, double seconds)
+{
+    const int rate = 48000;
+    const auto frames = static_cast<int> (seconds * rate);
+    juce::AudioBuffer<float> audio (2, frames);
+    audio.clear();
+    for (double t = 0.0137; t < seconds; t += 60.0 / bpm)
+    {
+        const auto start = static_cast<int> (std::llround (t * rate));
+        for (int i = 0; i < static_cast<int> (0.012 * rate) && start + i < frames; ++i)
+        {
+            const auto x = static_cast<float> (i) / static_cast<float> (rate);
+            const auto v = 0.8f * std::exp (-x / 0.003f) * std::sin (juce::MathConstants<float>::twoPi * 1000.0f * x);
+            audio.setSample (0, start + i, v);
+            audio.setSample (1, start + i, v);
+        }
+    }
+    juce::WavAudioFormat wav;
+    std::unique_ptr<juce::OutputStream> stream (file.createOutputStream().release());
+    if (stream == nullptr)
+        return false;
+    auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions().withSampleRate (rate)
+                                                   .withNumChannels (2).withBitsPerSample (24));
+    return writer != nullptr && writer->writeFromAudioSampleBuffer (audio, 0, frames);
+}
+
+// Host timing for the headless processor: 120 BPM 4/4, stopped or playing at a ppq.
+struct FakePlayHead final : juce::AudioPlayHead
+{
+    bool playing = false;
+    double ppq = 0.0;
+    juce::Optional<PositionInfo> getPosition() const override
+    {
+        PositionInfo info;
+        info.setBpm (120.0);
+        info.setTimeSignature (TimeSignature { 4, 4 });
+        info.setPpqPosition (ppq);
+        info.setTimeInSamples (static_cast<int64_t> (ppq * 0.5 * 48000.0));
+        info.setIsPlaying (playing);
+        return info;
+    }
+};
+
+float processPeak (ReImagineProcessor& p, int blockSamples = 512)
+{
+    juce::AudioBuffer<float> buffer (2, blockSamples);
+    buffer.clear();
+    juce::MidiBuffer midi;
+    p.processBlock (buffer, midi);
+    return buffer.getMagnitude (0, blockSamples);
 }
 
 juce::String sha256 (const juce::File& file)
@@ -192,6 +247,117 @@ int main (int argc, char** argv)
         check (lan->statusText().contains ("not this machine"), "non-loopback helper is refused: " + lan->statusText());
     }
     setEnv ("MOSH_SERVICE_HOST", "127.0.0.1");
+
+    std::cout << "conform and free audition (no helper, no model)\n";
+    {
+        const auto clickWav = home.getChildFile ("click-121bpm.wav");
+        check (writeClickWav (clickWav, 121.0, 8.0), "121 BPM click fixture written");
+        const auto clickHash = sha256 (clickWav);
+
+        // Imported with no host timing: the tempo map is assumed, so conform refuses.
+        auto assumed = importedProcessor (clickWav);
+        check (assumed->conformSelected().contains ("assumed"), "conform refuses an assumed tempo map: " + assumed->statusText());
+
+        // Imported while the host reports 120 BPM: the region carries host tempo.
+        auto c = std::make_unique<ReImagineProcessor>();
+        FakePlayHead head;
+        c->setPlayHead (&head);
+        c->prepareToPlay (48000.0, 512);
+        processPeak (*c);                                   // the plug-in learns the host position
+        c->importTakeFromFile (clickWav, 1.0);
+        waitFor ([&] { return takeCount (*c) == 1 && c->statusText().contains ("loaded"); }, 10.0);
+        check (c->selectedContext().bpm.has_value() && c->selectedContext().bpmFrom == Provenance::host,
+               "import under host timing has a host BPM");
+        const auto originalId = c->stateSnapshot().regions.front().selectedTakeId;
+        const auto originalHash = c->stateSnapshot().regions.front().takes.front().assetHash;
+
+        check (c->conformSelected().isEmpty(), "conform is queued: " + c->statusText());
+        waitFor ([&] { return ! c->conformActive() && takeCount (*c) == 2; }, 60.0);
+        auto cs = c->stateSnapshot();
+        check (cs.regions.front().takes.size() == 2, "conform created a new version: " + c->statusText());
+        if (cs.regions.front().takes.size() == 2)
+        {
+            const auto& conformed = cs.regions.front().takes[1];
+            const auto lineage = lineageOf (conformed);
+            check (lineage.role == "conform" && lineage.parentTakeId == originalId && lineage.conformedFrom == originalId,
+                   "conform lineage links to the original version");
+            check (lineage.stretchRatio.has_value() && std::abs (*lineage.stretchRatio - 121.0 / 120.0) < 0.002,
+                   "stretch ratio is measured/session: " + juce::String (lineage.stretchRatio.value_or (0.0), 5));
+            check (conformed.manifest["m1"]["tempoConformance"]["verdict"].toString() == "conforms",
+                   "conformed version now conforms: " + conformed.manifest["m1"]["tempoConformance"]["summary"].toString());
+            check (cs.regions.front().selectedTakeId == conformed.id, "the conformed version is selected");
+            {
+                // Same length as the parent, so "Replace" never lets the dry source through
+                // at the end of the region; the trim (121 -> 120 BPM lengthens) is recorded.
+                juce::AudioFormatManager formats;
+                formats.registerBasicFormats();
+                const auto lengthOf = [&] (const juce::String& hash)
+                {
+                    std::unique_ptr<juce::AudioFormatReader> r (formats.createReaderFor (
+                        home.getChildFile ("Library/Mosh/ReImagine/assets/renders/" + hash + ".wav")));
+                    return r ? r->lengthInSamples : juce::int64 { -1 };
+                };
+                const auto parentLength = lengthOf (originalHash);
+                check (parentLength > 0 && lengthOf (conformed.assetHash) == parentLength,
+                       "conformed version keeps the parent's exact length");
+                check (static_cast<int> (conformed.manifest["m1"]["conform"]["trimmedFrames"]) > 0
+                           && static_cast<int> (conformed.manifest["m1"]["conform"]["paddedFrames"]) == 0,
+                       "the trim to the parent's length is recorded");
+                check (conformed.manifest["m1"]["checks"]["usable"] == juce::var (true),
+                       "technical checks describe the conformed audio");
+                check (! takeLabel (cs.regions.front(), 1).contains ("import") && takeLabel (cs.regions.front(), 1).contains ("conform of v1"),
+                       "a conform of an import is labelled as a conform: " + takeLabel (cs.regions.front(), 1));
+            }
+            check (cs.regions.front().takes.front().assetHash == originalHash
+                       && home.getChildFile ("Library/Mosh/ReImagine/assets/renders/" + originalHash + ".wav").existsAsFile(),
+                   "the original version is not overwritten");
+            check (c->selectedReport().contains ("timing only"), "report says conform is timing only");
+        }
+        // Conforming the conformed version is refused after measuring (already conforms).
+        waitFor ([&] { return c->statusText().contains ("loaded"); }, 10.0);
+        c->conformSelected();
+        waitFor ([&] { return ! c->conformActive() && c->statusText().contains ("refused"); }, 60.0);
+        check (c->statusText().contains ("already conforms") && takeCount (*c) == 2,
+               "a conforming version is not stretched again: " + c->statusText());
+
+        // Free audition with no host timing: plays the selection, free-running.
+        c->setPlayHead (nullptr);
+        check (c->startFreeAudition().isEmpty(), "free audition starts without host timing");
+        waitFor ([&] { return c->freeAuditionPlaying(); }, 10.0);
+        check (c->freeAuditionPlaying() && c->selectedReport().contains ("FREE-RUNNING"), "report says the preview is free-running");
+        float previewPeak = 0.0f;
+        for (int block = 0; block < 40; ++block)
+            previewPeak = std::max (previewPeak, processPeak (*c));
+        check (previewPeak > 0.1f, "the preview is audible: peak " + juce::String (previewPeak, 3));
+        // The host starts playing over the region: the preview stops, the synced route plays once.
+        head.playing = true;
+        head.ppq = 0.0;
+        c->setPlayHead (&head);
+        float syncedPeak = 0.0f;
+        for (int block = 0; block < 40; ++block)
+        {
+            syncedPeak = std::max (syncedPeak, processPeak (*c));
+            head.ppq += 512.0 / 48000.0 * 2.0;
+        }
+        check (! c->freeAuditionPlaying(), "host playback stops the free preview");
+        check (syncedPeak > 0.1f && syncedPeak < 0.85f, "host-synced playback alone, no second copy: peak " + juce::String (syncedPeak, 3));
+        check (c->startFreeAudition().contains ("host is playing"), "free audition is refused while the host plays");
+        head.playing = false;
+        processPeak (*c);
+
+        check (c->undoLastConform(), "the conform can be undone");
+        cs = c->stateSnapshot();
+        check (cs.regions.front().takes.size() == 1 && cs.regions.front().selectedTakeId == originalId,
+               "undo removes the conformed version and reselects the original");
+        check (! c->undoLastConform(), "undo refuses a version that is not a conform");
+        check (sha256 (clickWav) == clickHash, "the click source file is byte-identical");
+
+        const auto log = home.getChildFile ("Library/Mosh/ReImagine/experience.jsonl").loadFileAsString();
+        check (log.contains ("\"version.conformed\", \"signal\": \"explicit\""), "experience log: conform is an explicit signal");
+        for (const auto* needle : { "\"conform.requested\"", "\"conform.refused\"", "\"version.conform-undone\"", "free-running" })
+            check (log.contains (needle), juce::String ("experience log has ") + needle);
+        c->setPlayHead (nullptr);
+    }
 
     std::cout << "helper up (TEST FIXTURE adapter)\n";
     juce::ChildProcess helper;

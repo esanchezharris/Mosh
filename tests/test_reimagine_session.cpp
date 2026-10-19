@@ -1,6 +1,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "reimagine/ReImagineConform.h"
 #include "reimagine/ReImagineSession.h"
 
 #include <cmath>
@@ -637,4 +638,239 @@ TEST_CASE ("Plugin state carries region context and intentions additively", "[re
     REQUIRE (legacy.has_value());
     CHECK (legacy->intentions.isEmpty());
     CHECK (legacy->regions.front().context.isVoid());
+}
+
+namespace
+{
+TempoConformanceReport drifting (double sessionBpm, double measuredBpm)
+{
+    TempoConformanceReport r;
+    r.verdict = TempoVerdict::drifts;
+    r.sessionBpm = sessionBpm;
+    r.bpmFrom = Provenance::host;
+    r.estimatedBpm = measuredBpm;
+    r.beatsPerBar = 4.0;
+    r.driftMsPerBar = (60.0 / measuredBpm - 60.0 / sessionBpm) * 4.0 * 1000.0;
+    return r;
+}
+
+juce::AudioBuffer<float> stereoOf (const std::vector<float>& mono)
+{
+    juce::AudioBuffer<float> b (2, static_cast<int> (mono.size()));
+    for (int c = 0; c < 2; ++c)
+        b.copyFrom (c, 0, mono.data(), static_cast<int> (mono.size()));
+    return b;
+}
+}
+
+TEST_CASE ("Conform ratio: measured BPM over session BPM, within +-8%", "[reimagine][session][conform]")
+{
+    const auto session = hostTempo (120.0);
+    const auto faster = planConform (drifting (120.0, 121.0), session);
+    REQUIRE (faster.allowed);
+    CHECK (faster.stretchRatio == Catch::Approx (121.0 / 120.0));   // longer: slows 121 to 120
+    CHECK (faster.fromBpm == Catch::Approx (121.0));
+    CHECK (faster.toBpm == Catch::Approx (120.0));
+    CHECK (faster.driftMsPerBar == Catch::Approx (-16.53).margin (0.05));
+
+    const auto slower = planConform (drifting (120.0, 115.0), session);
+    REQUIRE (slower.allowed);
+    CHECK (slower.stretchRatio == Catch::Approx (115.0 / 120.0));   // shorter: speeds 115 up to 120
+
+    // The bound is inclusive at 8% and refuses beyond it, either way.
+    CHECK (planConform (drifting (120.0, 129.6), session).allowed);
+    const auto tooFar = planConform (drifting (120.0, 130.0), session);
+    CHECK_FALSE (tooFar.allowed);
+    CHECK (tooFar.stretchRatio == 1.0);
+    CHECK (tooFar.refusal.contains ("limit +-8%"));
+    CHECK_FALSE (planConform (drifting (120.0, 110.0), session).allowed);
+
+    const auto stored = conformPlanToVar (faster);
+    CHECK (static_cast<double> (stored["stretchRatio"]) == Catch::Approx (121.0 / 120.0));
+    CHECK (stored["kind"].toString().contains ("timing only"));
+    CHECK (stored["refusal"].isVoid());
+}
+
+TEST_CASE ("Conform refuses without a trustworthy tempo or a measurable drift", "[reimagine][session][conform]")
+{
+    const auto drift = drifting (120.0, 121.0);
+
+    auto assumed = hostTempo (120.0);
+    assumed.tempoAssumed = true;
+    CHECK (planConform (drift, assumed).refusal.contains ("assumed"));
+    CHECK (conformContextRefusal (assumed).contains ("assumed"));
+
+    auto unproven = hostTempo (120.0);
+    unproven.bpmFrom = Provenance::unknown;
+    CHECK (planConform (drift, unproven).refusal == "session BPM provenance unknown");
+
+    SessionContext unknown;
+    CHECK (planConform (drift, unknown).refusal == "session BPM unknown");
+    CHECK (conformContextRefusal (hostTempo (120.0)).isEmpty());
+
+    // A user-set BPM is acceptable provenance.
+    auto userBpm = hostTempo (120.0);
+    userBpm.bpmFrom = Provenance::user;
+    CHECK (planConform (drift, userBpm).allowed);
+
+    TempoConformanceReport undetermined;
+    undetermined.reason = "no clear periodic pulse";
+    const auto noPulse = planConform (undetermined, hostTempo (120.0));
+    CHECK_FALSE (noPulse.allowed);
+    CHECK (noPulse.refusal.contains ("undetermined (no clear periodic pulse)"));
+
+    auto conforms = drifting (120.0, 120.05);
+    conforms.verdict = TempoVerdict::conforms;
+    CHECK (planConform (conforms, hostTempo (120.0)).refusal.contains ("already conforms"));
+
+    // Measured against 121 but the session is now 120: measure again, never stretch blind.
+    CHECK (planConform (drifting (121.0, 122.0), hostTempo (120.0)).refusal.contains ("different session BPM"));
+
+    // Real audio: an assumed tempo map stays undetermined, so conform refuses it.
+    auto assumedReal = hostTempo (120.0);
+    assumedReal.tempoAssumed = true;
+    const auto measured = conformanceOf (clickTrack (121.0, 121.0, 16.0, 48000.0), 48000.0, assumedReal);
+    CHECK_FALSE (planConform (measured, assumedReal).allowed);
+}
+
+TEST_CASE ("Conform: a 121 BPM click stretched to a 120 BPM session now conforms", "[reimagine][session][conform][tempo-conformance]")
+{
+    for (const auto rate : { 48000.0, 44100.0 })
+        for (const auto takeBpm : { 121.0, 118.0, 126.0 })
+        {
+            CAPTURE (rate, takeBpm);
+            const auto session = hostTempo (120.0);
+            const auto click = clickTrack (takeBpm, takeBpm, 16.0, rate, 0.0137);
+            const auto before = conformanceOf (click, rate, session);
+            REQUIRE (before.verdict == TempoVerdict::drifts);
+            const auto plan = planConform (before, session);
+            REQUIRE (plan.allowed);
+            CHECK (plan.stretchRatio == Catch::Approx (takeBpm / 120.0).margin (0.001));
+
+            const auto input = stereoOf (click);
+            juce::AudioBuffer<float> output;
+            juce::String error;
+            REQUIRE (stretchForConform (input, rate, plan.stretchRatio, output, error));
+            CHECK (error.isEmpty());
+            CHECK (output.getNumChannels() == 2);
+            CHECK (output.getNumSamples() == static_cast<int> (std::llround (click.size() * plan.stretchRatio)));
+
+            const auto after = checkTempoConformance (output.getArrayOfReadPointers(), 2, output.getNumSamples(), rate, session);
+            CHECK (after.verdict == TempoVerdict::conforms);
+            REQUIRE (after.estimatedBpm.has_value());
+            CHECK (*after.estimatedBpm == Catch::Approx (120.0).margin (0.15));
+            // The original buffer is untouched (a conform makes a new version).
+            CHECK (input.getSample (0, static_cast<int> (std::llround (0.0137 * rate)) + 10) == click[static_cast<size_t> (std::llround (0.0137 * rate)) + 10]);
+        }
+
+    juce::AudioBuffer<float> out;
+    juce::String error;
+    CHECK_FALSE (stretchForConform (juce::AudioBuffer<float> (2, 0), 48000.0, 1.01, out, error));
+    CHECK_FALSE (stretchForConform (stereoOf (sine (4800, 0.5f)), 48000.0, std::numeric_limits<double>::quiet_NaN(), out, error));
+}
+
+TEST_CASE ("Conform lineage is stored on the new version and states round-trip", "[reimagine][session][conform][state]")
+{
+    PluginStateV1 state;
+    TransferRegion region;
+    region.id = "r";
+    region.sourceHash = "src";
+    RenderTake parent;
+    parent.id = "P";
+    parent.assetHash = juce::String::repeatedString ("a", 64);
+    parent.seed = 7;
+    setLineage (parent, { "int-1", {}, "candidate", true, false });
+    // A non-conform take gets no conform keys at all.
+    CHECK_FALSE (parent.manifest["m1"].getDynamicObject()->hasProperty ("conformedFrom"));
+    CHECK_FALSE (parent.manifest["m1"].getDynamicObject()->hasProperty ("stretchRatio"));
+
+    RenderTake conformed;
+    conformed.id = "C";
+    conformed.assetHash = juce::String::repeatedString ("b", 64);
+    conformed.manifest = parent.manifest.clone();
+    auto lineage = lineageOf (parent);
+    lineage.parentTakeId = "P";
+    lineage.role = "conform";
+    lineage.kept = false;
+    lineage.conformedFrom = "P";
+    lineage.stretchRatio = 121.0 / 120.0;
+    setLineage (conformed, lineage);
+    region.takes = { parent, conformed };
+    state.regions.push_back (region);
+
+    CHECK (lineageOf (region.takes[0]).kept);                   // the parent is untouched
+    CHECK (lineageOf (region.takes[0]).role == "candidate");
+    CHECK (takeLabel (region, 1) == "v2 conform of v1 x1.0083");
+
+    const auto back = deserializeState (serializeState (state));
+    REQUIRE (back.has_value());
+    REQUIRE (back->regions.front().takes.size() == 2);
+    const auto restored = lineageOf (back->regions.front().takes[1]);
+    CHECK (restored.role == "conform");
+    CHECK (restored.parentTakeId == "P");
+    CHECK (restored.conformedFrom == "P");
+    REQUIRE (restored.stretchRatio.has_value());
+    CHECK (*restored.stretchRatio == Catch::Approx (121.0 / 120.0));
+    CHECK (restored.intentionId == "int-1");
+    CHECK_FALSE (restored.kept);
+
+    // A state saved before conform existed loads with no conform lineage.
+    const auto legacy = deserializeState (
+        "{\"schemaVersion\": 1, \"regions\": [{\"id\": \"r\", \"takes\": [{\"id\": \"t\", \"assetHash\": \"x\", "
+        "\"manifest\": {\"m1\": {\"intentionId\": \"int-1\", \"role\": \"revision\", \"parentTakeId\": \"q\"}}}]}]}");
+    REQUIRE (legacy.has_value());
+    const auto old = lineageOf (legacy->regions.front().takes.front());
+    CHECK (old.conformedFrom.isEmpty());
+    CHECK_FALSE (old.stretchRatio.has_value());
+    CHECK (old.role == "revision");
+}
+
+TEST_CASE ("Free audition: starts only with a version and never alongside host-synced playback", "[reimagine][session][audition]")
+{
+    FreeAudition a;
+    CHECK_FALSE (a.playing());
+    CHECK (a.lastStop() == AuditionStop::none);
+    CHECK (a.advance (512, 48000, false).count == 0);           // idle outputs nothing
+
+    CHECK (a.start (false, false) == FreeAudition::StartResult::noVersion);
+    CHECK (a.start (true, true) == FreeAudition::StartResult::hostSyncedActive);
+    CHECK_FALSE (a.playing());
+
+    REQUIRE (a.start (true, false) == FreeAudition::StartResult::started);
+    CHECK (a.playing());
+    auto block = a.advance (512, 1200, false);
+    CHECK (block.start == 0);
+    CHECK (block.count == 512);
+    block = a.advance (512, 1200, false);
+    CHECK (block.start == 512);
+    CHECK (block.count == 512);
+    block = a.advance (512, 1200, false);                        // the tail, then it finishes
+    CHECK (block.start == 1024);
+    CHECK (block.count == 176);
+    CHECK_FALSE (a.playing());
+    CHECK (a.lastStop() == AuditionStop::finished);
+    CHECK (a.advance (512, 1200, false).count == 0);
+
+    // The host starting playback stops the preview in that very block: never two copies.
+    REQUIRE (a.start (true, false) == FreeAudition::StartResult::started);
+    CHECK (a.position() == 0);
+    CHECK (a.advance (256, 48000, false).count == 256);
+    CHECK (a.advance (256, 48000, true).count == 0);
+    CHECK_FALSE (a.playing());
+    CHECK (a.lastStop() == AuditionStop::hostTookOver);
+    CHECK (auditionStopName (a.lastStop()).contains ("host"));
+
+    // A user stop, a selection change and missing audio each stop it with their reason.
+    REQUIRE (a.start (true, false) == FreeAudition::StartResult::started);
+    a.stop();
+    CHECK (a.lastStop() == AuditionStop::user);
+    REQUIRE (a.start (true, false) == FreeAudition::StartResult::started);
+    a.stop (AuditionStop::selectionChanged);
+    CHECK (a.lastStop() == AuditionStop::selectionChanged);
+    a.stop (AuditionStop::user);                                  // stopping when stopped keeps the reason
+    CHECK (a.lastStop() == AuditionStop::selectionChanged);
+    REQUIRE (a.start (true, false) == FreeAudition::StartResult::started);
+    CHECK (a.lastStop() == AuditionStop::none);
+    CHECK (a.advance (256, 0, false).count == 0);
+    CHECK (a.lastStop() == AuditionStop::nothingLoaded);
 }

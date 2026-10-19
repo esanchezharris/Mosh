@@ -852,6 +852,65 @@ juce::String describeStoredTempoConformance (const juce::var& stored)
     return summary.isNotEmpty() ? summary : juce::String ("not measured (version predates the check)");
 }
 
+juce::String conformContextRefusal (const SessionContext& context)
+{
+    if (context.tempoAssumed)
+        return "the region's tempo map was assumed (import before host timing); set or confirm the BPM first";
+    if (! context.bpm || ! std::isfinite (*context.bpm) || *context.bpm <= 0.0)
+        return "session BPM unknown";
+    if (context.bpmFrom == Provenance::unknown)
+        return "session BPM provenance unknown";
+    return {};
+}
+
+ConformPlan planConform (const TempoConformanceReport& measured, const SessionContext& context)
+{
+    ConformPlan plan;
+    const auto refuse = [&plan] (const juce::String& why)
+    {
+        plan.allowed = false;
+        plan.stretchRatio = 1.0;
+        plan.refusal = why;
+        return plan;
+    };
+    if (const auto why = conformContextRefusal (context); why.isNotEmpty())
+        return refuse (why);
+    plan.toBpm = *context.bpm;
+    if (measured.verdict == TempoVerdict::undetermined)
+        return refuse ("tempo conformance is undetermined (" + measured.reason + ")");
+    if (! measured.sessionBpm || std::abs (*measured.sessionBpm - *context.bpm) > 0.01)
+        return refuse ("the measurement was taken against a different session BPM; measure again");
+    if (measured.verdict == TempoVerdict::conforms)
+        return refuse ("already conforms (within " + juce::String (kTempoConformsMsPerBar, 0) + " ms per bar); nothing to stretch");
+    if (! measured.estimatedBpm || ! std::isfinite (*measured.estimatedBpm) || *measured.estimatedBpm <= 0.0)
+        return refuse ("no measured BPM");
+    plan.fromBpm = *measured.estimatedBpm;
+    plan.driftMsPerBar = measured.driftMsPerBar;
+    const auto ratio = plan.fromBpm / plan.toBpm;
+    if (! std::isfinite (ratio) || std::abs (ratio - 1.0) > kMaxConformStretch)
+        return refuse ("would stretch by " + juce::String ((ratio - 1.0) * 100.0, 1) + "% (limit +-"
+                       + juce::String (kMaxConformStretch * 100.0, 0)
+                       + "%): more likely another tempo or feel than drift");
+    plan.allowed = true;
+    plan.stretchRatio = ratio;
+    return plan;
+}
+
+juce::var conformPlanToVar (const ConformPlan& plan)
+{
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("kind", "conform (timing only; downbeat phase not aligned; not checked by ear)");
+    o->setProperty ("allowed", plan.allowed);
+    o->setProperty ("stretchRatio", plan.stretchRatio);
+    o->setProperty ("fromBpm", plan.fromBpm);
+    o->setProperty ("toBpm", plan.toBpm);
+    o->setProperty ("driftMsPerBarBefore", plan.driftMsPerBar);
+    o->setProperty ("maxStretch", kMaxConformStretch);
+    if (plan.refusal.isNotEmpty())
+        o->setProperty ("refusal", plan.refusal);
+    return juce::var (o);
+}
+
 TakeLineage lineageOf (const RenderTake& take)
 {
     TakeLineage lineage;
@@ -862,6 +921,9 @@ TakeLineage lineageOf (const RenderTake& take)
         lineage.role = m1->getProperty ("role").toString();
         lineage.kept = static_cast<bool> (m1->getProperty ("kept"));
         lineage.testFixture = static_cast<bool> (m1->getProperty ("testFixture"));
+        lineage.conformedFrom = m1->getProperty ("conformedFrom").toString();
+        if (const auto ratio = m1->getProperty ("stretchRatio"); ratio.isDouble() || ratio.isInt() || ratio.isInt64())
+            lineage.stretchRatio = static_cast<double> (ratio);
     }
     return lineage;
 }
@@ -879,6 +941,10 @@ void setLineage (RenderTake& take, const TakeLineage& lineage)
     m1->setProperty ("role", lineage.role);
     m1->setProperty ("kept", lineage.kept);
     m1->setProperty ("testFixture", lineage.testFixture);
+    if (lineage.conformedFrom.isNotEmpty())
+        m1->setProperty ("conformedFrom", lineage.conformedFrom);
+    if (lineage.stretchRatio)
+        m1->setProperty ("stretchRatio", *lineage.stretchRatio);
     manifest.getDynamicObject()->setProperty ("m1", juce::var (m1));
     take.manifest = manifest;
 }
@@ -892,11 +958,13 @@ juce::String takeLabel (const TransferRegion& region, size_t takeIndex)
     juce::String label = "v" + juce::String (static_cast<int> (takeIndex) + 1);
     if (take.manifest.getProperty ("source", {}).toString() == "import")
         label << " import";
-    else if (lineage.role == "revision" && lineage.parentTakeId.isNotEmpty())
+    else if ((lineage.role == "revision" || lineage.role == "conform") && lineage.parentTakeId.isNotEmpty())
     {
         for (size_t i = 0; i < region.takes.size(); ++i)
             if (region.takes[i].id == lineage.parentTakeId)
-                label << " rev of v" << juce::String (static_cast<int> (i) + 1);
+                label << (lineage.role == "conform" ? " conform of v" : " rev of v") << juce::String (static_cast<int> (i) + 1);
+        if (lineage.role == "conform" && lineage.stretchRatio)
+            label << " x" << juce::String (*lineage.stretchRatio, 4);
     }
     else
         label << " seed " << juce::String (take.seed);
@@ -946,8 +1014,67 @@ juce::var exportSidecar (const TransferRegion& region, const RenderTake& take, c
     return juce::var (o);
 }
 
+juce::String auditionStopName (AuditionStop why) noexcept
+{
+    switch (why)
+    {
+        case AuditionStop::user: return "stopped";
+        case AuditionStop::finished: return "finished";
+        case AuditionStop::hostTookOver: return "host transport started (host-synced playback took over)";
+        case AuditionStop::selectionChanged: return "selection changed";
+        case AuditionStop::nothingLoaded: return "nothing loaded for the selected version";
+        case AuditionStop::none: break;
+    }
+    return "none";
+}
+
+FreeAudition::StartResult FreeAudition::start (bool hasSelectedVersion, bool hostSyncedPlaybackActive) noexcept
+{
+    if (! hasSelectedVersion)
+        return StartResult::noVersion;
+    if (hostSyncedPlaybackActive)
+        return StartResult::hostSyncedActive;
+    // Position first, then the flag: the audio thread only reads the cursor while active.
+    cursor.store (0, std::memory_order_release);
+    stopReason.store (static_cast<int> (AuditionStop::none), std::memory_order_release);
+    active.store (1, std::memory_order_release);
+    return StartResult::started;
+}
+
+void FreeAudition::stop (AuditionStop why) noexcept
+{
+    if (active.exchange (0, std::memory_order_acq_rel) != 0)
+        stopReason.store (static_cast<int> (why), std::memory_order_release);
+}
+
+FreeAudition::Block FreeAudition::advance (int blockSamples, int64_t lengthSamples, bool hostSyncedPlaybackActive) noexcept
+{
+    if (! playing() || blockSamples <= 0)
+        return {};
+    if (hostSyncedPlaybackActive)
+    {
+        stop (AuditionStop::hostTookOver);
+        return {};
+    }
+    if (lengthSamples <= 0)
+    {
+        stop (AuditionStop::nothingLoaded);
+        return {};
+    }
+    auto from = cursor.load (std::memory_order_acquire);
+    Block block;
+    block.start = from;
+    block.count = static_cast<int> (std::max<int64_t> (0, std::min<int64_t> (blockSamples, lengthSamples - from)));
+    // A restart (start() on another thread) between the load and here wins.
+    if (! cursor.compare_exchange_strong (from, from + block.count, std::memory_order_acq_rel))
+        return {};
+    if (from + block.count >= lengthSamples)
+        stop (AuditionStop::finished);
+    return block;
+}
+
 ExperienceLog::ExperienceLog()
-    : ExperienceLog (reimagineUserHome()
+    :ExperienceLog (reimagineUserHome()
                          .getChildFile ("Library/Mosh/ReImagine/experience.jsonl"))
 {
 }

@@ -4,6 +4,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include <atomic>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -275,6 +276,32 @@ juce::var tempoConformanceToVar (const TempoConformanceReport&);
 // One report line from a stored m1.tempoConformance (void == predates the check).
 juce::String describeStoredTempoConformance (const juce::var&);
 
+// ── Conform (explicit, optional; timing only) ─────────────────────────────────────
+// Time-stretches a selected version so its measured beat period equals the session's.
+// The result is a NEW version (the original is never overwritten). It changes timing
+// only: downbeat phase is not aligned and nothing about it was checked by ear.
+// stretchRatio = output length / input length = measured BPM / session BPM, so a take
+// measured at 121 BPM in a 120 BPM session is lengthened by 121/120.
+constexpr double kMaxConformStretch = 0.08;     // refuse |stretchRatio - 1| above this
+
+struct ConformPlan
+{
+    bool allowed = false;
+    double stretchRatio = 1.0;
+    double fromBpm = 0.0;                       // measured
+    double toBpm = 0.0;                         // session
+    double driftMsPerBar = 0.0;                 // before conforming
+    juce::String refusal;                       // why not, when !allowed
+};
+
+// Empty when the context can carry a conform; otherwise the reason it cannot
+// (tempo map assumed, BPM missing or of unknown provenance).
+juce::String conformContextRefusal (const SessionContext&);
+// Refuses an undetermined or already-conforming measurement, one taken against a
+// different BPM than the session's current one, and a ratio outside +-kMaxConformStretch.
+ConformPlan planConform (const TempoConformanceReport& measured, const SessionContext&);
+juce::var conformPlanToVar (const ConformPlan&);
+
 // ── Versions (lineage on RenderTake) ──────────────────────────────────────────────
 // Takes created by this loop carry lineage in their manifest under "m1" so the
 // existing state schema stays additive and older builds keep loading the takes.
@@ -282,9 +309,12 @@ struct TakeLineage
 {
     juce::String intentionId;
     juce::String parentTakeId;
-    juce::String role;                        // "candidate" | "revision"
+    juce::String role;                        // "candidate" | "revision" | "conform"
     bool kept = false;
     bool testFixture = false;
+    // Conform only (written only when set, so other takes' manifests are unchanged).
+    juce::String conformedFrom;               // take id that was stretched
+    std::optional<double> stretchRatio;
 };
 
 TakeLineage lineageOf (const RenderTake&);
@@ -297,6 +327,39 @@ juce::String exportFileName (const TransferRegion&, const RenderTake&, const Ses
                              std::optional<int> meterNumerator);
 juce::var exportSidecar (const TransferRegion&, const RenderTake&, const SessionContext&,
                          double fileSampleRate, int64_t fileFrames, std::optional<int> meterNumerator);
+
+// ── Free audition ─────────────────────────────────────────────────────────────────
+// A local, free-running preview of the selected version for hosts that give no
+// transport or timing. It never follows the host timeline and it never plays while
+// host-synced replace playback is active: if the host starts playing, the preview
+// stops itself, so the region is never audible twice. Lock-free: start/stop on the
+// message or worker thread, advance on the audio thread.
+enum class AuditionStop { none, user, finished, hostTookOver, selectionChanged, nothingLoaded };
+juce::String auditionStopName (AuditionStop) noexcept;
+
+class FreeAudition
+{
+public:
+    enum class StartResult { started, noVersion, hostSyncedActive };
+    struct Block
+    {
+        int64_t start = 0;                    // sample in the version's audio
+        int count = 0;                        // 0 == output nothing from the preview
+    };
+
+    StartResult start (bool hasSelectedVersion, bool hostSyncedPlaybackActive) noexcept;
+    void stop (AuditionStop why = AuditionStop::user) noexcept;
+    // Audio thread. Never plays while host-synced playback is active.
+    Block advance (int blockSamples, int64_t lengthSamples, bool hostSyncedPlaybackActive) noexcept;
+    bool playing() const noexcept { return active.load (std::memory_order_acquire) != 0; }
+    int64_t position() const noexcept { return cursor.load (std::memory_order_acquire); }
+    AuditionStop lastStop() const noexcept { return static_cast<AuditionStop> (stopReason.load (std::memory_order_acquire)); }
+
+private:
+    std::atomic<int> active { 0 };
+    std::atomic<int64_t> cursor { 0 };
+    std::atomic<int> stopReason { static_cast<int> (AuditionStop::none) };
+};
 
 // ── Experience log ────────────────────────────────────────────────────────────────
 // Append-only JSONL. Explicit choices (keep, prefer) are tagged "explicit"; export,
