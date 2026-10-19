@@ -49,7 +49,7 @@ endif()
 # relaunch on 0.1.y", and Sparkle decides what is newer by comparing exactly this value
 # (CFBundleVersion / CFBundleShortVersionString, both fed from here by JUCE). Editing this
 # line for every test build would put a version bump in the diff of unrelated work.
-set(MOSH_VERSION "0.1.1" CACHE STRING "Bundle version (CFBundleShortVersionString + CFBundleVersion)")
+set(MOSH_VERSION "0.1.2" CACHE STRING "Bundle version (CFBundleShortVersionString + CFBundleVersion)")
 option(MOSH_BUILD_DAWN_BRIDGE "Build the macOS-only Mosh DAWN Bridge menu-bar app" OFF)
 if (CMAKE_HOST_APPLE AND MOSH_BUILD_DAWN_BRIDGE)
     project(Mosh VERSION ${MOSH_VERSION} LANGUAGES C CXX OBJCXX)
