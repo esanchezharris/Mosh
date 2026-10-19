@@ -45,15 +45,27 @@ ReImagineProcessor::~ReImagineProcessor()
 
 void ReImagineProcessor::prepareToPlay (double sampleRate, int)
 {
-    const auto channels = getTotalNumInputChannels();
-    currentSampleRate.store (sampleRate, std::memory_order_release);
-    currentChannels.store (channels, std::memory_order_release);
-    const auto maximum = static_cast<int> (std::ceil (sampleRate * 240.0));
-    captureBuffer.setSize (channels, maximum, false, true, false);
-    captureBuffer.clear();
-    transfer.prepare (sampleRate, channels, 240.0);
-    transferStateMirror.store (static_cast<int> (CaptureState::idle), std::memory_order_release);
-    captureWriteOffset.store (0, std::memory_order_release);
+    {
+        // R1 review P2: a Transfer that just stopped may still be waiting for the worker,
+        // or being written by it, from captureBuffer. A host re-prepares on a rate/buffer
+        // change, a device switch or a freeze. Hold the capture lock (a running write
+        // finishes first) and save a Transfer the worker has not started (it may be busy
+        // generating) before the buffer and the rate change under it.
+        const juce::ScopedLock capture (captureFinalizeLock);
+        if (finalizeRequested.exchange (0, std::memory_order_acq_rel) != 0)
+            finalizeCapture();
+        finalizationPending.store (0, std::memory_order_release);
+
+        const auto channels = getTotalNumInputChannels();
+        currentSampleRate.store (sampleRate, std::memory_order_release);
+        currentChannels.store (channels, std::memory_order_release);
+        const auto maximum = static_cast<int> (std::ceil (sampleRate * 240.0));
+        captureBuffer.setSize (channels, maximum, false, true, false);
+        captureBuffer.clear();
+        transfer.prepare (sampleRate, channels, 240.0);
+        transferStateMirror.store (static_cast<int> (CaptureState::idle), std::memory_order_release);
+        captureWriteOffset.store (0, std::memory_order_release);
+    }
     loadRequested.store (1, std::memory_order_release);
     workerEvent.signal();
 }
@@ -918,10 +930,15 @@ void ReImagineProcessor::run()
             if (reported)
                 uiStatus = "Tempo map changed - region is stale; Re-transfer required";
         }
-        if (finalizeRequested.exchange (0, std::memory_order_acq_rel) != 0)
         {
-            finalizeCapture();
-            finalizationPending.store (0, std::memory_order_release);
+            // Taken before the flag, so prepareToPlay either finalizes this Transfer itself
+            // or waits for this write to finish (R1 review P2).
+            const juce::ScopedLock capture (captureFinalizeLock);
+            if (finalizeRequested.exchange (0, std::memory_order_acq_rel) != 0)
+            {
+                finalizeCapture();
+                finalizationPending.store (0, std::memory_order_release);
+            }
         }
         if (loadRequested.exchange (0, std::memory_order_acq_rel) != 0)
             loadSelectedTake();
@@ -1158,7 +1175,10 @@ juce::StringArray ReImagineProcessor::enqueueBatch (IntentionInput input, bool r
             input.request = intention.request;
     }
 
-    // Header-only read of the audio that will be sent (message thread; no decode).
+    // Header-only read of the audio that will be sent (message thread; no decode). The
+    // file is only named by a digest (AssetStore); the worker verifies its content.
+    if (! isSha256Hex (inputHash))
+        return refuse ({ "Input audio is missing - Relink or Re-transfer" });
     const auto inputFile = inputRole == "source" ? assets.sourceFile (inputHash) : assets.renderFile (inputHash);
     juce::AudioFormatManager formats;
     formats.registerBasicFormats();

@@ -312,6 +312,14 @@ TEST_CASE ("Asset relink is content-addressed and refuses a hash mismatch", "[re
     juce::String error;
     REQUIRE (assets.relink (candidate, expected, false, error));
     CHECK (assets.verify (assets.renderFile (expected), expected));
+    // A hash from a crafted saved state never becomes a path (R1 review P3).
+    CHECK (isSha256Hex (expected));
+    CHECK_FALSE (isSha256Hex ("../../../../Some/Other"));
+    CHECK_FALSE (isSha256Hex (expected.toUpperCase()));
+    CHECK (assets.sourceFile ("../../../../Some/Other") == juce::File());
+    CHECK (assets.renderFile (expected.substring (1)) == juce::File());
+    CHECK_FALSE (assets.verify (assets.sourceFile ("../x"), "../x"));
+    CHECK (assets.renderFile (expected).isAChildOf (root));
     TransferRegion region;
     region.sourceHash = expected;
     region.selectedTakeId = "take";

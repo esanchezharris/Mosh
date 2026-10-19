@@ -42,6 +42,9 @@ struct LoraCatalogSnapshot
 
 std::vector<LoraCatalogItem> loraCatalogFromResponse (const juce::var&);
 
+// A lowercase 64-character SHA-256 hex digest, the only form an asset name may take.
+bool isSha256Hex (const juce::String&) noexcept;
+
 class AssetStore
 {
 public:

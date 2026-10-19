@@ -87,14 +87,22 @@ AssetStore::AssetStore (juce::File rootDirectory) : storeRoot (std::move (rootDi
     storeRoot.getChildFile ("renders").createDirectory();
 }
 
+bool isSha256Hex (const juce::String& s) noexcept
+{
+    return s.length() == 64 && s.containsOnly ("0123456789abcdef");
+}
+
+// Hashes come from saved state as well as from importWav. A hash that is not a digest
+// (a crafted Set's "../../Some/Other") names no asset, so it never becomes a path
+// outside the store (R1 review P3).
 juce::File AssetStore::sourceFile (const juce::String& hash) const
 {
-    return storeRoot.getChildFile ("sources").getChildFile (hash + ".wav");
+    return isSha256Hex (hash) ? storeRoot.getChildFile ("sources").getChildFile (hash + ".wav") : juce::File();
 }
 
 juce::File AssetStore::renderFile (const juce::String& hash) const
 {
-    return storeRoot.getChildFile ("renders").getChildFile (hash + ".wav");
+    return isSha256Hex (hash) ? storeRoot.getChildFile ("renders").getChildFile (hash + ".wav") : juce::File();
 }
 
 juce::String AssetStore::importWav (const juce::File& wav, bool source, juce::String& error) const

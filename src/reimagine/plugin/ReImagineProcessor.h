@@ -195,6 +195,9 @@ private:
     std::atomic<int> offlineProcessing { 0 };
     std::atomic<int> finalizeRequested { 0 };
     std::atomic<int> finalizationPending { 0 };
+    // finalizeCapture (worker, or prepareToPlay for a Transfer the worker has not reached)
+    // versus prepareToPlay re-sizing captureBuffer. Never taken on the audio thread.
+    juce::CriticalSection captureFinalizeLock;
     std::atomic<int> captureAbortEvent { 0 };
     std::atomic<int> renderRequested { 0 };
     std::atomic<int> loadRequested { 0 };
