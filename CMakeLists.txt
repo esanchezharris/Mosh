@@ -768,7 +768,10 @@ if (MOSH_BUILD_PLUGIN_FIXTURES)
     add_subdirectory(src/plugin_fixtures)
 endif()
 
-if (MOSH_BUILD_REIMAGINE_PLUGIN AND APPLE)
+# Default ON for Apple only (the owner-local VST3). Linux CI opts in explicitly with
+# -DMOSH_BUILD_REIMAGINE_PLUGIN=ON to build and run the plug-in's headless tests;
+# the macOS-only bundle smoke stays guarded inside the subdirectory.
+if (MOSH_BUILD_REIMAGINE_PLUGIN AND (APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
     add_subdirectory(src/reimagine/plugin)
 endif()
 

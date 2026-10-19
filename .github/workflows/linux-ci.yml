@@ -175,3 +175,99 @@ jobs:
           path: selftest-logs/
           if-no-files-found: ignore
           retention-days: 7
+
+  # ── Re-Imagine VST3 plug-in tests (path-filtered, separate job) ─────────────────
+  # Cheap gate: decide whether this change touches the Re-Imagine plug-in, its service
+  # path, its tests, CMake or this workflow. Only then pay for the plug-in build below,
+  # so the required linux-x64 job is not lengthened for every PR.
+  reimagine-changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.filter.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect Re-Imagine-relevant changes
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "$EVENT" = "pull_request" ]; then base="$BASE_SHA"; else base="$BEFORE_SHA"; fi
+          # Unknown/zero base (new branch, force-push) → run rather than silently skip.
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          changed="$(git diff --name-only "$base"...HEAD)"
+          echo "$changed"
+          if echo "$changed" | grep -qE '^(src/reimagine/|service/direct_render\.py$|service/server\.py$|tests/test_reimagine|CMakeLists\.txt$|.*/CMakeLists\.txt$|CMakePresets\.json$|cmake/|\.github/workflows/linux-ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Builds the Re-Imagine VST3 + its headless tests on Linux (MOSH_BUILD_REIMAGINE_PLUGIN
+  # is explicitly ON here; its default stays Apple-only) and runs:
+  #   MoshReImagineLoopE2E      — M1 loop against service/server.py with the direct-render
+  #                               TEST FIXTURE adapter (python3, no model, no audio claim)
+  #   MoshReImagineEditorSmoke  — editor paint under Xvfb
+  # MoshReImagineBundleSmoke is macOS-only (plutil/lipo on the .vst3 bundle) and is not
+  # configured on Linux. The [reimagine] Catch2 cases run in linux-x64's MoshTests.
+  reimagine-plugin:
+    needs: reimagine-changes
+    if: needs.reimagine-changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rewrite git SSH -> HTTPS (for the JUCE submodule)
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build pkg-config xvfb \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libasound2-dev libfreetype6-dev \
+            libx11-dev libxext-dev libxinerama-dev libxrandr-dev libxcursor-dev \
+            libxcomposite-dev libcurl4-openssl-dev
+
+      # Restore-only: linux-x64 owns saving this key, so the two jobs never race a save.
+      - name: Restore CPM/FetchContent cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cpm-cache
+          key: cpm-${{ runner.os }}-${{ github.repository }}-${{ hashFiles('patches/**') }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake', 'CMakeLists.txt') }}
+          restore-keys: |
+            cpm-${{ runner.os }}-${{ github.repository }}-${{ hashFiles('patches/**') }}-
+
+      - name: Purge a path-stale dep cache (self-heal)
+        run: |
+          f=.cpm-cache/_fc/tracktion_engine-subbuild/CMakeCache.txt
+          if [ -f "$f" ]; then
+            baked="$(sed -n 's/^CMAKE_CACHEFILE_DIR:INTERNAL=//p' "$f" | head -1)"
+            case "$baked" in
+              "$GITHUB_WORKSPACE"/*|"") : ;;
+              *) echo "stale .cpm-cache baked at '$baked' (!= $GITHUB_WORKSPACE) — purging"; rm -rf .cpm-cache ;;
+            esac
+          fi
+
+      - name: Configure (Re-Imagine plug-in ON)
+        run: |
+          cmake --preset linux-x64-debug \
+            -B build-linux-reimagine \
+            -DMOSH_BUILD_APP=OFF -DMOSH_BUILD_UI=OFF -DMOSH_BUILD_PLUGIN_FIXTURES=OFF \
+            -DMOSH_BUILD_REIMAGINE_PLUGIN=ON
+
+      - name: Build Re-Imagine VST3 + tests
+        run: |
+          cmake --build build-linux-reimagine --target \
+            MoshReImaginePlugin_VST3 MoshReImagineLoopE2E MoshReImagineEditorSmoke
+
+      - name: Run Re-Imagine plug-in tests (ctest, Xvfb)
+        run: xvfb-run -a ctest --test-dir build-linux-reimagine -R MoshReImagine --output-on-failure
