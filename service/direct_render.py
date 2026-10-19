@@ -19,6 +19,46 @@ class DirectRenderError(ValueError):
         super().__init__(reason)
 
 
+CHORD_TIMING_MAX_EVENTS = 64
+_CHORD_PROVENANCE = ("host", "user", "inferred", "unknown")
+
+
+def parse_chord_timing(value: Json) -> JsonMap | None:
+    """Validate the optional, additive ``chord_timing`` field.
+
+    The plug-in sends the user's timed chord list (bar 1 == the first sample of the
+    input) as structured data beside the prompt text. The service records it in the
+    render manifest; nothing here or in SA3 enforces harmony or change timing, so the
+    recorded copy always says ``enforced: False`` whatever the caller claimed.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise DirectRenderError("chord_timing must be an object")
+    if value.get("unit", "bar") != "bar" or value.get("origin", "region-start") != "region-start":
+        raise DirectRenderError("chord_timing must count bars from the region start")
+    provenance = value.get("provenance", "unknown")
+    if provenance not in _CHORD_PROVENANCE:
+        raise DirectRenderError("chord_timing provenance must be host, user, inferred or unknown")
+    events = value.get("events")
+    if not isinstance(events, list) or not events or len(events) > CHORD_TIMING_MAX_EVENTS:
+        raise DirectRenderError(f"chord_timing needs 1–{CHORD_TIMING_MAX_EVENTS} events")
+    parsed: list[Json] = []
+    previous = 0.0
+    for event in events:
+        if not isinstance(event, dict):
+            raise DirectRenderError("chord_timing events must be objects")
+        bar, symbol = event.get("bar"), event.get("symbol")
+        if type(bar) not in (int, float) or not math.isfinite(bar) or bar < 1 or bar <= previous:
+            raise DirectRenderError("chord_timing bars must be finite, >= 1 and increasing")
+        if not isinstance(symbol, str) or not 1 <= len(symbol) <= 16 or symbol[0] not in "ABCDEFG":
+            raise DirectRenderError("chord_timing symbols must be chord names")
+        previous = float(bar)
+        parsed.append({"bar": bar, "symbol": symbol})
+    return {"unit": "bar", "origin": "region-start", "provenance": provenance,
+            "events": parsed, "sent_as": "text-prompt+structured", "enforced": False}
+
+
 def fixture_enabled(adapter: str) -> bool:
     return adapter == "fake" and os.environ.get("MOSH_DIRECT_RENDER_TEST_FIXTURE") == "1"
 
@@ -31,6 +71,7 @@ class DirectRequest:
     output_wav: str
     manifest_path: str
     fixture: bool
+    chord_timing: JsonMap | None = None
 
     @classmethod
     def parse(cls, data: JsonMap) -> DirectRequest | None:
@@ -64,6 +105,7 @@ class DirectRequest:
             raise DirectRenderError("direct Re-Imagine requires one non-looping source clip")
         if not isinstance(params.get("colors", []), list) or not isinstance(params.get("loras", []), list):
             raise DirectRenderError("colors and loras must be selections")
+        chord_timing = parse_chord_timing(params.get("chord_timing"))
         source, output = data.get("inputWav"), data.get("outputWav")
         if not isinstance(source, str) or not source or not Path(source).is_file():
             raise DirectRenderError("inputWav must be a readable staged source")
@@ -76,7 +118,7 @@ class DirectRequest:
             raise DirectRenderError("source, output and manifest must use distinct paths")
         if Path(output).exists() or Path(manifest).exists():
             raise DirectRenderError("direct render requires fresh artifact paths")
-        return cls(request_id, source_sha, source, output, manifest, fixture)
+        return cls(request_id, source_sha, source, output, manifest, fixture, chord_timing)
 
     def verify_source(self) -> None:
         digest = hashlib.sha256()
@@ -107,3 +149,5 @@ class DirectRequest:
                 raise DirectRenderError("adapter returned truncated audio")
         manifest.update(request_id=self.request_id, source_sha256=self.source_sha256,
                         decision_policy="explicit", evaluation="disabled")
+        if self.chord_timing is not None:
+            manifest["chord_timing"] = self.chord_timing

@@ -26,9 +26,16 @@ target_sources(MoshReImaginePlugin PRIVATE
   ../ReImagineService.h
   ../ReImagineSession.cpp
   ../ReImagineSession.h
+  ../ReImagineConform.cpp
+  ../ReImagineConform.h
 )
 
 target_include_directories(MoshReImaginePlugin PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# Conform (ReImagineConform.cpp) compiles the SoundTouch sources vendored in Tracktion
+# Engine, the stretcher the main app's warp uses; the plug-in does not link the engine.
+target_include_directories(MoshReImaginePlugin PRIVATE
+  "${tracktion_engine_SOURCE_DIR}/modules/tracktion_engine/3rd_party/soundtouch/include"
+  "${tracktion_engine_SOURCE_DIR}/modules/tracktion_engine/3rd_party/soundtouch/source/SoundTouch")
 
 target_compile_definitions(MoshReImaginePlugin PUBLIC
   JUCE_WEB_BROWSER=0

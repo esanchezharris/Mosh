@@ -17,6 +17,7 @@ Run:  service/run.sh         # picks the MLX venv python when MOSH_ENABLE_SA3=1
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import itertools
 import json
 import ntpath
@@ -27,6 +28,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -1028,8 +1030,57 @@ def _create_training_job_record(data: dict, host: str) -> dict:
     }
 
 
+def _lan_allowed() -> bool:
+    return os.environ.get("MOSH_SERVICE_ALLOW_LAN", "") == "1"
+
+
+def _is_loopback_host(host: str) -> bool:
+    """True only for `localhost` or a literal loopback IP, with or without a port.
+
+    Parsed as an IP rather than prefix-matched, so a DNS-rebinding name such as
+    `127.0.0.1.attacker.example` is not mistaken for loopback."""
+    h = (host or "").strip().lower()
+    if h.startswith("["):  # [::1] or [::1]:8770
+        h = h[1:].split("]", 1)[0]
+    elif h.count(":") == 1:  # name:port or v4:port (a bare IPv6 has 2+ colons)
+        h = h.split(":", 1)[0]
+    if h == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+def _foreign_request_reason(headers) -> str:
+    """Why a request must be refused as not coming from this machine's own Mosh, or "".
+
+    Every native client (the app, the Re-Imagine plugin, the scripts) sends no Origin
+    and a loopback Host. A browser page that POSTs here cross-site always carries an
+    Origin, and a DNS-rebinding page carries its own name as Host; without this check
+    either could queue a render whose outputWav/manifest paths it chose."""
+    origin = headers.get("Origin")
+    if origin is not None:
+        try:
+            origin_host = urllib.parse.urlsplit(origin.strip()).netloc
+        except ValueError:
+            origin_host = ""
+        if not _is_loopback_host(origin_host):
+            return "cross-origin request refused"
+    if not _lan_allowed() and not _is_loopback_host(headers.get("Host", "")):
+        return "non-loopback Host refused (set MOSH_SERVICE_ALLOW_LAN=1 to opt in)"
+    return ""
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = f"MoshService/{SERVICE_VERSION}"
+
+    def _refuse_foreign(self) -> bool:
+        reason = _foreign_request_reason(self.headers)
+        if reason:
+            self._send(403, {"ok": False, "error": reason})
+            return True
+        return False
 
     def _send(self, code: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
@@ -1072,6 +1123,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         global _LAST_REQUEST_MONOTONIC
+        if self._refuse_foreign():
+            return
         _LAST_REQUEST_MONOTONIC = time.monotonic()
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
         query = {}
@@ -1242,6 +1295,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         global _LAST_REQUEST_MONOTONIC
+        if self._refuse_foreign():
+            return
         _LAST_REQUEST_MONOTONIC = time.monotonic()
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
         data = self._read_json()
@@ -1965,6 +2020,10 @@ def _idle_shutdown_loop(httpd: ThreadingHTTPServer, idle_seconds: float) -> None
 def main() -> int:
     host = os.environ.get("MOSH_SERVICE_HOST", "127.0.0.1")
     port = int(os.environ.get("MOSH_SERVICE_PORT", "8770"))
+    if not _is_loopback_host(host) and not _lan_allowed():
+        sys.stderr.write(f"[service] refusing to listen on non-loopback host {host!r}; "
+                         "audio stays local (set MOSH_SERVICE_ALLOW_LAN=1 to opt in)\n")
+        return 2
     threading.Thread(target=_worker_loop, daemon=True).start()
     threading.Thread(target=_training_worker_loop, daemon=True).start()
     if SA3_ENABLED and stable_audio3_adapter.backend_name() == "mlx":

@@ -117,6 +117,7 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineCore.cpp
     ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineService.cpp
     ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineSession.cpp
+    ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineConform.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
     test_combined_audio_device.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/CombinedAudioDevice.cpp
@@ -147,6 +148,10 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshXFeedbackDsp.cpp)
 
 target_include_directories(MoshTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# Re-Imagine conform compiles Tracktion's vendored SoundTouch (ReImagineConform.cpp).
+target_include_directories(MoshTests PRIVATE
+    "${tracktion_engine_SOURCE_DIR}/modules/tracktion_engine/3rd_party/soundtouch/include"
+    "${tracktion_engine_SOURCE_DIR}/modules/tracktion_engine/3rd_party/soundtouch/source/SoundTouch")
 
 target_compile_definitions(MoshTests PRIVATE
     JUCE_USE_CURL=0
