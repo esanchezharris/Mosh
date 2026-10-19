@@ -874,3 +874,179 @@ TEST_CASE ("Free audition: starts only with a version and never alongside host-s
     CHECK (a.advance (256, 0, false).count == 0);
     CHECK (a.lastStop() == AuditionStop::nothingLoaded);
 }
+
+// ── Cloud planner (opt-in) and controls touched ─────────────────────────────────
+namespace
+{
+juce::var plannerReply (const juce::String& prompt, double strength, int count)
+{
+    return juce::JSON::parse ("{\"ok\": true, \"plan\": {\"prompt\": " + juce::JSON::toString (prompt)
+                              + ", \"strength\": " + juce::String (strength) + ", \"candidate_count\": " + juce::String (count)
+                              + ", \"interpretation\": \"A sparser keys loop.\", \"unsupported\": [\"follow the chord changes exactly\"]},"
+                                " \"controller\": {\"plannerVersion\": \"reimagine-claude-planner/1\", \"provider\": \"anthropic\","
+                                " \"model\": \"claude-opus-5-5\", \"costUsd\": 0.0096}}");
+}
+
+CompiledRequest templated (int candidates)
+{
+    auto snapshot = eightBarSnapshot();
+    snapshot.context.key = "F minor";
+    snapshot.context.keyFrom = Provenance::user;
+    snapshot.context.chords = { { 1.0, "Fm7" }, { 3.0, "Db" } };
+    snapshot.context.chordsFrom = Provenance::user;
+    auto input = hazyKeys();
+    input.candidateCount = candidates;
+    auto compiled = compileIntention (input, snapshot, "int-1", {}, 0);
+    REQUIRE (compiled.request.has_value());
+    return *compiled.request;
+}
+}
+
+TEST_CASE ("Planner request carries text and context only", "[reimagine][session][planner]")
+{
+    auto snapshot = eightBarSnapshot();
+    snapshot.context.key = "F minor";
+    snapshot.context.keyFrom = Provenance::user;
+    snapshot.context.chords = { { 1.0, "Fm7" }, { 3.5, "Db" } };
+    snapshot.context.chordsFrom = Provenance::user;
+    snapshot.context.meterDenominator = 4;
+    snapshot.context.protectedChoices.add ("chord-change timing");
+    auto input = hazyKeys();
+    input.revision = "roughen the texture";
+    const auto body = plannerRequestBody (input, snapshot, 9);
+    const auto text = juce::JSON::toString (body);
+    CHECK (body["request"].toString() == input.request);
+    CHECK (body["revision"].toString() == "roughen the texture");
+    CHECK (static_cast<int> (body["limits"]["max_candidates"]) == kMaxCandidatesPerBatch);   // clamped
+    CHECK (body["context"]["meter"].toString() == "4/4");
+    CHECK (static_cast<double> (body["context"]["bpm"]) == Catch::Approx (90.0));
+    CHECK (body["context"]["chords"].size() == 2);
+    CHECK (static_cast<double> (body["context"]["chords"][1]["bar"]) == Catch::Approx (3.5));
+    CHECK (body["input_role"].toString() == "source");
+    CHECK (static_cast<double> (body["input_seconds"]) == Catch::Approx (static_cast<double> (snapshot.frames) / 48000.0));
+    CHECK_FALSE (text.contains (snapshot.sourceHash));                     // no hashes
+    CHECK_FALSE (text.contains ("inst-1"));                                // no instance or region ids
+    CHECK_FALSE (text.contains ("region-1"));
+
+    snapshot.context.bpm.reset();
+    CHECK_FALSE (plannerRequestBody (input, snapshot, 2)["context"].hasProperty ("bpm"));   // unknown stays absent
+}
+
+TEST_CASE ("Planner replies are parsed, refusals keep their reason", "[reimagine][session][planner]")
+{
+    juce::String reason, message;
+    auto plan = parsePlannerReply (plannerReply ("worn tape keys", 0.3, 1), reason, message);
+    REQUIRE (plan.has_value());
+    CHECK (plan->prompt == "worn tape keys");
+    CHECK (plan->strength == Catch::Approx (0.3f));
+    CHECK (plan->candidateCount == 1);
+    CHECK (plan->unsupported.size() == 1);
+    CHECK (plan->controller["model"].toString() == "claude-opus-5-5");
+
+    CHECK_FALSE (parsePlannerReply (juce::JSON::parse ("{\"ok\": false, \"reason\": \"budget\", \"error\": \"cap reached\"}"),
+                                    reason, message));
+    CHECK (reason == "budget");
+    CHECK (message == "cap reached");
+    CHECK_FALSE (parsePlannerReply ({}, reason, message));
+    CHECK (reason == "unreachable");
+    CHECK_FALSE (parsePlannerReply (juce::JSON::parse ("{\"ok\": true, \"plan\": {\"prompt\": 5}}"), reason, message));
+    CHECK (reason == "invalid-plan");
+}
+
+TEST_CASE ("A plan rewrites prompt, strength and count within the template's budget", "[reimagine][session][planner]")
+{
+    const auto base = templated (2);
+    juce::String reason, message;
+    const auto plan = parsePlannerReply (plannerReply ("hazy sampled keyboard loop, worn tape", 0.3, 1), reason, message);
+    REQUIRE (plan.has_value());
+    const auto applied = applyPlannerPlan (base, *plan);
+    REQUIRE (applied.request.has_value());
+    const auto& r = *applied.request;
+    CHECK (r.controller == "cloud-planner");
+    CHECK (r.templateVersion == "reimagine-claude-planner/1");
+    CHECK (r.prompt == "hazy sampled keyboard loop, worn tape");
+    CHECK (r.strength == Catch::Approx (0.3f));
+    REQUIRE (r.seeds.size() == 1);
+    CHECK (r.seeds[0] == base.seeds[0]);
+    CHECK (r.chordTiming.size() == 2);                                     // structured timing still sent
+    CHECK (applied.warnings.joinIntoString ("|").contains ("Not enforced: follow the chord changes exactly"));
+    bool controllerRow = false;
+    for (const auto& entry : r.conditioning)
+    {
+        if (entry.field == "controller")
+            controllerRow = entry.sentAs == "cloud-text" && ! entry.enforced && entry.note.contains ("never received audio");
+        if (entry.field == "key")
+            CHECK (entry.sentAs == "planner-text");
+        if (entry.field == "chords")
+            CHECK_FALSE (entry.enforced);
+    }
+    CHECK (controllerRow);
+    const auto stored = compiledRequestToVar (r);
+    CHECK (stored["controller"].toString() == "cloud-planner");
+    CHECK (stored["controllerRecord"]["provider"].toString() == "anthropic");
+    CHECK (stored["unsupported"].size() == 1);
+    CHECK (validateRequest (r).isEmpty());
+}
+
+TEST_CASE ("Plans that do not fit are refused, and the template says why", "[reimagine][session][planner]")
+{
+    const auto base = templated (2);
+    juce::String reason, message;
+    auto tooMany = parsePlannerReply (plannerReply ("keys", 0.3, 3), reason, message);
+    REQUIRE (tooMany.has_value());
+    CHECK_FALSE (applyPlannerPlan (base, *tooMany).request.has_value());   // never above the reserved budget
+    auto strong = parsePlannerReply (plannerReply ("keys", 0.9, 1), reason, message);
+    CHECK_FALSE (applyPlannerPlan (base, *strong).request.has_value());
+    auto empty = parsePlannerReply (plannerReply ("   ", 0.3, 1), reason, message);
+    CHECK_FALSE (applyPlannerPlan (base, *empty).request.has_value());
+    auto longPrompt = parsePlannerReply (plannerReply (juce::String::repeatedString ("x", kMaxPromptChars + 1), 0.3, 1),
+                                         reason, message);
+    CHECK_FALSE (applyPlannerPlan (base, *longPrompt).request.has_value());
+
+    auto fallback = base;
+    notePlannerUnavailable (fallback, "disabled", "no opt-in");
+    CHECK (fallback.controller == "template");
+    CHECK (fallback.prompt == base.prompt);
+    const auto stored = compiledRequestToVar (fallback);
+    CHECK (stored["controller"].toString().startsWith ("template-only"));
+    CHECK (stored["controllerRecord"]["reason"].toString() == "disabled");
+    CHECK_FALSE (static_cast<bool> (stored["controllerRecord"]["used"]));
+}
+
+TEST_CASE ("Controls touched counts each changed setting once", "[reimagine][session][controls]")
+{
+    SessionContext context;
+    auto input = hazyKeys();
+    input.strength = 0.4f;
+    input.baseSeed = 0;                          // the editor's defaults
+    const auto first = controlStateFor (input, context, true);
+    // From the defaults, typing the request is one control.
+    CHECK (changedControls (ControlState {}, first) == juce::StringArray ({ "prompt" }));
+    CHECK (changedControls (first, first).isEmpty());
+
+    auto next = input;
+    next.revision = "roughen it";
+    next.strength = 0.3f;
+    next.useCloudPlanner = true;
+    context.key = "F minor";
+    context.keyFrom = Provenance::user;
+    const auto touched = changedControls (first, controlStateFor (next, context, false));
+    CHECK (touched == juce::StringArray ({ "strength", "revision", "from-selected-audio", "cloud-planner", "context-key" }));
+
+    SessionContext hostOnly;                     // host-filled values are not user controls
+    hostOnly.key = "C major";
+    hostOnly.keyFrom = Provenance::host;
+    CHECK (changedControls (first, controlStateFor (input, hostOnly, true)).isEmpty());
+}
+
+TEST_CASE ("The cloud-planner switch is stored with the Set and defaults off", "[reimagine][session][planner][state]")
+{
+    PluginStateV1 state;
+    state.cloudPlanner = true;
+    const auto back = deserializeState (serializeState (state));
+    REQUIRE (back.has_value());
+    CHECK (back->cloudPlanner);
+    const auto legacy = deserializeState ("{\"schemaVersion\": 1, \"regions\": []}");
+    REQUIRE (legacy.has_value());
+    CHECK_FALSE (legacy->cloudPlanner);
+}

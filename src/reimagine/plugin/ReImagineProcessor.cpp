@@ -45,15 +45,27 @@ ReImagineProcessor::~ReImagineProcessor()
 
 void ReImagineProcessor::prepareToPlay (double sampleRate, int)
 {
-    const auto channels = getTotalNumInputChannels();
-    currentSampleRate.store (sampleRate, std::memory_order_release);
-    currentChannels.store (channels, std::memory_order_release);
-    const auto maximum = static_cast<int> (std::ceil (sampleRate * 240.0));
-    captureBuffer.setSize (channels, maximum, false, true, false);
-    captureBuffer.clear();
-    transfer.prepare (sampleRate, channels, 240.0);
-    transferStateMirror.store (static_cast<int> (CaptureState::idle), std::memory_order_release);
-    captureWriteOffset.store (0, std::memory_order_release);
+    {
+        // R1 review P2: a Transfer that just stopped may still be waiting for the worker,
+        // or being written by it, from captureBuffer. A host re-prepares on a rate/buffer
+        // change, a device switch or a freeze. Hold the capture lock (a running write
+        // finishes first) and save a Transfer the worker has not started (it may be busy
+        // generating) before the buffer and the rate change under it.
+        const juce::ScopedLock capture (captureFinalizeLock);
+        if (finalizeRequested.exchange (0, std::memory_order_acq_rel) != 0)
+            finalizeCapture();
+        finalizationPending.store (0, std::memory_order_release);
+
+        const auto channels = getTotalNumInputChannels();
+        currentSampleRate.store (sampleRate, std::memory_order_release);
+        currentChannels.store (channels, std::memory_order_release);
+        const auto maximum = static_cast<int> (std::ceil (sampleRate * 240.0));
+        captureBuffer.setSize (channels, maximum, false, true, false);
+        captureBuffer.clear();
+        transfer.prepare (sampleRate, channels, 240.0);
+        transferStateMirror.store (static_cast<int> (CaptureState::idle), std::memory_order_release);
+        captureWriteOffset.store (0, std::memory_order_release);
+    }
     loadRequested.store (1, std::memory_order_release);
     workerEvent.signal();
 }
@@ -477,6 +489,12 @@ void ReImagineProcessor::setLabEnabled (bool enabled)
 {
     const juce::ScopedLock lock (stateLock);
     pluginState.labEnabled = enabled;
+}
+
+void ReImagineProcessor::setCloudPlannerEnabled (bool enabled)
+{
+    const juce::ScopedLock lock (stateLock);
+    pluginState.cloudPlanner = enabled;
 }
 
 PluginStateV1 ReImagineProcessor::stateSnapshot() const
@@ -912,10 +930,15 @@ void ReImagineProcessor::run()
             if (reported)
                 uiStatus = "Tempo map changed - region is stale; Re-transfer required";
         }
-        if (finalizeRequested.exchange (0, std::memory_order_acq_rel) != 0)
         {
-            finalizeCapture();
-            finalizationPending.store (0, std::memory_order_release);
+            // Taken before the flag, so prepareToPlay either finalizes this Transfer itself
+            // or waits for this write to finish (R1 review P2).
+            const juce::ScopedLock capture (captureFinalizeLock);
+            if (finalizeRequested.exchange (0, std::memory_order_acq_rel) != 0)
+            {
+                finalizeCapture();
+                finalizationPending.store (0, std::memory_order_release);
+            }
         }
         if (loadRequested.exchange (0, std::memory_order_acq_rel) != 0)
             loadSelectedTake();
@@ -1152,7 +1175,10 @@ juce::StringArray ReImagineProcessor::enqueueBatch (IntentionInput input, bool r
             input.request = intention.request;
     }
 
-    // Header-only read of the audio that will be sent (message thread; no decode).
+    // Header-only read of the audio that will be sent (message thread; no decode). The
+    // file is only named by a digest (AssetStore); the worker verifies its content.
+    if (! isSha256Hex (inputHash))
+        return refuse ({ "Input audio is missing - Relink or Re-transfer" });
     const auto inputFile = inputRole == "source" ? assets.sourceFile (inputHash) : assets.renderFile (inputHash);
     juce::AudioFormatManager formats;
     formats.registerBasicFormats();
@@ -1188,6 +1214,10 @@ juce::StringArray ReImagineProcessor::enqueueBatch (IntentionInput input, bool r
     batch.request = *compiled.request;
     batch.snapshot = snapshot;
     batch.adapter = juce::SystemStats::getEnvironmentVariable ("MOSH_REIMAGINE_ADAPTER", "stable_audio3");
+    batch.input = input;
+    batch.requestedAtMs = juce::Time::getMillisecondCounterHiRes();
+    const auto controls = controlStateFor (input, context, fromSelectedAudio);
+    juce::StringArray touched;
     {
         const juce::ScopedLock lock (stateLock);
         const auto* current = selectedRegionUnsafe();
@@ -1206,6 +1236,8 @@ juce::StringArray ReImagineProcessor::enqueueBatch (IntentionInput input, bool r
         if (intention.snapshot.isVoid())
             intention.snapshot = snapshotToVar (snapshot);
         storeIntentionUnsafe (intention);
+        touched = changedControls (lastRequestControls.value_or (ControlState {}), controls);
+        lastRequestControls = controls;
         pendingBatch = batch;
         uiStatus = "Generating " + juce::String (static_cast<int> (batch.request.seeds.size()))
                  + (revision ? " revision(s)" : " candidate(s)") + " - attempts "
@@ -1220,6 +1252,11 @@ juce::StringArray ReImagineProcessor::enqueueBatch (IntentionInput input, bool r
     payload->setProperty ("compiled", compiledRequestToVar (*compiled.request));
     payload->setProperty ("warnings", juce::var (compiled.warnings));
     payload->setProperty ("adapter", batch.adapter);
+    payload->setProperty ("cloudPlannerRequested", input.useCloudPlanner);
+    // Settings changed since this instance's previous request (each control once);
+    // docs/reimagine-plugin/M1-GARY-COMPARISON.md compares this with direct use of Gary.
+    payload->setProperty ("controlsTouched", touched.size());
+    payload->setProperty ("controls", juce::var (touched));
     logEvent (revision ? "revision.requested" : "intention.compiled", "explicit", juce::var (payload));
     batchRequested.store (1, std::memory_order_release);
     workerEvent.signal();
@@ -1244,7 +1281,68 @@ void ReImagineProcessor::cancelGeneration()
     logEvent ("generation.cancel-requested", "explicit", {});
 }
 
-void ReImagineProcessor::performBatch (const GenerationBatch& batch)
+void ReImagineProcessor::planBatch (GenerationBatch& batch)
+{
+    // One opt-in cloud call (service/reimagine_planner.py) rewrites the template request's
+    // prompt, strength and count. It receives text and context only, never audio. When it
+    // is off, over budget, unreachable or returns an unusable plan, the template request
+    // stands and the report says why; that is a local fallback, never another provider.
+    setStatus ("Planning with the cloud planner (your text and context, no audio)...");
+    const auto started = juce::Time::getMillisecondCounterHiRes();
+    const auto reply = service.plan (plannerRequestBody (batch.input, batch.snapshot,
+                                                         static_cast<int> (batch.request.seeds.size())));
+    const auto plannerSeconds = (juce::Time::getMillisecondCounterHiRes() - started) / 1000.0;
+    juce::String reason, message;
+    auto plan = parsePlannerReply (reply, reason, message);
+    juce::StringArray notEnforced;
+    if (plan)
+    {
+        auto applied = applyPlannerPlan (batch.request, *plan);
+        if (applied.request)
+        {
+            batch.request = *applied.request;
+            notEnforced = applied.warnings;
+        }
+        else
+        {
+            reason = "invalid-plan";
+            message = applied.errors.joinIntoString ("; ");
+            plan.reset();
+        }
+    }
+    if (! plan)
+        notePlannerUnavailable (batch.request, reason, message);
+
+    auto* payload = new juce::DynamicObject();
+    payload->setProperty ("intentionId", batch.request.intentionId);
+    payload->setProperty ("snapshotId", batch.snapshot.id);
+    payload->setProperty ("used", plan.has_value());
+    payload->setProperty ("plannerSeconds", plannerSeconds);
+    payload->setProperty ("controller", reply.getProperty ("controller", {}));   // tokens and cost, failures included
+    payload->setProperty ("budget", reply.getProperty ("budget", {}));
+    if (plan)
+    {
+        payload->setProperty ("prompt", batch.request.prompt);
+        payload->setProperty ("strength", static_cast<double> (batch.request.strength));
+        payload->setProperty ("candidates", static_cast<int> (batch.request.seeds.size()));
+        payload->setProperty ("interpretation", batch.request.interpretation);
+        payload->setProperty ("unsupported", juce::var (batch.request.unsupported));
+    }
+    else
+    {
+        payload->setProperty ("reason", reason);
+        payload->setProperty ("error", message);
+    }
+    logEvent (plan ? "controller.planned" : "controller.plan-unavailable", "system", juce::var (payload));
+    if (plan)
+        setStatus ("Planned by " + reply.getProperty ("controller", {}).getProperty ("model", "the cloud planner").toString()
+                   + ": " + juce::String (static_cast<int> (batch.request.seeds.size())) + " candidate(s)"
+                   + (notEnforced.isEmpty() ? juce::String() : " - " + notEnforced.joinIntoString ("; ")));
+    else
+        setStatus ("Cloud planner not used (" + reason + ": " + message + ") - generating from the template");
+}
+
+void ReImagineProcessor::performBatch (GenerationBatch batch)
 {
     struct ActiveScope
     {
@@ -1295,6 +1393,12 @@ void ReImagineProcessor::performBatch (const GenerationBatch& batch)
         payload->setProperty ("error", error);
         logEvent ("generation.unavailable", "system", juce::var (payload));
         return setStatus ("Local helper unavailable - " + error + " (no attempts spent, no remote fallback)");
+    }
+    if (batch.input.useCloudPlanner)
+    {
+        planBatch (batch);
+        if (batchCancelled (batch.id) || threadShouldExit())
+            return setStatus ("Generation cancelled while planning (a finished planner call is still billed)");
     }
     const auto input = batch.snapshot.inputRole == "source" ? assets.sourceFile (batch.snapshot.inputHash)
                                                              : assets.renderFile (batch.snapshot.inputHash);
@@ -1474,6 +1578,7 @@ void ReImagineProcessor::performBatch (const GenerationBatch& batch)
             m1->setProperty ("checks", technicalReportToVar (report));
             m1->setProperty ("tempoConformance", tempoConformanceToVar (tempo));
             m1->setProperty ("request", compiledRequestToVar (batch.request));
+            m1->setProperty ("secondsSinceRequest", (juce::Time::getMillisecondCounterHiRes() - batch.requestedAtMs) / 1000.0);
         }
 
         bool published = false;
@@ -1514,6 +1619,13 @@ void ReImagineProcessor::performBatch (const GenerationBatch& batch)
         payload->setProperty ("checks", technicalReportToVar (report));
         payload->setProperty ("tempoConformance", tempoConformanceToVar (tempo));
         payload->setProperty ("testFixture", fixture);
+        payload->setProperty ("controller", batch.request.controller);
+        // From pressing Generate/Revise to this version being auditionable; the first one of
+        // a batch is the comparison's "time to first candidate".
+        const auto sinceRequest = (juce::Time::getMillisecondCounterHiRes() - batch.requestedAtMs) / 1000.0;
+        payload->setProperty ("secondsSinceRequest", sinceRequest);
+        if (produced.size() == 1)   // this version was just added
+            payload->setProperty ("firstCandidateSeconds", sinceRequest);
         const juce::var presented (payload);   // one owner: the object is ref-counted
         logAttempt (index, "ok", label, seconds, presented);
         logEvent ("version.presented", "implicit", presented);
@@ -1669,6 +1781,28 @@ juce::String ReImagineProcessor::selectedReport() const
                 lines.add ("Revisions: " + intention.revisions.joinIntoString (" / ").substring (0, 110));
         }
     const auto m1 = found->manifest.getProperty ("m1", {});
+    if (const auto request = m1.getProperty ("request", {}); request.isObject())
+    {
+        const auto record = request.getProperty ("controllerRecord", {});
+        if (request.getProperty ("controller", {}).toString() == "cloud-planner")
+        {
+            const auto cost = static_cast<double> (record.getProperty ("costUsd", 0.0));
+            lines.add ("Prompt by: " + record.getProperty ("model", "cloud planner").toString() + " ($"
+                       + juce::String (cost, 4) + ", text only - it never heard the audio): "
+                       + request.getProperty ("interpretation", {}).toString().substring (0, 120));
+            if (const auto* unsupported = request.getProperty ("unsupported", {}).getArray(); unsupported != nullptr && ! unsupported->isEmpty())
+            {
+                juce::StringArray items;
+                for (const auto& item : *unsupported)
+                    items.add (item.toString());
+                lines.add ("Planner: not enforceable - " + items.joinIntoString ("; ").substring (0, 160));
+            }
+        }
+        else if (static_cast<bool> (record.getProperty ("requested", false)))
+            lines.add ("Prompt by: template (cloud planner not used: " + record.getProperty ("reason", {}).toString() + ")");
+        else
+            lines.add ("Prompt by: template (your text verbatim plus context; no language model)");
+    }
     if (auto* warnings = m1.getProperty ("checks", {}).getProperty ("warnings", {}).getArray(); warnings != nullptr && ! warnings->isEmpty())
     {
         juce::StringArray w;

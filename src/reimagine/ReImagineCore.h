@@ -180,6 +180,9 @@ struct PluginStateV1
     juce::String selectedRegionId;
     RackSettings rack;
     bool labEnabled = false;
+    // Additive (M1): the "Claude writes the prompt" switch (opt-in cloud planner). Older
+    // states load with it off.
+    bool cloudPlanner = false;
     float mix = 1.0f;
     std::vector<TransferRegion> regions;
     // Additive (M1): intention records with attempt budgets (ReImagineSession.h

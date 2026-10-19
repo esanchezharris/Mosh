@@ -115,6 +115,72 @@ struct FakePlayHead final : juce::AudioPlayHead
     }
 };
 
+// Host timing from an exact sample counter, 120 BPM 4/4 (a ppq accumulated in floating
+// point drifts by a sample, and a Transfer correctly aborts on that discontinuity).
+struct SamplePlayHead final : juce::AudioPlayHead
+{
+    explicit SamplePlayHead (double r) : rate (r) {}
+    double rate;
+    bool playing = false;
+    bool looping = false;
+    int64_t samples = 0;
+    juce::Optional<PositionInfo> getPosition() const override
+    {
+        PositionInfo info;
+        info.setBpm (120.0);
+        info.setTimeSignature (TimeSignature { 4, 4 });
+        info.setPpqPosition (static_cast<double> (samples) * 2.0 / rate);
+        info.setTimeInSamples (samples);
+        info.setIsPlaying (playing);
+        info.setIsLooping (looping);
+        return info;
+    }
+};
+
+bool writeToneWav (const juce::File& file, double rate, double seconds)
+{
+    const auto frames = static_cast<int> (seconds * rate);
+    juce::AudioBuffer<float> audio (2, frames);
+    for (int i = 0; i < frames; ++i)
+    {
+        const auto t = static_cast<double> (i) / rate;
+        const auto v = static_cast<float> (0.3 * std::sin (juce::MathConstants<double>::twoPi * 330.0 * t)
+                                           + 0.1 * std::sin (juce::MathConstants<double>::twoPi * 0.5 * t));
+        audio.setSample (0, i, v);
+        audio.setSample (1, i, -v);
+    }
+    juce::WavAudioFormat wav;
+    std::unique_ptr<juce::OutputStream> stream (file.createOutputStream().release());
+    auto writer = stream ? wav.createWriterFor (stream, juce::AudioFormatWriterOptions().withSampleRate (rate)
+                                                            .withNumChannels (2).withBitsPerSample (24))
+                         : nullptr;
+    return writer != nullptr && writer->writeFromAudioSampleBuffer (audio, 0, frames);
+}
+
+// Plays [from, from + length) of the host timeline through `p` in blocks of `block`
+// samples with silent input, writing each output sample at its timeline index in `out`.
+void playRange (ReImagineProcessor& p, SamplePlayHead& head, int64_t from, int64_t length, int block,
+                std::vector<float>& left, std::vector<float>& right, int64_t origin)
+{
+    juce::AudioBuffer<float> buffer (2, block);
+    juce::MidiBuffer midi;
+    head.playing = true;
+    for (int64_t done = 0; done < length; done += block)
+    {
+        const auto n = static_cast<int> (std::min<int64_t> (block, length - done));
+        buffer.setSize (2, n, false, false, true);
+        buffer.clear();
+        head.samples = from + done;
+        p.processBlock (buffer, midi);
+        for (int i = 0; i < n; ++i)
+        {
+            const auto index = static_cast<size_t> (from + done + i - origin);
+            left[index] = buffer.getSample (0, i);
+            right[index] = buffer.getSample (1, i);
+        }
+    }
+}
+
 float processPeak (ReImagineProcessor& p, int blockSamples = 512)
 {
     juce::AudioBuffer<float> buffer (2, blockSamples);
@@ -359,6 +425,167 @@ int main (int argc, char** argv)
         c->setPlayHead (nullptr);
     }
 
+    std::cout << "transfer survives a host re-prepare (R1 P2)\n";
+    for (int round = 0; round < 5; ++round)
+    {
+        auto t = std::make_unique<ReImagineProcessor>();
+        SamplePlayHead head (48000.0);
+        t->setPlayHead (&head);
+        t->prepareToPlay (48000.0, 512);
+        processPeak (*t);
+        t->toggleTransfer();
+        processPeak (*t);                                   // armed while stopped
+        head.playing = true;
+        head.samples = static_cast<int64_t> (8 + round) * 24000;
+        const int blocks = 200;                             // ~2.1 s
+        juce::AudioBuffer<float> block (2, 512);
+        juce::MidiBuffer midi;
+        for (int b = 0; b < blocks; ++b)
+        {
+            for (int i = 0; i < 512; ++i)
+            {
+                const auto v = 0.25f * std::sin (juce::MathConstants<float>::twoPi * 220.0f
+                                                 * static_cast<float> (b * 512 + i) / 48000.0f);
+                block.setSample (0, i, v);
+                block.setSample (1, i, v);
+            }
+            t->processBlock (block, midi);
+            head.samples += 512;
+        }
+        head.playing = false;
+        processPeak (*t);                                   // the stop requests the WAV write
+        t->prepareToPlay (44100.0, 256);                    // the host re-prepares at once
+        waitFor ([&] { return ! t->stateSnapshot().regions.empty(); }, 10.0);
+        const auto state = t->stateSnapshot();
+        bool intact = false;
+        juce::String detail = t->statusText();
+        if (! state.regions.empty())
+        {
+            juce::AudioFormatManager formats;
+            formats.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> r (formats.createReaderFor (
+                home.getChildFile ("Library/Mosh/ReImagine/assets/sources/" + state.regions.front().sourceHash + ".wav")));
+            intact = r != nullptr && r->sampleRate == 48000.0 && r->lengthInSamples == static_cast<juce::int64> (blocks) * 512;
+            detail = r ? juce::String (r->sampleRate) + " Hz, " + juce::String (r->lengthInSamples) + " frames" : "unreadable";
+        }
+        check (intact, "round " + juce::String (round + 1) + ": the Transfer is saved whole at the rate it was captured: " + detail);
+        t->setPlayHead (nullptr);
+    }
+
+    std::cout << "host-synced playback: sample rates, block sizes, seeks, loop wrap\n";
+    for (const double rate : { 44100.0, 48000.0, 96000.0 })
+    {
+        const auto tone = home.getChildFile ("tone-" + juce::String (static_cast<int> (rate)) + ".wav");
+        writeToneWav (tone, rate, 4.0);                     // 8 beats at 120 BPM
+        auto pb = std::make_unique<ReImagineProcessor>();
+        SamplePlayHead head (rate);
+        pb->setPlayHead (&head);
+        pb->prepareToPlay (rate, 512);
+        processPeak (*pb);                                  // learns the (stopped) host position
+        pb->importTakeFromFile (tone, 2.0);                 // region: ppq 4..12
+        const auto label = juce::String (rate / 1000.0, 1) + " kHz";
+        check (waitFor ([&] { return takeCount (*pb) == 1 && pb->statusText().contains ("loaded"); }, 10.0),
+               label + ": import loads under host timing: " + pb->statusText());
+        // Timeline from ppq 2 to ppq 14: two beats of silence either side of the region.
+        const auto origin = static_cast<int64_t> (rate);           // ppq 2
+        const auto total = static_cast<int64_t> (6.0 * rate);      // 12 beats
+        const auto regionStart = static_cast<int64_t> (2.0 * rate), regionEnd = static_cast<int64_t> (6.0 * rate);
+        std::vector<float> refL (static_cast<size_t> (total)), refR (static_cast<size_t> (total));
+        playRange (*pb, head, origin, total, 2048, refL, refR, origin);
+
+        double outside = 0.0, inside = 0.0;
+        for (int64_t i = 0; i < total; ++i)
+        {
+            const auto timeline = origin + i;
+            const auto v = std::abs (refL[static_cast<size_t> (i)]);
+            if (timeline < regionStart || timeline >= regionEnd)
+                outside = std::max (outside, static_cast<double> (v));
+            else
+                inside = std::max (inside, static_cast<double> (v));
+        }
+        check (outside == 0.0 && inside > 0.2, label + ": the version plays inside its region only (peak inside "
+               + juce::String (inside, 3) + ", outside " + juce::String (outside, 6) + ")");
+        {
+            // Sample-accurate alignment against the tone itself, away from the 10 ms edge
+            // fades: a one-sample offset at 330 Hz is an error of ~0.01, far above 24-bit noise.
+            double worst = 0.0;
+            for (auto t = regionStart + static_cast<int64_t> (0.1 * rate); t < regionEnd - static_cast<int64_t> (0.1 * rate); t += 997)
+            {
+                const auto k = static_cast<double> (t - regionStart) / rate;
+                const auto expected = 0.3 * std::sin (juce::MathConstants<double>::twoPi * 330.0 * k)
+                                    + 0.1 * std::sin (juce::MathConstants<double>::twoPi * 0.5 * k);
+                worst = std::max (worst, std::abs (refL[static_cast<size_t> (t - origin)] - expected));
+                worst = std::max (worst, std::abs (refR[static_cast<size_t> (t - origin)] + expected));
+            }
+            check (worst < 2.0e-5, label + ": region audio is sample-aligned with the version (max error "
+                   + juce::String (worst, 7) + ")");
+        }
+
+        const auto compare = [&] (const std::vector<float>& l, const std::vector<float>& r, int64_t from, int64_t length)
+        {
+            double worst = 0.0;
+            for (int64_t i = from - origin; i < from - origin + length; ++i)
+            {
+                worst = std::max (worst, static_cast<double> (std::abs (l[static_cast<size_t> (i)] - refL[static_cast<size_t> (i)])));
+                worst = std::max (worst, static_cast<double> (std::abs (r[static_cast<size_t> (i)] - refR[static_cast<size_t> (i)])));
+            }
+            return worst;
+        };
+        for (const int block : { 32, 128, 441, 512, 4096 })
+        {
+            std::vector<float> l (refL.size()), r (refR.size());
+            playRange (*pb, head, origin, total, block, l, r, origin);
+            check (compare (l, r, origin, total) < 1.0e-6, label + ", block " + juce::String (block)
+                   + ": output matches the reference sample for sample");
+        }
+        {
+            // Seeks: start mid-region at unaligned positions, and across each region edge.
+            std::vector<float> l (refL.size()), r (refR.size());
+            double worst = 0.0;
+            for (const double seconds : { 2.3719, 3.0, 4.99991, 1.95, 5.97 })
+            {
+                const auto at = static_cast<int64_t> (seconds * rate);
+                playRange (*pb, head, at, 3000, 256, l, r, origin);
+                worst = std::max (worst, compare (l, r, at, 3000));
+            }
+            check (worst < 1.0e-6, label + ": seeks land on the same samples as continuous play");
+        }
+        {
+            // Loop wrap: play a 1-beat loop inside the region three times; each pass repeats
+            // the reference exactly (no stale position, no click from the wrap itself).
+            std::vector<float> l (refL.size()), r (refR.size());
+            const auto loopStart = static_cast<int64_t> (3.25 * rate), loopLength = static_cast<int64_t> (0.5 * rate);
+            head.looping = true;
+            double worst = 0.0;
+            for (int pass = 0; pass < 3; ++pass)
+            {
+                playRange (*pb, head, loopStart, loopLength, 300, l, r, origin);
+                worst = std::max (worst, compare (l, r, loopStart, loopLength));
+            }
+            head.looping = false;
+            check (worst < 1.0e-6, label + ": loop wraps repeat the region exactly");
+        }
+        head.playing = false;
+        processPeak (*pb);
+        pb->setPlayHead (nullptr);
+    }
+
+    // Cloud planner: off until the opt-in file exists; its "python" is a stand-in script
+    // that records what it was sent and answers with a canned plan (no network, no key).
+    const auto plannerEnv = home.getChildFile ("planner/reimagine-planner.env");
+    const auto plannerInput = home.getChildFile ("planner/received.json");
+    const auto plannerStandIn = home.getChildFile ("planner/fake-python");
+    plannerEnv.getParentDirectory().createDirectory();
+    plannerStandIn.replaceWithText ("#!/bin/sh\ncat > '" + plannerInput.getFullPathName() + "'\n"
+        "printf '%s' '{\"plan\": {\"prompt\": \"hazy sampled keyboard loop, worn tape, sparse voicings\", "
+        "\"strength\": 0.3, \"candidate_count\": 1, \"interpretation\": \"A sparser tape-worn keys loop.\", "
+        "\"unsupported\": [\"follow the chord changes exactly\"]}, \"usage\": {\"input_tokens\": 900, "
+        "\"output_tokens\": 300}, \"model\": \"claude-opus-5-5\", \"request_id\": \"req_e2e\", "
+        "\"stop_reason\": \"end_turn\"}'\n", false, false, "\n");   // LF: a CRLF shebang does not run
+    plannerStandIn.setExecutePermission (true);
+    setEnv ("MOSH_REIMAGINE_PLANNER_ENV", plannerEnv.getFullPathName());
+    setEnv ("MOSH_REIMAGINE_PLANNER_PYTHON", plannerStandIn.getFullPathName());
+
     std::cout << "helper up (TEST FIXTURE adapter)\n";
     juce::ChildProcess helper;
     if (! helper.start (juce::StringArray { "python3", server.getFullPathName() }, 0))
@@ -484,6 +711,55 @@ int main (int argc, char** argv)
             check (xs.regions.front().takes[1].manifest["m1"]["requestId"].toString()
                        .startsWith (lineageOf (xs.regions.front().takes[1]).intentionId), "request ids are bound to the intention");
         }
+    }
+
+    std::cout << "cloud planner (stand-in subprocess, no network)\n";
+    {
+        auto q = importedProcessor (source);
+        q->setSelectedContext ("F minor", "1:Fm7 2:Db", "Verse", "chord-change timing");
+        auto planned = request (2, 300);
+        planned.useCloudPlanner = true;
+        runGeneration (*q, [&] { return q->generateCandidates (planned); }, 3);
+        auto qs = q->stateSnapshot();
+        check (takeCount (*q) == 3, "planner off: the template still renders both candidates: " + q->statusText());
+        if (takeCount (*q) == 3)
+        {
+            const auto req = qs.regions.front().takes[1].manifest["m1"]["request"];
+            check (req["controller"].toString().startsWith ("template") && req["controllerRecord"]["reason"].toString() == "disabled",
+                   "planner off: the template is used and the reason is recorded");
+            check (q->selectedReport().contains ("cloud planner not used: disabled"), "report says why the planner was not used");
+        }
+        check (! plannerInput.existsAsFile(), "planner off: nothing is sent");
+
+        plannerEnv.replaceWithText ("MOSH_REIMAGINE_PLANNER=anthropic\nANTHROPIC_API_KEY=sk-e2e-not-real\n");
+        runGeneration (*q, [&] { return q->generateCandidates (planned); }, 4);
+        qs = q->stateSnapshot();
+        check (takeCount (*q) == 4, "planner on: its plan (1 candidate) is rendered: " + q->statusText());
+        if (takeCount (*q) == 4)
+        {
+            const auto req = qs.regions.front().takes[3].manifest["m1"]["request"];
+            check (req["controller"].toString() == "cloud-planner" && req["prompt"].toString().contains ("worn tape")
+                       && std::abs (static_cast<double> (req["strength"]) - 0.3) < 1.0e-6 && req["seeds"].size() == 1,
+                   "the planner's prompt, strength and count reach the render request");
+            check (req["controllerRecord"]["model"].toString() == "claude-opus-5-5"
+                       && static_cast<double> (req["controllerRecord"]["costUsd"]) > 0.0,
+                   "controller provenance and cost are stored with the version");
+            check (q->selectedReport().contains ("Prompt by: claude-opus-5-5") && q->selectedReport().contains ("never heard"),
+                   "report names the planner and says it never heard the audio");
+        }
+        const auto sent = plannerInput.loadFileAsString();
+        check (sent.contains ("hazy sampled-keyboard loop") && sent.contains ("Fm7") && sent.contains ("F minor"),
+               "the planner receives the request and the text context");
+        check (! sent.contains (home.getFullPathName()) && ! sent.contains (".wav") && ! sent.contains (sha256 (source)),
+               "the planner never receives paths, file names or hashes");
+        check (home.getChildFile ("Library/Mosh/ReImagine/planner-ledger.jsonl").loadFileAsString().contains ("req_e2e"),
+               "the call is priced into the local ledger");
+        const auto qlog = home.getChildFile ("Library/Mosh/ReImagine/experience.jsonl").loadFileAsString();
+        check (qlog.contains ("\"controller.plan-unavailable\"") && qlog.contains ("\"controller.planned\""),
+               "experience log records planner use and non-use");
+        check (qlog.contains ("\"controlsTouched\"") && qlog.contains ("\"firstCandidateSeconds\""),
+               "experience log records controls touched and time to first candidate");
+        plannerEnv.deleteFile();
     }
 
     std::cout << "save / reopen / missing asset\n";

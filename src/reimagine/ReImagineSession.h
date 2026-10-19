@@ -119,6 +119,9 @@ struct IntentionInput
     int64_t baseSeed = 0;
     std::vector<ColorSetting> colors;
     std::vector<LoraSetting> loras;
+    // Ask the opt-in cloud planner to write the prompt (text and context only, no audio).
+    // Off by default; when the planner is unavailable the template is used and says why.
+    bool useCloudPlanner = false;
 };
 
 // How one stored context field reached (or did not reach) the generator.
@@ -163,6 +166,13 @@ struct CompiledRequest
     std::vector<ConditioningEntry> conditioning;
     int attemptsBefore = 0;
     int maxAttempts = kDefaultMaxAttemptsPerIntention;
+    // Who wrote the prompt: "template" (kTransformTemplateVersion) or "cloud-planner"
+    // (service/reimagine_planner.py). `controllerRecord` holds the planner's provenance
+    // (provider, model, tokens, cost) or why it was not used.
+    juce::String controller = "template";
+    juce::var controllerRecord;
+    juce::String interpretation;              // the planner's one-line reading of the request
+    juce::StringArray unsupported;            // what the planner said the backend cannot enforce
 };
 
 struct CompileResult
@@ -186,6 +196,56 @@ juce::StringArray validateRequest (const CompiledRequest&);
 // contract: explicit decision policy, frozen source hash, no provider fallback).
 juce::var directServiceParams (const CompiledRequest&, size_t candidateIndex,
                                const juce::String& inputSha256, const juce::String& requestId);
+
+// ── Cloud planner (opt-in; service/reimagine_planner.py, POST /reimagine/plan) ───────
+// One Claude call per Generate/Revise turns the typed request plus the TEXT context into
+// a prompt, a strength and a candidate count. It never receives audio, paths or hashes,
+// and it cannot hear whether a take follows the chords.
+struct PlannerPlan
+{
+    juce::String prompt;
+    float strength = 0.4f;
+    int candidateCount = 1;
+    juce::String interpretation;
+    juce::StringArray unsupported;
+    juce::var controller;                     // provider/model/tokens/cost as returned
+};
+
+// The /reimagine/plan body. `maxCandidates` caps the plan (the user's chosen count).
+juce::var plannerRequestBody (const IntentionInput&, const SessionSnapshot&, int maxCandidates);
+
+// Parses the helper's reply. On refusal or a malformed reply returns nothing and sets
+// `reason` (machine-readable, e.g. "disabled", "budget") and `message`.
+std::optional<PlannerPlan> parsePlannerReply (const juce::var& reply, juce::String& reason, juce::String& message);
+
+// Applies a plan to the template-compiled request for the same intention: prompt,
+// strength, candidate count (never above the compiled count, so the attempt budget the
+// template reserved still holds), controller provenance and honest conditioning rows.
+// Returns errors when the plan does not fit; the caller then keeps the template request.
+CompileResult applyPlannerPlan (const CompiledRequest& templated, const PlannerPlan&);
+
+// Marks a template request with why the planner was not used (shown in the report).
+void notePlannerUnavailable (CompiledRequest&, const juce::String& reason, const juce::String& message);
+
+// ── Controls touched (comparison instrumentation, docs/reimagine-plugin/M1-GARY-COMPARISON.md) ──
+// The settings a request was made with. Diffing two of these counts the controls the user
+// changed between requests (each control once).
+struct ControlState
+{
+    juce::String prompt;
+    float strength = 0.4f;
+    int64_t seed = 0;
+    int candidateCount = 2;
+    juce::String colors;                      // canonical "id=amount;..." strings
+    juce::String loras;
+    juce::String revision;
+    bool fromSelectedAudio = true;
+    bool cloudPlanner = false;
+    juce::String contextKey, contextChords, contextSection, contextProtected;
+};
+
+ControlState controlStateFor (const IntentionInput&, const SessionContext&, bool fromSelectedAudio);
+juce::StringArray changedControls (const ControlState& before, const ControlState& after);
 
 juce::var compiledRequestToVar (const CompiledRequest&);
 juce::var snapshotToVar (const SessionSnapshot&);

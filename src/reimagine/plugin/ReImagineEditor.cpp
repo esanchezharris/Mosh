@@ -27,15 +27,15 @@ ReImagineEditor::ReImagineEditor (ReImagineProcessor& p)
     };
     for (auto* label : labels)
         addAndMakeVisible (label);
-    std::array<juce::Component*, 21> loopComponents {
+    std::array<juce::Component*, 22> loopComponents {
         &contextHeading, &intentionHeading, &reviseHeading, &contextKey, &contextChords, &contextSection,
         &contextProtected, &saveContext, &candidateCount, &generate, &cancel, &revision, &reviseFromAudio,
-        &revise, &keep, &exportWav, &dragOut, &report, &conform, &undoConform, &preview
+        &revise, &keep, &exportWav, &dragOut, &report, &conform, &undoConform, &preview, &cloudPlanner
     };
     for (auto* component : loopComponents)
         addAndMakeVisible (component);
     configureLabel (contextHeading, "CONTEXT (THIS REGION)", 11.0f, true);
-    configureLabel (intentionHeading, "INTENTION - PROMPT FIELD IS THE REQUEST", 11.0f, true);
+    configureLabel (intentionHeading, "INTENTION (PROMPT FIELD)", 11.0f, true);
     configureLabel (reviseHeading, "REVISE SELECTED VERSION", 11.0f, true);
     configureLabel (report, {}, 11.5f);
     report.setJustificationType (juce::Justification::topLeft);
@@ -64,6 +64,10 @@ ReImagineEditor::ReImagineEditor (ReImagineProcessor& p)
         showMessages (processorRef.generateCandidates (intentionFromControls()));
     };
     cancel.onClick = [this] { processorRef.cancelGeneration(); };
+    cloudPlanner.setTooltip ("Opt-in: one Claude call writes the prompt, strength and candidate count from your "
+                             "request and this region's text context (key, BPM, meter, chords, section). It never "
+                             "receives audio. Needs ~/.config/mosh/reimagine-planner.env; otherwise the template is used.");
+    cloudPlanner.onClick = [this] { processorRef.setCloudPlannerEnabled (cloudPlanner.getToggleState()); };
     revision.setMultiLine (true);
     revision.setReturnKeyStartsNewLine (false);
     revision.setFont (juce::FontOptions (13.0f));
@@ -270,6 +274,7 @@ ReImagineEditor::ReImagineEditor (ReImagineProcessor& p)
     reimagine.setValue (state.rack.reimagine, juce::dontSendNotification);
     seed.setText (juce::String (state.rack.seed), false);
     lab.setToggleState (state.labEnabled, juce::dontSendNotification);
+    cloudPlanner.setToggleState (state.cloudPlanner, juce::dontSendNotification);
     for (size_t i = 0; i < loraSlotIds.size() && i < state.rack.loras.size(); ++i)
     {
         loraSlotIds[i] = state.rack.loras[i].id;
@@ -329,6 +334,7 @@ IntentionInput ReImagineEditor::intentionFromControls() const
     input.baseSeed = rack.seed;
     input.colors = rack.colors;
     input.loras = rack.loras;
+    input.useCloudPlanner = cloudPlanner.getToggleState();
     return input;
 }
 
@@ -626,7 +632,8 @@ void ReImagineEditor::resized()
     contextSection.setBounds (782, 172, 183, 26);
     contextProtected.setBounds (973, 172, 183, 26);
     saveContext.setBounds (1046, 204, 110, 26);
-    intentionHeading.setBounds (782, 238, 374, 18);
+    intentionHeading.setBounds (782, 238, 196, 18);
+    cloudPlanner.setBounds (982, 234, 174, 24);
     candidateCount.setBounds (782, 260, 140, 30);
     generate.setBounds (930, 260, 120, 30);
     cancel.setBounds (1058, 260, 98, 30);

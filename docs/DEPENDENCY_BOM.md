@@ -54,6 +54,20 @@ clause 8, and it is vendored verbatim: research access never implies shipping ri
 | Supabase client libraries | MIT/Apache (clients) | OK | none | Nothing unusual | not-bundled |
 | Cloudflare R2 / Workers | Standard commercial SaaS terms | OK | none | Nothing unusual for serving audio; zero-egress is the point | hosted-service |
 | Anthropic / OpenAI APIs | Commercial Terms / Services Agreement | OK — token proxy is the intended model | n/a | §3 | hosted-service |
+| `anthropic` Python SDK (Re-Imagine M1 planner) | MIT (anthropic-sdk-python repo LICENSE) | OK — owner-local only: installed into a separate planner venv (`~/Library/Mosh/planner-venv`), never bundled; the call is opt-in via `~/.config/mosh/reimagine-planner.env` (`service/reimagine_planner.py`) | none | Notice retention if ever bundled. The API call itself falls under the Anthropic row above; it sends typed text and context only, never audio | not-bundled |
+
+**Open items outside the table (2026-10-19), not yet acknowledgements:**
+- **SoundTouch (vendored in Tracktion Engine), LGPL-2.1.** Already compiled into the app for
+  warp and, since PR #802, into the Re-Imagine VST3 (`ReImagineConform.cpp`). Tracktion's
+  copy carries the LGPL notice in its source headers but no LICENSE/COPYING file, so there is
+  no upstream text to vendor under `licenses/` yet. Owner/counsel: obtain the LGPL-2.1 text
+  and SoundTouch copyright notice, add a §1 row with a `licenses/` Notice, and meet the
+  relinking obligation for static linking, before either binary is distributed.
+- **gary4local mac (`betweentwomidnights/gary-localhost-installer-mac`).** Not a dependency:
+  no licence file at the repo root (checked 2026-10-19), Mosh contains none of its code and
+  makes no calls to it; it is the owner's separately installed comparison baseline
+  (docs/reimagine-plugin/M1-GARY-COMPARISON.md). gary4juce is AGPL-3.0-only and must not be
+  copied, adapted or linked. Any future integration needs a licence answer first.
 
 **Unverified — must not ship until a row exists here:** the parked FMS-stack models and tooling
 (RMVPE, Seed-VC, RVC, g2p/CMUdict artifacts). FMS is parked, so this should be vacuous; the former

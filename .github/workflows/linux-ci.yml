@@ -214,7 +214,7 @@ jobs:
           fi
           changed="$(git diff --name-only "$base"...HEAD)"
           echo "$changed"
-          if echo "$changed" | grep -qE '^(src/reimagine/|service/direct_render\.py$|service/server\.py$|tests/test_reimagine|CMakeLists\.txt$|.*/CMakeLists\.txt$|CMakePresets\.json$|cmake/|\.github/workflows/linux-ci\.yml$)'; then
+          if echo "$changed" | grep -qE '^(src/reimagine/|service/direct_render\.py$|service/reimagine_planner\.py$|service/server\.py$|tests/test_reimagine|CMakeLists\.txt$|.*/CMakeLists\.txt$|CMakePresets\.json$|cmake/|\.github/workflows/linux-ci\.yml$)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"

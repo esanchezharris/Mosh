@@ -474,6 +474,197 @@ juce::var snapshotToVar (const SessionSnapshot& s)
     return juce::var (o);
 }
 
+// ── Cloud planner ─────────────────────────────────────────────────────────────────
+juce::var plannerRequestBody (const IntentionInput& input, const SessionSnapshot& snapshot, int maxCandidates)
+{
+    const auto& ctx = snapshot.context;
+    auto* context = new juce::DynamicObject();
+    context->setProperty ("key", ctx.key);
+    context->setProperty ("key_from", provenanceName (ctx.keyFrom));
+    if (ctx.bpm)
+        context->setProperty ("bpm", *ctx.bpm);
+    context->setProperty ("bpm_from", provenanceName (ctx.bpmFrom));
+    if (ctx.meterNumerator && ctx.meterDenominator)
+        context->setProperty ("meter", juce::String (*ctx.meterNumerator) + "/" + juce::String (*ctx.meterDenominator));
+    juce::Array<juce::var> chords;
+    for (const auto& chord : ctx.chords)
+    {
+        auto* row = new juce::DynamicObject();
+        row->setProperty ("bar", chord.bar);
+        row->setProperty ("symbol", chord.symbol);
+        chords.add (juce::var (row));
+    }
+    context->setProperty ("chords", chords);
+    context->setProperty ("chords_from", provenanceName (ctx.chordsFrom));
+    context->setProperty ("section", ctx.sectionLabel);
+    context->setProperty ("protected", stringArrayToVar (ctx.protectedChoices));
+
+    auto* limits = new juce::DynamicObject();
+    limits->setProperty ("max_candidates", juce::jlimit (1, kMaxCandidatesPerBatch, maxCandidates));
+
+    auto* body = new juce::DynamicObject();
+    body->setProperty ("request", input.request.trim());
+    body->setProperty ("revision", input.revision.trim());
+    body->setProperty ("input_seconds", snapshot.sampleRate > 0.0 ? static_cast<double> (snapshot.frames) / snapshot.sampleRate : 0.0);
+    body->setProperty ("input_role", snapshot.inputRole == "parent-take" ? "parent-take" : "source");
+    body->setProperty ("context", juce::var (context));
+    body->setProperty ("limits", juce::var (limits));
+    return juce::var (body);
+}
+
+std::optional<PlannerPlan> parsePlannerReply (const juce::var& reply, juce::String& reason, juce::String& message)
+{
+    if (! reply.isObject())
+    {
+        reason = "unreachable";
+        message = "the local helper did not answer the planner request";
+        return std::nullopt;
+    }
+    if (! static_cast<bool> (reply.getProperty ("ok", false)))
+    {
+        reason = reply.getProperty ("reason", "unavailable").toString();
+        message = reply.getProperty ("error", "planner unavailable").toString();
+        return std::nullopt;
+    }
+    const auto plan = reply.getProperty ("plan", {});
+    const auto prompt = plan.getProperty ("prompt", {});
+    const auto strength = plan.getProperty ("strength", {});
+    const auto count = plan.getProperty ("candidate_count", {});
+    if (! prompt.isString() || ! (strength.isDouble() || strength.isInt() || strength.isInt64())
+        || ! (count.isInt() || count.isInt64()))
+    {
+        reason = "invalid-plan";
+        message = "the planner reply is missing prompt, strength or candidate_count";
+        return std::nullopt;
+    }
+    PlannerPlan result;
+    result.prompt = prompt.toString();
+    result.strength = static_cast<float> (static_cast<double> (strength));
+    result.candidateCount = static_cast<int> (count);
+    result.interpretation = plan.getProperty ("interpretation", {}).toString();
+    if (const auto* list = plan.getProperty ("unsupported", {}).getArray())
+        for (const auto& item : *list)
+            if (item.toString().trim().isNotEmpty())
+                result.unsupported.add (item.toString().trim());
+    result.controller = reply.getProperty ("controller", {});
+    return result;
+}
+
+CompileResult applyPlannerPlan (const CompiledRequest& templated, const PlannerPlan& plan)
+{
+    CompileResult result;
+    const auto prompt = plan.prompt.trim();
+    if (prompt.isEmpty() || prompt.length() > kMaxPromptChars)
+        result.errors.add ("Planner prompt must be 1-" + juce::String (kMaxPromptChars) + " characters");
+    if (! std::isfinite (plan.strength) || plan.strength < kMinStrength || plan.strength > kMaxStrength)
+        result.errors.add ("Planner strength outside 0.01-0.5");
+    if (plan.candidateCount < 1 || plan.candidateCount > static_cast<int> (templated.seeds.size()))
+        result.errors.add ("Planner asked for " + juce::String (plan.candidateCount) + " candidates; the request allows 1-"
+                           + juce::String (static_cast<int> (templated.seeds.size())));
+    if (! result.errors.isEmpty())
+        return result;
+
+    auto planned = templated;
+    planned.controller = "cloud-planner";
+    planned.controllerRecord = plan.controller;
+    planned.templateVersion = plan.controller.getProperty ("plannerVersion", "reimagine-claude-planner/1").toString();
+    planned.prompt = prompt;
+    planned.strength = plan.strength;
+    planned.seeds.resize (static_cast<size_t> (plan.candidateCount));
+    planned.interpretation = plan.interpretation;
+    planned.unsupported = plan.unsupported;
+    for (auto& entry : planned.conditioning)
+    {
+        if (entry.field == "source-audio" || entry.field == "parent-take-audio")
+            entry.note = "init audio at strength " + juce::String (plan.strength, 2)
+                       + " (chosen by the planner); resemblance is not a preservation guarantee";
+        else if ((entry.field == "tempo" || entry.field == "key") && entry.stored)
+        {
+            entry.sentAs = "planner-text";
+            entry.note = "sent to the planner as text; the SA3 prompt it wrote may or may not name it; not enforced";
+        }
+        else if (entry.field == "chords" && entry.stored)
+        {
+            entry.sentAs = "planner-text+structured";
+            entry.note = "chord names and change bars sent to the planner and as chord_timing; not enforced";
+        }
+        else if ((entry.field == "section" || entry.field == "protected-choices") && entry.stored)
+        {
+            entry.sentAs = "planner-text";
+            entry.note = "sent to the planner as text; not a model constraint";
+        }
+    }
+    const auto model = plan.controller.getProperty ("model", "unknown model").toString();
+    planned.conditioning.push_back ({ "controller", true, "cloud-text", false,
+                                      "prompt, strength and count written by " + model
+                                      + " from your text and context; it never received audio" });
+    if (auto problems = validateRequest (planned); ! problems.isEmpty())
+    {
+        result.errors.addArray (problems);
+        return result;
+    }
+    for (const auto& item : plan.unsupported)
+        result.warnings.add ("Not enforced: " + item);
+    result.request = std::move (planned);
+    return result;
+}
+
+void notePlannerUnavailable (CompiledRequest& request, const juce::String& reason, const juce::String& message)
+{
+    auto* record = new juce::DynamicObject();
+    record->setProperty ("requested", true);
+    record->setProperty ("used", false);
+    record->setProperty ("reason", reason);
+    record->setProperty ("message", message);
+    request.controller = "template";
+    request.controllerRecord = juce::var (record);
+}
+
+// ── Controls touched ─────────────────────────────────────────────────────────────
+ControlState controlStateFor (const IntentionInput& input, const SessionContext& context, bool fromSelectedAudio)
+{
+    ControlState state;
+    state.prompt = input.request.trim();
+    state.strength = input.strength;
+    state.seed = input.baseSeed;
+    state.candidateCount = input.candidateCount;
+    juce::StringArray colors, loras;
+    for (const auto& c : input.colors)
+        colors.add (c.id + "=" + juce::String (c.amount, 1));
+    for (const auto& l : input.loras)
+        loras.add (l.id + "=" + juce::String (l.scale, 3));
+    state.colors = colors.joinIntoString (";");
+    state.loras = loras.joinIntoString (";");
+    state.revision = input.revision.trim();
+    state.fromSelectedAudio = fromSelectedAudio;
+    state.cloudPlanner = input.useCloudPlanner;
+    state.contextKey = context.keyFrom == Provenance::user ? context.key : juce::String();
+    state.contextChords = context.chordsFrom == Provenance::user ? formatChordList (context.chords) : juce::String();
+    state.contextSection = context.sectionLabel;
+    state.contextProtected = context.protectedChoices.joinIntoString (",");
+    return state;
+}
+
+juce::StringArray changedControls (const ControlState& a, const ControlState& b)
+{
+    juce::StringArray changed;
+    auto note = [&changed] (bool differs, const char* name) { if (differs) changed.add (name); };
+    note (a.prompt != b.prompt, "prompt");
+    note (std::abs (a.strength - b.strength) > 1.0e-4f, "strength");
+    note (a.seed != b.seed, "seed");
+    note (a.candidateCount != b.candidateCount, "candidate-count");
+    note (a.colors != b.colors, "colors");
+    note (a.loras != b.loras, "loras");
+    note (a.revision != b.revision, "revision");
+    note (a.fromSelectedAudio != b.fromSelectedAudio, "from-selected-audio");
+    note (a.cloudPlanner != b.cloudPlanner, "cloud-planner");
+    note (a.contextKey != b.contextKey, "context-key");
+    note (a.contextChords != b.contextChords, "context-chords");
+    note (a.contextSection != b.contextSection, "context-section");
+    note (a.contextProtected != b.contextProtected, "context-protected");
+    return changed;
+}
+
 juce::var compiledRequestToVar (const CompiledRequest& r)
 {
     auto* o = new juce::DynamicObject();
@@ -484,7 +675,14 @@ juce::var compiledRequestToVar (const CompiledRequest& r)
     o->setProperty ("backend", r.backend);
     o->setProperty ("modelVariant", r.modelVariant);
     o->setProperty ("template", r.templateVersion);
-    o->setProperty ("controller", "template-only (no language model)");
+    o->setProperty ("controller", r.controller == "cloud-planner" ? juce::String ("cloud-planner")
+                                                                 : juce::String ("template-only (no language model)"));
+    if (! r.controllerRecord.isVoid())
+        o->setProperty ("controllerRecord", r.controllerRecord);
+    if (r.interpretation.isNotEmpty())
+        o->setProperty ("interpretation", r.interpretation);
+    if (! r.unsupported.isEmpty())
+        o->setProperty ("unsupported", stringArrayToVar (r.unsupported));
     o->setProperty ("prompt", r.prompt);
     o->setProperty ("strength", static_cast<double> (r.strength));
     o->setProperty ("durationSeconds", r.durationSeconds);
