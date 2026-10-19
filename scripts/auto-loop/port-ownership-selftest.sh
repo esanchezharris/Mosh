@@ -116,7 +116,15 @@ _await_listen() {
   return 1
 }
 
-alive() { kill -0 "$1" 2>/dev/null; }
+# kill -0 also succeeds on a zombie. The fixtures are started inside `$( )`, so their
+# parent exits at once and they are reparented to PID 1; when PID 1 does not reap (a
+# container's process supervisor) a killed fixture stays a zombie and read as alive.
+# `ps -o stat=` is the same on BSD and procps ps.
+alive() {
+  kill -0 "$1" 2>/dev/null || return 1
+  case "$(ps -o stat= -p "$1" 2>/dev/null)" in *Z*) return 1 ;; esac
+  return 0
+}
 
 # ── 1. concurrent allocation hands out DISJOINT blocks ───────────────────────────
 # The check-then-act version returned the same base port to every concurrent caller.

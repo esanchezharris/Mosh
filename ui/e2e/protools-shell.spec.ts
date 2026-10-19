@@ -554,6 +554,9 @@ test("Playlists audition whole takes and promote a selected phrase into the main
   await page.setViewportSize({ width: 1440, height: 900 });
   await bootProTools(page);
   await sessionAction(page, "new_project");
+  // Wait for the empty project to land: adding a track before it does lets new_project
+  // wipe the new track, or leaves .first() resolving to the old session's Drums header.
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(0);
   await page.getByTestId("pt-add-track").click();
   await page.getByTestId("pt-add-track-audio").click();
 
@@ -634,6 +637,9 @@ test("Waveform comp target cycles alternate takes inside one selection", async (
   await page.setViewportSize({ width: 1440, height: 900 });
   await bootProTools(page);
   await sessionAction(page, "new_project");
+  // Wait for the empty project to land: adding a track before it does lets new_project
+  // wipe the new track, or leaves .first() resolving to the old session's Drums header.
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(0);
   await page.getByTestId("pt-add-track").click();
   await page.getByTestId("pt-add-track-audio").click();
 
