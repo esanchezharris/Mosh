@@ -132,8 +132,12 @@ evidence. It claims nothing about how the music sounds.
   thread, never the audio thread. The job decodes the selected version and measures it
   again with `checkTempoConformance` against the session as it is now (a stored report may
   be stale). It then asks `planConform` for a ratio. `stretchRatio` = measured BPM /
-  session BPM = output length / input length, so a 121 BPM take in a 120 BPM session is
-  lengthened by 121/120.
+  session BPM = stretched length / input length, so a 121 BPM take in a 120 BPM session is
+  lengthened by 121/120. The new version then keeps its parent's exact length, because it
+  replaces the same region: a sped-up take is padded with silence (otherwise the dry source
+  would play through the end of the region) and a slowed one is trimmed. `paddedFrames` and
+  `trimmedFrames` are recorded on the version and in `version.conformed`, and the technical
+  checks are re-run on the conformed audio.
 - **Refusals, each with its reason in the status line and the experience log
   (`conform.refused`):** the tempo map is `tempoMapAssumed`; the session BPM is missing or
   its provenance is unknown (host- and user-set BPM are both accepted); the measurement is
@@ -229,15 +233,18 @@ not committed). Engineering evidence only: synthetic clicks, no model, no listen
     is exact;
   - lineage and `PluginStateV1` round-trip, with an older state still loading;
   - the free-audition state transitions.
-- `MoshReImagineLoopE2E`: **PASS, 3 of 3 runs** (81 checks; the 27 new ones need no helper).
+- `MoshReImagineLoopE2E`: **PASS, 3 of 3 runs** (85 checks after the review fixes; the 31 conform/preview checks need no helper).
   It covers:
   - an assumed-tempo import is refused;
   - an import under a fake 120 BPM host playhead conforms a 121 BPM click into a new
-    version that measures `conforms`, with the original asset intact;
+    version that measures `conforms`, keeps the parent's exact length (the trim is
+    recorded), is labelled "conform of v1" rather than "import", and leaves the original
+    asset intact;
   - conforming that version again is refused ("already conforms");
   - free preview is audible with no playhead;
-  - when the fake host starts playing, the preview stops and the output peak equals one
-    copy (0.736), not two;
+  - when the fake host starts playing, the preview stops in that block. (The output peak
+    of 0.736 equals one copy, but the preview copies rather than adds, so the peak alone
+    could not reveal double playback; the evidence is that the preview reports stopped.)
   - the preview is refused while the host plays;
   - undo restores the original;
   - the experience log has the conform events.

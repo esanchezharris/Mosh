@@ -286,6 +286,28 @@ int main (int argc, char** argv)
             check (conformed.manifest["m1"]["tempoConformance"]["verdict"].toString() == "conforms",
                    "conformed version now conforms: " + conformed.manifest["m1"]["tempoConformance"]["summary"].toString());
             check (cs.regions.front().selectedTakeId == conformed.id, "the conformed version is selected");
+            {
+                // Same length as the parent, so "Replace" never lets the dry source through
+                // at the end of the region; the trim (121 -> 120 BPM lengthens) is recorded.
+                juce::AudioFormatManager formats;
+                formats.registerBasicFormats();
+                const auto lengthOf = [&] (const juce::String& hash)
+                {
+                    std::unique_ptr<juce::AudioFormatReader> r (formats.createReaderFor (
+                        home.getChildFile ("Library/Mosh/ReImagine/assets/renders/" + hash + ".wav")));
+                    return r ? r->lengthInSamples : juce::int64 { -1 };
+                };
+                const auto parentLength = lengthOf (originalHash);
+                check (parentLength > 0 && lengthOf (conformed.assetHash) == parentLength,
+                       "conformed version keeps the parent's exact length");
+                check (static_cast<int> (conformed.manifest["m1"]["conform"]["trimmedFrames"]) > 0
+                           && static_cast<int> (conformed.manifest["m1"]["conform"]["paddedFrames"]) == 0,
+                       "the trim to the parent's length is recorded");
+                check (conformed.manifest["m1"]["checks"]["usable"] == juce::var (true),
+                       "technical checks describe the conformed audio");
+                check (! takeLabel (cs.regions.front(), 1).contains ("import") && takeLabel (cs.regions.front(), 1).contains ("conform of v1"),
+                       "a conform of an import is labelled as a conform: " + takeLabel (cs.regions.front(), 1));
+            }
             check (cs.regions.front().takes.front().assetHash == originalHash
                        && home.getChildFile ("Library/Mosh/ReImagine/assets/renders/" + originalHash + ".wav").existsAsFile(),
                    "the original version is not overwritten");

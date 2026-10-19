@@ -122,8 +122,12 @@ int ReImagineProcessor::sampleForPpq (const PlaybackRegion& region, double ppq) 
 
 void ReImagineProcessor::renderSelected (juce::AudioBuffer<float>& buffer, const HostPosition& host) noexcept
 {
-    snapshotReaders.fetch_add (1, std::memory_order_acq_rel);
-    const auto* snapshot = audibleSnapshot.load (std::memory_order_acquire);
+    // seq_cst on the reader count and the pointer, here and in publishPlayback: with
+    // acquire/release alone the reader's load may see the OLD pointer while the
+    // publisher's load still sees zero readers (store->load reordering), and the old
+    // snapshot is freed under the audio thread. Two seq_cst pairs cannot both miss.
+    snapshotReaders.fetch_add (1, std::memory_order_seq_cst);
+    const auto* snapshot = audibleSnapshot.load (std::memory_order_seq_cst);
     if (snapshot == nullptr || compareDry.load (std::memory_order_acquire) != 0)
     {
         snapshotReaders.fetch_sub (1, std::memory_order_release);
@@ -174,8 +178,8 @@ void ReImagineProcessor::renderFreeAudition (juce::AudioBuffer<float>& buffer, b
 {
     if (! audition.playing())
         return;
-    snapshotReaders.fetch_add (1, std::memory_order_acq_rel);
-    const auto* snapshot = audibleSnapshot.load (std::memory_order_acquire);
+    snapshotReaders.fetch_add (1, std::memory_order_seq_cst);   // see renderSelected
+    const auto* snapshot = audibleSnapshot.load (std::memory_order_seq_cst);
     const PlaybackRegion* region = nullptr;
     if (snapshot != nullptr && juce::isPositiveAndBelow (snapshot->selectedIndex, static_cast<int> (snapshot->regions.size())))
         region = snapshot->regions[static_cast<size_t> (snapshot->selectedIndex)].get();
@@ -757,8 +761,8 @@ void ReImagineProcessor::publishPlayback (std::unique_ptr<PlaybackSnapshot> snap
                     playbackRegion->stale.store (1, std::memory_order_relaxed);
     }
     const auto* raw = snapshot.get();
-    audibleSnapshot.store (raw, std::memory_order_release);
-    while (snapshotReaders.load (std::memory_order_acquire) != 0)
+    audibleSnapshot.store (raw, std::memory_order_seq_cst);
+    while (snapshotReaders.load (std::memory_order_seq_cst) != 0)
         wait (1);
     ownedPlaybackSnapshot = std::move (snapshot);
 }
@@ -1781,6 +1785,27 @@ void ReImagineProcessor::performConform (const ConformJob& job)
     juce::String error;
     if (! stretchForConform (audio, rate, plan.stretchRatio, stretched, error, [this] { return threadShouldExit(); }))
         return refuse (error, tempoConformanceToVar (before));
+    // The conformed version replaces the same region as its parent, so it keeps the
+    // parent's exact length: a sped-up take is padded with silence (never the dry source,
+    // which renderSelected would otherwise play under "Replace"), a slowed one is trimmed.
+    const auto stretchedFrames = stretched.getNumSamples();
+    const auto parentFrames = audio.getNumSamples();
+    if (stretchedFrames != parentFrames)
+    {
+        juce::AudioBuffer<float> fitted (stretched.getNumChannels(), parentFrames);
+        fitted.clear();
+        for (int channel = 0; channel < fitted.getNumChannels(); ++channel)
+            fitted.copyFrom (channel, 0, stretched, channel, 0, std::min (stretchedFrames, parentFrames));
+        stretched = std::move (fitted);
+    }
+    const auto paddedFrames = std::max (0, parentFrames - stretchedFrames);
+    const auto trimmedFrames = std::max (0, stretchedFrames - parentFrames);
+    const auto checks = checkCandidate (measureAudio (stretched.getArrayOfReadPointers(), stretched.getNumChannels(),
+                                                      stretched.getNumSamples(), rate),
+                                        static_cast<double> (parentFrames) / rate, audio.getNumChannels());
+    if (! checks.usable)
+        return refuse ("the conformed audio failed the technical checks: " + checks.failures.joinIntoString ("; "),
+                       tempoConformanceToVar (before));
     const auto after = checkTempoConformance (stretched.getArrayOfReadPointers(), stretched.getNumChannels(),
                                               stretched.getNumSamples(), rate, job.context);
 
@@ -1825,6 +1850,9 @@ void ReImagineProcessor::performConform (const ConformJob& job)
             take.seed = parent->seed;
             take.parameters = parent->parameters;
             take.manifest = parent->manifest.isObject() ? parent->manifest.clone() : juce::var (new juce::DynamicObject());
+            // A conform of an imported take is a conform, not an import (label and sidecar).
+            const auto parentSource = take.manifest.getProperty ("source", {}).toString();
+            take.manifest.getDynamicObject()->removeProperty ("source");
             auto lineage = lineageOf (*parent);
             lineage.parentTakeId = parent->id;
             lineage.role = "conform";
@@ -1838,7 +1866,13 @@ void ReImagineProcessor::performConform (const ConformJob& job)
                 conform.getDynamicObject()->setProperty ("method", "SoundTouch (Tracktion-vendored, Better settings), pitch kept");
                 conform.getDynamicObject()->setProperty ("measuredBefore", tempoConformanceToVar (before));
                 conform.getDynamicObject()->setProperty ("rawAssetSha256", parent->assetHash);
+                conform.getDynamicObject()->setProperty ("stretchedFrames", stretchedFrames);
+                conform.getDynamicObject()->setProperty ("paddedFrames", paddedFrames);
+                conform.getDynamicObject()->setProperty ("trimmedFrames", trimmedFrames);
+                if (parentSource.isNotEmpty())
+                    conform.getDynamicObject()->setProperty ("parentSource", parentSource);
                 m1->setProperty ("conform", conform);
+                m1->setProperty ("checks", technicalReportToVar (checks));   // of the conformed audio, not the parent
                 m1->setProperty ("tempoConformance", tempoConformanceToVar (after));
             }
             target->takes.push_back (take);
@@ -1862,6 +1896,8 @@ void ReImagineProcessor::performConform (const ConformJob& job)
     payload->setProperty ("toBpm", plan.toBpm);
     payload->setProperty ("driftMsPerBarBefore", plan.driftMsPerBar);
     payload->setProperty ("verdictAfter", tempoVerdictName (after.verdict));
+    payload->setProperty ("paddedFrames", paddedFrames);
+    payload->setProperty ("trimmedFrames", trimmedFrames);
     payload->setProperty ("assetSha256", hash);
     payload->setProperty ("rawAssetSha256", job.parentAssetHash);
     logEvent ("version.conformed", "explicit", juce::var (payload));
