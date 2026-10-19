@@ -7,6 +7,7 @@ name: CI
 #
 #   cheap-gate  (fast, ~10 min)  typecheck + vitest + e2e + touched-py tests.
 #                                This is the intended REQUIRED status check.
+#                                Runs on ubuntu-latest (cheaper than macOS).
 #   native-gate (slow, heavy)    cmake build + Catch2 + `Mosh --selftest ×3
 #                                deterministic` + verify.py --gate + DAW conformance.
 #                                Best-effort here; promote to required once stable.
@@ -71,8 +72,14 @@ jobs:
   # ── Cheap lane: no native build. The required check. ────────────────────────
   cheap-gate:
     name: cheap gate (typecheck · vitest · e2e · py)
-    runs-on: macos-14
+    # ubuntu, not macOS: nothing in the cheap lane is macOS-specific, it runs on EVERY
+    # PR, and macOS runner minutes cost ~10x more. The native lane stays on macos-14.
+    runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # The memory preflight's 32 GiB disk floor is sized for the owner's Mac; a hosted
+      # ubuntu runner has ~14+ GiB free and the cheap lane never builds native code.
+      MOSH_MIN_DATA_FREE_GIB: "8"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -91,7 +98,7 @@ jobs:
           python-version: "3.11"
 
       - name: Ensure jq (gate emits JSON)
-        run: jq --version >/dev/null 2>&1 || brew install jq
+        run: jq --version >/dev/null 2>&1 || sudo apt-get install -y jq
 
       - name: Install Python test deps
         run: python3 -m pip install --upgrade pip numpy "pydantic>=2,<3" pytest soundfile typer rich safetensors
@@ -102,12 +109,12 @@ jobs:
 
       - name: Install Playwright browser (chromium)
         working-directory: ui
-        run: npx playwright install chromium
+        run: npx playwright install --with-deps chromium
 
       - name: Stamp installed deps
         # Tell the gate its deps are already fresh (matches lib.sh deps_write_stamp)
         # so gate_cheap's ensure_node_modules skips a redundant `npm ci`.
-        run: shasum -a 256 ui/package-lock.json | awk '{print $1}' > ui/node_modules/.mosh-deps-stamp
+        run: sha256sum ui/package-lock.json | awk '{print $1}' > ui/node_modules/.mosh-deps-stamp
 
       - name: Run cheap gate
         run: |

@@ -116,7 +116,13 @@ _await_listen() {
   return 1
 }
 
-alive() { kill -0 "$1" 2>/dev/null; }
+# A killed fake service whose parent (a `$(…)` subshell) already exited is reparented to
+# PID 1. Where PID 1 does not reap (a bare container init), it lingers as a zombie, and
+# `kill -0` still succeeds on a zombie, so count state Z as dead.
+alive() {
+  kill -0 "$1" 2>/dev/null || return 1
+  case "$(ps -o stat= -p "$1" 2>/dev/null)" in Z*) return 1;; esac
+}
 
 # ── 1. concurrent allocation hands out DISJOINT blocks ───────────────────────────
 # The check-then-act version returned the same base port to every concurrent caller.

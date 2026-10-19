@@ -34,36 +34,61 @@ require_unsigned_integer MOSH_MIN_MEMORY_FREE_PERCENT "$MIN_MEMORY_FREE_PERCENT"
 require_unsigned_integer MOSH_MAX_SWAP_USED_MIB "$MAX_SWAP_USED_MIB"
 require_unsigned_integer MOSH_MIN_DATA_FREE_GIB "$MIN_DATA_FREE_GIB"
 
-memory_free_percent="$(memory_pressure -Q 2>/dev/null | awk -F': ' '
-  /System-wide memory free percentage/ {
-    gsub(/%/, "", $2)
-    print int($2)
-    exit
-  }
-')"
-require_metric 'free memory percentage' "$memory_free_percent"
+# macOS reads memory_pressure / sysctl / the Data volume. Elsewhere (no
+# memory_pressure on PATH) the Linux branch reads /proc/meminfo instead.
+if command -v memory_pressure >/dev/null 2>&1 || [ ! -r /proc/meminfo ]; then
+  memory_free_percent="$(memory_pressure -Q 2>/dev/null | awk -F': ' '
+    /System-wide memory free percentage/ {
+      gsub(/%/, "", $2)
+      print int($2)
+      exit
+    }
+  ')"
+  require_metric 'free memory percentage' "$memory_free_percent"
 
-swap_used_mib="$(sysctl vm.swapusage 2>/dev/null | awk '
-  {
-    for (i = 1; i <= NF; i++) {
-      if ($i == "used") {
-        value = $(i + 2)
-        unit = substr(value, length(value), 1)
-        sub(/[MGT]$/, "", value)
-        if (unit == "G") value *= 1024
-        if (unit == "T") value *= 1048576
-        printf "%.0f\n", value
-        exit
+  swap_used_mib="$(sysctl vm.swapusage 2>/dev/null | awk '
+    {
+      for (i = 1; i <= NF; i++) {
+        if ($i == "used") {
+          value = $(i + 2)
+          unit = substr(value, length(value), 1)
+          sub(/[MGT]$/, "", value)
+          if (unit == "G") value *= 1024
+          if (unit == "T") value *= 1048576
+          printf "%.0f\n", value
+          exit
+        }
       }
     }
-  }
-')"
-require_metric 'swap usage' "$swap_used_mib"
+  ')"
+  require_metric 'swap usage' "$swap_used_mib"
 
-data_free_gib="$(df -Pk /System/Volumes/Data 2>/dev/null | awk '
-  NR == 2 { printf "%d\n", $4 / 1048576; exit }
-')"
-require_metric 'Data volume free space' "$data_free_gib"
+  data_free_gib="$(df -Pk /System/Volumes/Data 2>/dev/null | awk '
+    NR == 2 { printf "%d\n", $4 / 1048576; exit }
+  ')"
+  require_metric 'Data volume free space' "$data_free_gib"
+else
+  # Linux (the ubuntu CI runner, cloud containers): the same three limits read from
+  # /proc/meminfo and the filesystem holding this checkout.
+  memory_free_percent="$(awk '
+    /^MemTotal:/ { total = $2 }
+    /^MemAvailable:/ { avail = $2 }
+    END { if (total > 0) printf "%d\n", avail * 100 / total }
+  ' /proc/meminfo 2>/dev/null)"
+  require_metric 'free memory percentage' "$memory_free_percent"
+
+  swap_used_mib="$(awk '
+    /^SwapTotal:/ { total = $2 }
+    /^SwapFree:/ { free = $2 }
+    END { printf "%d\n", (total - free) / 1024 }
+  ' /proc/meminfo 2>/dev/null)"
+  require_metric 'swap usage' "$swap_used_mib"
+
+  data_free_gib="$(df -Pk "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" 2>/dev/null | awk '
+    NR == 2 { printf "%d\n", $4 / 1048576; exit }
+  ')"
+  require_metric 'Data volume free space' "$data_free_gib"
+fi
 
 failed=0
 if [ "$memory_free_percent" -lt "$MIN_MEMORY_FREE_PERCENT" ]; then
