@@ -9,23 +9,28 @@
 # after UI-only edits (the staged Resources/ui only refreshed when something
 # re-copied it), and the packaged app shipped last wave's UI.
 #
-# Two modes (invoked from cmake/BuildUI.cmake):
+# Three modes (invoked from cmake/BuildUI.cmake):
+#   MODE=deps  — if ui/node_modules has no install stamp, or package.json /
+#                package-lock.json is newer than it, run npm install and write the
+#                stamp. Otherwise a no-op. Every target that runs a ui/ npm script
+#                (MoshUI, MoshSkillIdentityGate, MoshCompanionUI) depends on this,
+#                so a fresh clone never runs one before ui/node_modules exists.
 #   MODE=build — re-glob ui/src at RUN time (no configure-time staleness, new
 #                files included by construction); if any source or build input
 #                is newer than ui/dist/index.html (or dist is missing), run
-#                npm install + npm run build. Otherwise a no-op.
+#                npm run build. Otherwise a no-op.
 #   MODE=stage — if ui/dist/index.html is newer than the staged copy (or the
 #                stage is missing), rm + copy_directory. Otherwise a no-op, so
 #                clean trees keep the staged mtimes untouched (and the ad-hoc
 #                signature refresh stays cheap).
 #
-# Args: MOSH_UI_DIR, MOSH_UI_DIST, MOSH_UI_STAGE_DIR (stage mode), NPM_EXECUTABLE,
-#       MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP, MOSH_ENABLE_DEMO_COMPACT_MELODY
+# Args: MOSH_UI_DIR, NPM_EXECUTABLE (deps + build), MOSH_UI_DIST, MOSH_UI_STAGE_DIR
+#       (stage mode), MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP, MOSH_ENABLE_DEMO_COMPACT_MELODY
 #       (both build mode), MODE.
 # ─────────────────────────────────────────────────────────────────────────────
 
 if (NOT DEFINED MODE)
-    message(FATAL_ERROR "BuildUIFresh.cmake needs -DMODE=build|stage")
+    message(FATAL_ERROR "BuildUIFresh.cmake needs -DMODE=deps|build|stage")
 endif()
 
 # Newest mtime (epoch seconds) across a file list; empty list ⇒ "".
@@ -42,7 +47,27 @@ function (newest_mtime outVar)
     set(${outVar} "${newest}" PARENT_SCOPE)
 endfunction()
 
-if (MODE STREQUAL "build")
+if (MODE STREQUAL "deps")
+    # Stamp lives INSIDE ui/node_modules, so deleting node_modules also deletes the stamp.
+    # Written only after a successful install, so a half-finished install is retried.
+    set(depsStamp "${MOSH_UI_DIR}/node_modules/.mosh-deps-stamp")
+    newest_mtime (manifestMt "${MOSH_UI_DIR}/package.json" "${MOSH_UI_DIR}/package-lock.json")
+    set(stampMt "")
+    if (EXISTS "${depsStamp}")
+        file(TIMESTAMP "${depsStamp}" stampMt "%s" UTC)
+    endif()
+    if (stampMt STREQUAL "" OR (NOT manifestMt STREQUAL "" AND manifestMt GREATER stampMt))
+        message(STATUS "ui/node_modules missing or older than package.json/package-lock.json — npm install")
+        execute_process(COMMAND "${NPM_EXECUTABLE}" install --no-audit --no-fund
+                        WORKING_DIRECTORY "${MOSH_UI_DIR}" RESULT_VARIABLE rc)
+        if (NOT rc EQUAL 0)
+            message(FATAL_ERROR "npm install failed (${rc})")
+        endif()
+        file(WRITE "${depsStamp}" "installed\n")
+    else()
+        message(STATUS "ui/node_modules matches package.json/package-lock.json — no install")
+    endif()
+elseif (MODE STREQUAL "build")
     if (MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP)
         set(agentLoopFlag "1")
     else()
@@ -88,11 +113,7 @@ if (MODE STREQUAL "build")
     if (distMt STREQUAL "" OR (NOT srcMt STREQUAL "" AND srcMt GREATER distMt)
         OR NOT previousBuildModeFlags STREQUAL buildModeFlags)
         message(STATUS "UI sources or packaged build mode changed — building Mosh UI (Vite, free-form Moshi=${agentLoopFlag}, demo compact melody=${demoMelodyFlag})")
-        execute_process(COMMAND "${NPM_EXECUTABLE}" install --no-audit --no-fund
-                        WORKING_DIRECTORY "${MOSH_UI_DIR}" RESULT_VARIABLE rc)
-        if (NOT rc EQUAL 0)
-            message(FATAL_ERROR "npm install failed (${rc})")
-        endif()
+        # ui/node_modules is guaranteed by MoshUIDeps (MODE=deps), which MoshUI depends on.
         execute_process(COMMAND "${CMAKE_COMMAND}" -E env
                                 "VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP=${agentLoopFlag}"
                                 "VITE_MOSH_ENABLE_DEMO_COMPACT_MELODY=${demoMelodyFlag}"
