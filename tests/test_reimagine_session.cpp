@@ -43,6 +43,45 @@ IntentionInput hazyKeys()
     return in;
 }
 
+// Click track: a 12 ms decaying 1 kHz burst on every beat. The tempo moves linearly from
+// startBpm to endBpm across the clip (equal for a steady track).
+std::vector<float> clickTrack (double startBpm, double endBpm, double seconds, double sampleRate,
+                               double firstClickSeconds = 0.0)
+{
+    const auto frames = static_cast<size_t> (seconds * sampleRate);
+    std::vector<float> data (frames, 0.0f);
+    const auto burst = static_cast<size_t> (0.012 * sampleRate);
+    double t = firstClickSeconds;
+    while (t < seconds)
+    {
+        const auto start = static_cast<size_t> (std::llround (t * sampleRate));
+        for (size_t i = 0; i < burst && start + i < frames; ++i)
+        {
+            const auto x = static_cast<double> (i) / sampleRate;
+            data[start + i] += static_cast<float> (0.8 * std::exp (-x / 0.003) * std::sin (2.0 * 3.14159265358979 * 1000.0 * x));
+        }
+        const auto bpm = startBpm + (endBpm - startBpm) * (t / seconds);
+        t += 60.0 / bpm;
+    }
+    return data;
+}
+
+SessionContext hostTempo (double bpm)
+{
+    SessionContext c;
+    c.bpm = bpm;
+    c.bpmFrom = Provenance::host;
+    c.meterNumerator = 4;
+    c.meterFrom = Provenance::host;
+    return c;
+}
+
+TempoConformanceReport conformanceOf (const std::vector<float>& mono, double sampleRate, const SessionContext& c)
+{
+    const float* channels[] = { mono.data(), mono.data() };
+    return checkTempoConformance (channels, 2, static_cast<int64_t> (mono.size()), sampleRate, c);
+}
+
 std::vector<float> sine (int frames, float amplitude)
 {
     std::vector<float> data (static_cast<size_t> (frames));
@@ -117,7 +156,7 @@ TEST_CASE ("The transform template compiles a bounded, honest request", "[reimag
     CHECK (r.prompt.startsWith ("hazy sampled-keyboard loop"));
     CHECK (r.prompt.contains ("in F minor"));
     CHECK (r.prompt.contains ("90 BPM"));
-    CHECK (r.prompt.contains ("chords Fm7 Db Ab Eb"));
+    CHECK (r.prompt.endsWith ("chords by bar: 1 Fm7, 3 Db, 5 Ab, 7 Eb"));
     CHECK (r.seeds == std::vector<int64_t> { 100, 101 });
     CHECK (r.durationSeconds == Catch::Approx (21.333).margin (0.001));
     CHECK (r.templateVersion == kTransformTemplateVersion);
@@ -128,8 +167,10 @@ TEST_CASE ("The transform template compiles a bounded, honest request", "[reimag
         if (entry.field == "chords")
         {
             sawChords = true;
-            CHECK (entry.sentAs == "text-prompt");
+            CHECK (entry.sentAs == "text-prompt+structured");
             CHECK_FALSE (entry.enforced);
+            CHECK (entry.note.contains ("1:Fm7 3:Db 5:Ab 7:Eb"));
+            CHECK (entry.note.contains ("neither harmony nor change timing is enforced"));
         }
         if (entry.field == "protected-choices")
         {
@@ -263,6 +304,49 @@ TEST_CASE ("Direct service params satisfy the explicit no-fallback render contra
     CHECK (static_cast<double> (params["nl"]) == Catch::Approx (0.35));
 }
 
+TEST_CASE ("Chord change timing reaches the request as structured data, not enforced", "[reimagine][session][service]")
+{
+    auto snapshot = eightBarSnapshot();
+    snapshot.context.chords = parseChordList ("1:Fm7 3:Db 4.5:Eb/G", 8.0).chords;
+    snapshot.context.chordsFrom = Provenance::user;
+    const auto r = *compileIntention (hazyKeys(), snapshot, "i", {}, 0).request;
+    CHECK (r.prompt == "hazy sampled-keyboard loop, less busy performance, 90 BPM, chords by bar: 1 Fm7, 3 Db, 4.50 Eb/G");
+    REQUIRE (r.chordTiming.size() == 3);
+    CHECK (r.chordTimingFrom == Provenance::user);
+
+    // The service body carries the same list with provenance, and claims no enforcement.
+    const auto params = directServiceParams (r, 0, juce::String::repeatedString ("c", 64), "i:0");
+    const auto timing = params["chord_timing"];
+    REQUIRE (timing.isObject());
+    CHECK (timing["unit"].toString() == "bar");
+    CHECK (timing["origin"].toString() == "region-start");
+    CHECK (timing["provenance"].toString() == "user");
+    CHECK_FALSE (static_cast<bool> (timing["enforced"]));
+    REQUIRE (timing["events"].size() == 3);
+    CHECK (static_cast<double> (timing["events"][2]["bar"]) == Catch::Approx (4.5));
+    CHECK (timing["events"][2]["symbol"].toString() == "Eb/G");
+    CHECK (compiledRequestToVar (r)["chordTiming"]["events"].size() == 3);
+
+    // Deterministic: the same snapshot compiles to the same prompt and body.
+    const auto again = *compileIntention (hazyKeys(), snapshot, "i", {}, 0).request;
+    CHECK (again.prompt == r.prompt);
+    CHECK (juce::JSON::toString (directServiceParams (again, 0, juce::String::repeatedString ("c", 64), "i:0"))
+           == juce::JSON::toString (params));
+
+    // No chords: the field is absent, so older service builds see an unchanged body.
+    const auto plain = *compileIntention (hazyKeys(), eightBarSnapshot(), "i", {}, 0).request;
+    CHECK_FALSE (directServiceParams (plain, 0, juce::String::repeatedString ("c", 64), "i:0")
+                     .getDynamicObject()->hasProperty ("chord_timing"));
+    CHECK_FALSE (plain.prompt.contains ("chords"));
+
+    // A hand-edited request with bad timing is refused before submission.
+    auto bad = r;
+    bad.chordTiming = { { 3.0, "Fm7" }, { 2.0, "Db" } };
+    CHECK_FALSE (validateRequest (bad).isEmpty());
+    bad.chordTiming = { { 1.0, "rm -rf" } };
+    CHECK_FALSE (validateRequest (bad).isEmpty());
+}
+
 TEST_CASE ("Context and intentions round-trip and keep unknown as unknown", "[reimagine][session][state]")
 {
     SessionContext c;
@@ -325,6 +409,144 @@ TEST_CASE ("Technical checks pass good audio and fail deliberately bad fixtures"
     CHECK (clip.usable);
     CHECK (clip.warnings.size() == 3);   // clipping, channel count, length
     CHECK (clip.durationDeltaSeconds == Catch::Approx (1.0));
+}
+
+TEST_CASE ("Tempo conformance: a steady click at the session tempo conforms", "[reimagine][session][tempo-conformance]")
+{
+    for (const auto rate : { 48000.0, 44100.0 })
+        for (const auto bpm : { 90.0, 120.0, 143.0 })
+        {
+            CAPTURE (rate, bpm);
+            const auto report = conformanceOf (clickTrack (bpm, bpm, 16.0, rate, 0.0137), rate, hostTempo (bpm));
+            CHECK (report.verdict == TempoVerdict::conforms);
+            REQUIRE (report.estimatedBpm.has_value());
+            CHECK (*report.estimatedBpm == Catch::Approx (bpm).margin (0.1));
+            CHECK (std::abs (report.driftMsPerBar) < 2.0);
+            CHECK (report.pulseStrength >= kTempoMinPulseStrength);
+            CHECK (describeTempoConformance (report).startsWith ("conforms to "));
+        }
+
+    // A short 4 s take (8 beats at 120) still measures within tolerance.
+    CHECK (conformanceOf (clickTrack (120.0, 120.0, 4.0, 48000.0), 48000.0, hostTempo (120.0)).verdict
+           == TempoVerdict::conforms);
+    // Clicks over a sustained low pad (55 + 220 Hz) still measure: the pad is not a pulse.
+    auto padded = clickTrack (120.0, 120.0, 16.0, 48000.0);
+    for (size_t i = 0; i < padded.size(); ++i)
+    {
+        const auto t = static_cast<double> (i) / 48000.0;
+        padded[i] += static_cast<float> (0.3 * std::sin (2.0 * 3.14159265358979 * 55.0 * t)
+                                         + 0.2 * std::sin (2.0 * 3.14159265358979 * 220.0 * t));
+    }
+    CHECK (conformanceOf (padded, 48000.0, hostTempo (120.0)).verdict == TempoVerdict::conforms);
+    CHECK (conformanceOf (padded, 48000.0, hostTempo (121.0)).verdict == TempoVerdict::drifts);
+
+    // Half-time material (a hit every other beat) conforms through the 2-beat lag.
+    CHECK (conformanceOf (clickTrack (60.0, 60.0, 16.0, 48000.0), 48000.0, hostTempo (120.0)).verdict
+           == TempoVerdict::conforms);
+}
+
+TEST_CASE ("Tempo conformance: a click at another tempo, or accelerating, drifts", "[reimagine][session][tempo-conformance]")
+{
+    // 121 BPM against a 120 BPM session: (60/121 - 0.5) s x 4 beats = -16.5 ms per bar.
+    const auto faster = conformanceOf (clickTrack (121.0, 121.0, 16.0, 48000.0), 48000.0, hostTempo (120.0));
+    CHECK (faster.verdict == TempoVerdict::drifts);
+    CHECK (faster.driftMsPerBar == Catch::Approx (-16.53).margin (1.0));
+    REQUIRE (faster.estimatedBpm.has_value());
+    CHECK (*faster.estimatedBpm == Catch::Approx (121.0).margin (0.2));
+    CHECK (describeTempoConformance (faster).contains ("faster than 120.00 BPM (host)"));
+
+    // 3/4 meter: drift scales with the bar. 118 BPM vs 120: (60/118 - 0.5) x 3 = +25.4 ms per bar.
+    auto threeFour = hostTempo (120.0);
+    threeFour.meterNumerator = 3;
+    const auto slower = conformanceOf (clickTrack (118.0, 118.0, 16.0, 48000.0), 48000.0, threeFour);
+    CHECK (slower.verdict == TempoVerdict::drifts);
+    CHECK (slower.driftMsPerBar == Catch::Approx (25.42).margin (1.5));
+    CHECK (describeTempoConformance (slower).contains ("slower"));
+
+    // A take that speeds up from 120 to 128 BPM never reports conforming.
+    const auto accelerating = conformanceOf (clickTrack (120.0, 128.0, 16.0, 48000.0), 48000.0, hostTempo (120.0));
+    CHECK (accelerating.verdict != TempoVerdict::conforms);
+}
+
+TEST_CASE ("Tempo conformance stays undetermined without a trustworthy tempo or pulse", "[reimagine][session][tempo-conformance]")
+{
+    const auto clicks = clickTrack (120.0, 120.0, 16.0, 48000.0);
+
+    SessionContext unknown;
+    const auto noBpm = conformanceOf (clicks, 48000.0, unknown);
+    CHECK (noBpm.verdict == TempoVerdict::undetermined);
+    CHECK_FALSE (noBpm.estimatedBpm.has_value());
+    CHECK (noBpm.reason.contains ("BPM unknown"));
+
+    // A BPM value whose provenance is unknown is not evidence.
+    auto unproven = hostTempo (120.0);
+    unproven.bpmFrom = Provenance::unknown;
+    CHECK (conformanceOf (clicks, 48000.0, unproven).verdict == TempoVerdict::undetermined);
+
+    // tempoMapAssumed wins even when a BPM is present.
+    auto assumed = hostTempo (120.0);
+    assumed.tempoAssumed = true;
+    const auto assumedReport = conformanceOf (clicks, 48000.0, assumed);
+    CHECK (assumedReport.verdict == TempoVerdict::undetermined);
+    CHECK (assumedReport.reason.contains ("assumed"));
+    CHECK (tempoConformanceToVar (assumedReport)["driftMsPerBar"].isVoid());
+
+    // Steady tone, silence, noise and a too-short clip have no measurable beat grid.
+    CHECK (conformanceOf (sine (48000 * 8, 0.5f), 48000.0, hostTempo (120.0)).verdict == TempoVerdict::undetermined);
+    CHECK (conformanceOf (std::vector<float> (48000 * 8, 0.0f), 48000.0, hostTempo (120.0)).verdict
+           == TempoVerdict::undetermined);
+    std::vector<float> noise (48000 * 8);
+    juce::Random random (42);
+    for (auto& v : noise)
+        v = random.nextFloat() * 0.6f - 0.3f;
+    CHECK (conformanceOf (noise, 48000.0, hostTempo (120.0)).verdict == TempoVerdict::undetermined);
+    CHECK (conformanceOf (clickTrack (120.0, 120.0, 1.5, 48000.0), 48000.0, hostTempo (120.0)).verdict
+           == TempoVerdict::undetermined);
+    // A pulse far from the session tempo (90 vs 120 BPM) is not forced onto it.
+    CHECK (conformanceOf (clickTrack (90.0, 90.0, 16.0, 48000.0), 48000.0, hostTempo (120.0)).verdict
+           != TempoVerdict::conforms);
+
+    // Unknown meter: 4 beats per bar is assumed and said so.
+    auto noMeter = hostTempo (120.0);
+    noMeter.meterNumerator.reset();
+    noMeter.meterFrom = Provenance::unknown;
+    const auto assumedMeter = conformanceOf (clicks, 48000.0, noMeter);
+    CHECK (assumedMeter.meterAssumed);
+    CHECK (describeTempoConformance (assumedMeter).contains ("4 beats/bar assumed"));
+}
+
+TEST_CASE ("Tempo conformance is stored on the take and old states still load", "[reimagine][session][tempo-conformance][state]")
+{
+    const auto report = conformanceOf (clickTrack (121.0, 121.0, 16.0, 48000.0), 48000.0, hostTempo (120.0));
+    PluginStateV1 state;
+    TransferRegion region;
+    region.id = "r";
+    region.sourceHash = "src";
+    RenderTake take;
+    take.id = "t";
+    take.assetHash = juce::String::repeatedString ("d", 64);
+    setLineage (take, { "int-1", {}, "candidate", false, false });
+    take.manifest["m1"].getDynamicObject()->setProperty ("tempoConformance", tempoConformanceToVar (report));
+    region.takes.push_back (take);
+    state.regions.push_back (region);
+
+    const auto back = deserializeState (serializeState (state));
+    REQUIRE (back.has_value());
+    const auto stored = back->regions.front().takes.front().manifest["m1"]["tempoConformance"];
+    CHECK (stored["verdict"].toString() == "drifts");
+    CHECK (stored["kind"].toString().contains ("not a taste judgement"));
+    CHECK_FALSE (static_cast<bool> (stored["phaseChecked"]));
+    CHECK (describeStoredTempoConformance (stored) == describeTempoConformance (report));
+    CHECK (lineageOf (back->regions.front().takes.front()).intentionId == "int-1");
+
+    // A take written before the check has no field and says so instead of guessing.
+    const auto legacy = deserializeState (
+        "{\"schemaVersion\": 1, \"regions\": [{\"id\": \"r\", \"takes\": [{\"id\": \"t\", \"assetHash\": \"x\", "
+        "\"manifest\": {\"m1\": {\"intentionId\": \"int-1\", \"role\": \"candidate\"}}}]}]}");
+    REQUIRE (legacy.has_value());
+    REQUIRE (legacy->regions.front().takes.size() == 1);
+    CHECK (describeStoredTempoConformance (legacy->regions.front().takes.front().manifest["m1"]["tempoConformance"])
+           == "not measured (version predates the check)");
 }
 
 TEST_CASE ("Lineage lives in the take manifest without mutating shared copies", "[reimagine][session][versions]")
