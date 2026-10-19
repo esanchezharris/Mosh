@@ -2246,7 +2246,18 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
         // The voice mode: a load that returns it to poly reallocates the synth's voices, and
         // so do the load's undo and redo (Tracktion reallocates from a stale value unless the
         // change is resynced: ResyncFourOscVoicesAction). Heard as a two-note chord.
+        //
+        // Every chord is heard on mosh-keys, including the state the last undo returns to. Each
+        // 4OSC note starts its oscillators at random phases (MultiVoiceOscillator::start), and
+        // mosh-lead has two saws at one pitch at near-equal levels, so one note's fundamental
+        // can cancel to under a tenth of the other's: a poly mosh-lead chord fails `both` about
+        // 1.6% of the time in a model of it. That was the "C 0.01757, G 0.00159" gate failure
+        // (a mono 4OSC steals its one voice, so it sounds G, not C). mosh-keys' sine and
+        // octave-up triangle never share a frequency, so each fundamental comes from one
+        // oscillator and its level does not depend on phase. The load that returns to poly
+        // still resets the hand-set mono to the default (the property-removal path).
         {
+            check (ok (load (files["mosh-keys"])) && st ("voiceMode").toString() == "poly", "mosh-keys first, still poly");
             auto magnitude = [] (const juce::AudioBuffer<float>& b, double hz)
             {
                 const double w = juce::MathConstants<double>::twoPi * hz / 48000.0;
@@ -2255,13 +2266,24 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                 for (int i = 0; i < b.getNumSamples(); ++i) { re += x[i] * std::cos (w * i); im -= x[i] * std::sin (w * i); }
                 return std::sqrt (re * re + im * im) / juce::jmax (1, b.getNumSamples());
             };
+            // A note's presence is its fundamental AND 2nd harmonic. Each 4OSC oscillator (and
+            // unison voice) starts at a random phase (tracktion MultiVoiceOscillator::start),
+            // and mosh-lead stacks two saws at one pitch: a relative phase near pi cancels the
+            // fundamental to ~3% (seen: G 0.00116 vs ~0.035), but leaves the 2nd harmonic
+            // (2*pi) in phase, so the pair can't vanish. C's and G's 1st/2nd harmonics are
+            // clear of each other (G's 2nd sits on C's 3rd, which is not measured for C).
+            auto presence = [&] (const juce::AudioBuffer<float>& b, double hz)
+            {
+                const double h1 = magnitude (b, hz), h2 = magnitude (b, 2.0 * hz);
+                return std::sqrt (h1 * h1 + h2 * h2);
+            };
             auto chord = [&]
             {
                 LiveInstrument live (*synth, 256);
                 const auto out = live.play (0.4, { { 0, juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100) },
                                                    { 0, juce::MidiMessage::noteOn (1, 67, (juce::uint8) 100) } });
                 live.play (0.8, { { 0, juce::MidiMessage::noteOff (1, 60) }, { 0, juce::MidiMessage::noteOff (1, 67) } });
-                const double c = magnitude (out, 261.626), g = magnitude (out, 391.995);
+                const double c = presence (out, 261.626), g = presence (out, 391.995);
                 return std::make_pair (c, g);
             };
             auto both = [] (std::pair<double, double> m) { return juce::jmin (m.first, m.second) > 0.1 * juce::jmax (m.first, m.second); };

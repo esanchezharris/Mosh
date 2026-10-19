@@ -17,6 +17,20 @@ if (NOT NPM_EXECUTABLE)
     return()
 endif()
 
+# ui/node_modules, installed once and re-installed only when package.json or
+# package-lock.json changes. Every target that runs an npm script in ui/ depends on
+# this; without it a fresh clone could run one before any `npm install` (the
+# skill identity gate below failed with `tsx: not found` that way). Always-run like
+# MoshUI; the script no-ops when its stamp is current.
+add_custom_target(MoshUIDeps
+    COMMAND ${CMAKE_COMMAND}
+            -DMODE=deps
+            "-DMOSH_UI_DIR=${MOSH_UI_DIR}"
+            "-DNPM_EXECUTABLE=${NPM_EXECUTABLE}"
+            -P "${CMAKE_CURRENT_LIST_DIR}/BuildUIFresh.cmake"
+    COMMENT "Checking ui/node_modules (npm install if package.json/package-lock.json changed)"
+    VERBATIM)
+
 # Freshness is checked EXPLICITLY by cmake/BuildUIFresh.cmake (run-time glob +
 # mtime compare inside the script), NOT by Ninja's OUTPUT/DEPENDS heuristic —
 # that heuristic fired unreliably for UI-only edits (configure-time glob
@@ -35,6 +49,7 @@ add_custom_target(MoshUI
             -P "${CMAKE_CURRENT_LIST_DIR}/BuildUIFresh.cmake"
     COMMENT "Checking UI bundle freshness (Vite build if ui/src is newer)"
     VERBATIM)
+add_dependencies(MoshUI MoshUIDeps)
 
 # Stage the built bundle where WebBridge can serve it after the app links.
 add_dependencies(Mosh MoshUI)
@@ -109,4 +124,5 @@ add_custom_target(MoshSkillIdentityGate
             --owner-active-index "${MOSH_SKILL_OWNER_ACTIVE_INDEX}"
     COMMENT "Verifying skill identity/collision universe (native + declarative + owner)"
     VERBATIM)
+add_dependencies(MoshSkillIdentityGate MoshUIDeps)
 add_dependencies(Mosh MoshSkillIdentityGate)

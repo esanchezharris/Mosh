@@ -1662,7 +1662,7 @@ juce::var MoshOps::cmdGetCommandLog (const juce::var& args)
     {
         const juce::ScopedLock sl (commandLogCacheLock_);
         total = (int) commandLogTotal_;
-        logBytes = (double) juce::jmax<juce::int64> (commandLogBytes_, 0);
+        logBytes = (double) juce::jmax (commandLogBytes_, (juce::int64) 0);
 
         for (int i = commandLogRecentEntries_.size() - 1; i >= 0 && recent.size() < limit; --i)
             recent.add (commandLogRecentEntries_.getReference (i));

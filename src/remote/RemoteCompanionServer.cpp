@@ -370,7 +370,7 @@ juce::var RemoteCompanionServer::handleApiRequest (const Request& request, int& 
 
     {
         const juce::ScopedLock sl (lock);
-        if (! protocol.authorize (request.authToken, juce::Time::currentTimeMillis()).ok)
+        if (! protocol.authorizeAndRenew (request.authToken, juce::Time::currentTimeMillis()).ok)
         {
             status = 401;
             return phoneError ("Pair this phone again");
@@ -1012,11 +1012,11 @@ juce::var RemoteCompanionServer::callOnMessageThread (const std::function<juce::
     return shared->result;
 }
 
-RemoteAuthResult RemoteCompanionServer::authorizeRequest (const juce::var& body) const
+RemoteAuthResult RemoteCompanionServer::authorizeRequest (const juce::var& body)
 {
     const auto token = propString (body, "token");
     const juce::ScopedLock sl (lock);
-    return protocol.authorize (token, juce::Time::currentTimeMillis());
+    return protocol.authorizeAndRenew (token, juce::Time::currentTimeMillis());
 }
 
 juce::var RemoteCompanionServer::eventsSince (int sinceSeq) const

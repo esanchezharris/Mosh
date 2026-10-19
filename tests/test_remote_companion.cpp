@@ -86,6 +86,64 @@ TEST_CASE ("remote companion pairing requires an unexpired token", "[remote][pai
     REQUIRE_FALSE (protocol.authorize ("pair-token", 1000 + RemoteCompanionProtocol::pairingTtlMs() + 1).ok);
 }
 
+TEST_CASE ("a phone in use keeps its pairing alive past the scan window", "[remote][pairing]")
+{
+    const auto scanTtl = RemoteCompanionProtocol::pairingTtlMs();
+    const auto idleTtl = RemoteCompanionProtocol::sessionIdleTtlMs();
+    REQUIRE (idleTtl > scanTtl);
+
+    RemoteCompanionProtocol protocol;
+    protocol.beginPairing ("10.0.0.2", 47873, 0, "pair-token");
+
+    // A recording session: the pad polls well past the 5-minute scan window.
+    for (juce::int64 t = 0; t <= 3 * scanTtl; t += 1000)
+        REQUIRE (protocol.authorizeAndRenew ("pair-token", t).ok);
+
+    const auto lastUse = 3 * scanTtl;
+    REQUIRE (protocol.authorize ("pair-token", lastUse + idleTtl).ok);
+    REQUIRE_FALSE (protocol.authorize ("pair-token", lastUse + idleTtl + 1).ok);
+}
+
+TEST_CASE ("pairing renewal never revives, extends for a stranger, or shortens", "[remote][pairing]")
+{
+    const auto scanTtl = RemoteCompanionProtocol::pairingTtlMs();
+
+    SECTION ("an unscanned QR still expires after the scan window")
+    {
+        RemoteCompanionProtocol protocol;
+        protocol.beginPairing ("10.0.0.2", 47873, 0, "pair-token");
+        REQUIRE_FALSE (protocol.authorizeAndRenew ("pair-token", scanTtl + 1).ok);
+        REQUIRE_FALSE (protocol.authorize ("pair-token", scanTtl + 2).ok);
+    }
+
+    SECTION ("a wrong token does not renew the real one")
+    {
+        RemoteCompanionProtocol protocol;
+        protocol.beginPairing ("10.0.0.2", 47873, 0, "pair-token");
+        REQUIRE_FALSE (protocol.authorizeAndRenew ("wrong-token", scanTtl - 1).ok);
+        REQUIRE_FALSE (protocol.authorize ("pair-token", scanTtl + 1).ok);
+    }
+
+    SECTION ("a longer lab-feed expiry is kept")
+    {
+        const juce::int64 dayMs = 24LL * 60 * 60 * 1000;
+        RemoteCompanionProtocol protocol;
+        protocol.beginPairing ("10.0.0.2", 47873, 0, "lab-token", dayMs);
+        REQUIRE (protocol.authorizeAndRenew ("lab-token", 1000).ok);
+        REQUIRE (protocol.currentPairing().expiresAtMs == dayMs);
+    }
+
+    SECTION ("a new QR invalidates the previous phone")
+    {
+        RemoteCompanionProtocol protocol;
+        protocol.beginPairing ("10.0.0.2", 47873, 0, "old-token");
+        REQUIRE (protocol.authorizeAndRenew ("old-token", 1000).ok);
+        protocol.beginPairing ("10.0.0.2", 47873, 2000, "new-token");
+        REQUIRE_FALSE (protocol.authorizeAndRenew ("old-token", 3000).ok);
+        REQUIRE (protocol.authorizeAndRenew ("new-token", 3000).ok);
+    }
+}
+
 TEST_CASE ("phone take store writes sequenced PCM chunks to a WAV on finish", "[remote][takes]")
 {
     auto root = juce::File::getSpecialLocation (juce::File::tempDirectory)
