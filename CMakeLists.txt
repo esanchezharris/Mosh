@@ -49,7 +49,7 @@ endif()
 # relaunch on 0.1.y", and Sparkle decides what is newer by comparing exactly this value
 # (CFBundleVersion / CFBundleShortVersionString, both fed from here by JUCE). Editing this
 # line for every test build would put a version bump in the diff of unrelated work.
-set(MOSH_VERSION "0.1.1" CACHE STRING "Bundle version (CFBundleShortVersionString + CFBundleVersion)")
+set(MOSH_VERSION "0.1.2" CACHE STRING "Bundle version (CFBundleShortVersionString + CFBundleVersion)")
 option(MOSH_BUILD_DAWN_BRIDGE "Build the macOS-only Mosh DAWN Bridge menu-bar app" OFF)
 if (CMAKE_HOST_APPLE AND MOSH_BUILD_DAWN_BRIDGE)
     project(Mosh VERSION ${MOSH_VERSION} LANGUAGES C CXX OBJCXX)
@@ -267,6 +267,10 @@ if (MOSH_BUILD_APP)
         # WebView2 (Edge Chromium) backs the WebView on Windows. JUCE ignores this
         # on non-Windows, so it is safe to pass unconditionally.
         NEEDS_WEBVIEW2 TRUE
+        # WebKitGTK + GTK back the WebView on Linux. JUCE only links them (and only adds
+        # the gtk/webkit include dirs juce_gui_extra needs) when this is set, and reads
+        # it only on Linux/BSD, so it is a no-op on macOS/Windows.
+        NEEDS_WEB_BROWSER TRUE
         ${MOSH_APP_EXTRA_ARGS})
 
 # Source modules (00 §5). Added incrementally per build stage.
@@ -687,6 +691,14 @@ if (MOSH_BUILD_APP)
                     "$<TARGET_FILE_DIR:Mosh>/drumkits"
             COMMENT "Staging drum kits next to the Mosh executable"
             VERBATIM)
+        # P1 preset seam — MoshOps::presetsBundledRoot falls back to <exe dir>/presets off
+        # macOS. Without this the 4OSC and track-chain banks were missing on Linux.
+        add_custom_command(TARGET Mosh POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${CMAKE_SOURCE_DIR}/resources/presets"
+                    "$<TARGET_FILE_DIR:Mosh>/presets"
+            COMMENT "Staging instrument presets next to the Mosh executable"
+            VERBATIM)
 
         # Windows: stage the MSVC runtime redistributable DLLs (vcruntime140*, msvcp140)
         # next to Mosh.exe so a zipped self-contained build (run-mosh.ps1 -Package copies
@@ -756,7 +768,10 @@ if (MOSH_BUILD_PLUGIN_FIXTURES)
     add_subdirectory(src/plugin_fixtures)
 endif()
 
-if (MOSH_BUILD_REIMAGINE_PLUGIN AND APPLE)
+# Default ON for Apple only (the owner-local VST3). Linux CI opts in explicitly with
+# -DMOSH_BUILD_REIMAGINE_PLUGIN=ON to build and run the plug-in's headless tests;
+# the macOS-only bundle smoke stays guarded inside the subdirectory.
+if (MOSH_BUILD_REIMAGINE_PLUGIN AND (APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
     add_subdirectory(src/reimagine/plugin)
 endif()
 

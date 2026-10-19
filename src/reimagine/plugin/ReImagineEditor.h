@@ -92,6 +92,9 @@ private:
     juce::TextButton keep { "Keep" };
     juce::TextButton exportWav { "Export" };
     DragOutButton dragOut { processorRef };
+    juce::TextButton conform { "Conform tempo" };
+    juce::TextButton undoConform { "Undo" };
+    juce::TextButton preview { "Free preview" };
     juce::Label report;
     juce::String knownTakeSignature;
     juce::String knownContextRegion;

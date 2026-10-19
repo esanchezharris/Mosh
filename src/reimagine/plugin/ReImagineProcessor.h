@@ -95,6 +95,25 @@ public:
     juce::File exportSelected (juce::String& error);
     juce::String selectedReport() const;
     bool generationActive() const noexcept { return batchActive.load (std::memory_order_acquire) != 0; }
+
+    // Conform (explicit, optional, timing only). Queues a worker-thread job that measures
+    // the selected version's beat period and, when it drifts within +-8% of a session BPM
+    // the host or user supplied, time-stretches it into a NEW version linked to it
+    // (parent, conformedFrom, stretchRatio). The original is never overwritten. Returns
+    // the refusal reason, or empty when queued; the worker can still refuse after
+    // measuring (status + experience log say why).
+    juce::String conformSelected();
+    // Removes the selected version when it is the newest version, a conform and not kept,
+    // and selects the version it was stretched from. The stored asset is not deleted.
+    bool undoLastConform();
+    bool conformActive() const noexcept { return conformRunning.load (std::memory_order_acquire) != 0; }
+
+    // Free audition: a local, free-running preview of the selected version for when the
+    // host gives no transport or timing. Not host-synced; it stops itself as soon as
+    // host-synced replace playback becomes active. Returns a refusal reason, or empty.
+    juce::String startFreeAudition();
+    void stopFreeAudition();
+    bool freeAuditionPlaying() const noexcept { return audition.playing(); }
     const juce::String& instanceIdentifier() const noexcept { return instanceId; }
 
     juce::AudioProcessorValueTreeState parameters;
@@ -116,6 +135,7 @@ private:
     struct PlaybackSnapshot
     {
         std::vector<std::unique_ptr<PlaybackRegion>> regions;
+        int selectedIndex = -1;               // the selected region's entry, for free audition
     };
 
     static juce::AudioProcessorValueTreeState::ParameterLayout makeParameters();
@@ -123,6 +143,7 @@ private:
     std::optional<HostPosition> hostPosition() const noexcept;
     void captureInput (const juce::AudioBuffer<float>&, int64_t offset) noexcept;
     void renderSelected (juce::AudioBuffer<float>&, const HostPosition&) noexcept;
+    void renderFreeAudition (juce::AudioBuffer<float>&, bool hostSyncedActive) noexcept;
     int sampleForPpq (const PlaybackRegion&, double ppq) const noexcept;
     void run() override;
     void finalizeCapture();
@@ -194,6 +215,23 @@ private:
     std::atomic<uint64_t> nextBatchId { 1 };
     std::atomic<uint64_t> cancelledThroughBatch { 0 };
     std::atomic<int> lastMeterNumerator { 0 };
+
+    struct ConformJob
+    {
+        juce::String regionId;
+        juce::String sourceHash;
+        juce::String parentTakeId;
+        juce::String parentAssetHash;
+        SessionContext context;
+    };
+    void performConform (const ConformJob&);
+    // pendingConform is guarded by stateLock.
+    std::optional<ConformJob> pendingConform;
+    std::atomic<int> conformRequested { 0 };
+    std::atomic<int> conformRunning { 0 };
+    FreeAudition audition;
+    std::atomic<int> auditionArmRequested { 0 };
+
     const juce::String instanceId { juce::Uuid().toString() };
     ExperienceLog experience;
 

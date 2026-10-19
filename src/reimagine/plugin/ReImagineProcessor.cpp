@@ -1,5 +1,6 @@
 #include "ReImagineProcessor.h"
 #include "ReImagineEditor.h"
+#include "../ReImagineConform.h"
 
 #include <algorithm>
 #include <cmath>
@@ -121,8 +122,12 @@ int ReImagineProcessor::sampleForPpq (const PlaybackRegion& region, double ppq) 
 
 void ReImagineProcessor::renderSelected (juce::AudioBuffer<float>& buffer, const HostPosition& host) noexcept
 {
-    snapshotReaders.fetch_add (1, std::memory_order_acq_rel);
-    const auto* snapshot = audibleSnapshot.load (std::memory_order_acquire);
+    // seq_cst on the reader count and the pointer, here and in publishPlayback: with
+    // acquire/release alone the reader's load may see the OLD pointer while the
+    // publisher's load still sees zero readers (store->load reordering), and the old
+    // snapshot is freed under the audio thread. Two seq_cst pairs cannot both miss.
+    snapshotReaders.fetch_add (1, std::memory_order_seq_cst);
+    const auto* snapshot = audibleSnapshot.load (std::memory_order_seq_cst);
     if (snapshot == nullptr || compareDry.load (std::memory_order_acquire) != 0)
     {
         snapshotReaders.fetch_sub (1, std::memory_order_release);
@@ -166,6 +171,29 @@ void ReImagineProcessor::renderSelected (juce::AudioBuffer<float>& buffer, const
                               buffer.getSample (channel, sample) * gains.dry + rendered * gains.wet);
         }
     }
+    snapshotReaders.fetch_sub (1, std::memory_order_release);
+}
+
+void ReImagineProcessor::renderFreeAudition (juce::AudioBuffer<float>& buffer, bool hostSyncedActive) noexcept
+{
+    if (! audition.playing())
+        return;
+    snapshotReaders.fetch_add (1, std::memory_order_seq_cst);   // see renderSelected
+    const auto* snapshot = audibleSnapshot.load (std::memory_order_seq_cst);
+    const PlaybackRegion* region = nullptr;
+    if (snapshot != nullptr && juce::isPositiveAndBelow (snapshot->selectedIndex, static_cast<int> (snapshot->regions.size())))
+        region = snapshot->regions[static_cast<size_t> (snapshot->selectedIndex)].get();
+    const auto length = region != nullptr ? static_cast<int64_t> (region->audio.getNumSamples()) : int64_t { 0 };
+    const auto block = audition.advance (buffer.getNumSamples(), length, hostSyncedActive);
+    // Replace, never add: the preview substitutes for the input like the host-synced route.
+    if (block.count > 0 && region != nullptr && compareDry.load (std::memory_order_acquire) == 0)
+        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+        {
+            const auto sourceChannel = std::min (channel, region->audio.getNumChannels() - 1);
+            juce::FloatVectorOperations::copy (buffer.getWritePointer (channel),
+                                               region->audio.getReadPointer (sourceChannel, static_cast<int> (block.start)),
+                                               block.count);
+        }
     snapshotReaders.fetch_sub (1, std::memory_order_release);
 }
 
@@ -218,8 +246,12 @@ void ReImagineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
             || event == CaptureEvent::abortedTempoMapCapacity)
             captureAbortEvent.store (static_cast<int> (event), std::memory_order_release);
     }
+    const auto hostSynced = offline || (position && shouldRenderSelected (*position, offline));
     if (position && shouldRenderSelected (*position, offline))
         renderSelected (buffer, *position);
+    // After the host-synced route: the free preview stops itself whenever that route is
+    // active, so the selected version is never audible twice.
+    renderFreeAudition (buffer, hostSynced);
     transferStateMirror.store (static_cast<int> (transfer.state()), std::memory_order_release);
 }
 
@@ -718,6 +750,9 @@ void ReImagineProcessor::performRender (const RenderRequest& request)
 
 void ReImagineProcessor::publishPlayback (std::unique_ptr<PlaybackSnapshot> snapshot)
 {
+    // A new snapshot means the selection or its audio changed; a running preview stops
+    // rather than continuing on other audio. (A preview being armed starts afterwards.)
+    audition.stop (AuditionStop::selectionChanged);
     {
         const juce::ScopedLock lock (stateLock);
         for (auto& playbackRegion : snapshot->regions)
@@ -726,8 +761,8 @@ void ReImagineProcessor::publishPlayback (std::unique_ptr<PlaybackSnapshot> snap
                     playbackRegion->stale.store (1, std::memory_order_relaxed);
     }
     const auto* raw = snapshot.get();
-    audibleSnapshot.store (raw, std::memory_order_release);
-    while (snapshotReaders.load (std::memory_order_acquire) != 0)
+    audibleSnapshot.store (raw, std::memory_order_seq_cst);
+    while (snapshotReaders.load (std::memory_order_seq_cst) != 0)
         wait (1);
     ownedPlaybackSnapshot = std::move (snapshot);
 }
@@ -820,6 +855,8 @@ void ReImagineProcessor::loadSelectedTake()
                 output[sample] = input[lower] + fraction * (input[upper] - input[lower]);
             }
         }
+        if (region.id == state.selectedRegionId)
+            playback->selectedIndex = static_cast<int> (playback->regions.size());
         playback->regions.push_back (std::move (loaded));
         loadedAny = true;
     }
@@ -882,6 +919,24 @@ void ReImagineProcessor::run()
         }
         if (loadRequested.exchange (0, std::memory_order_acq_rel) != 0)
             loadSelectedTake();
+        if (auditionArmRequested.exchange (0, std::memory_order_acq_rel) != 0)
+        {
+            bool loaded = false;
+            if (const auto* playback = audibleSnapshot.load (std::memory_order_acquire); playback != nullptr)
+                loaded = playback->selectedIndex >= 0;   // the worker owns the snapshot; no reader guard needed
+            const auto hostSynced = lastHostPlaying.load (std::memory_order_acquire) != 0
+                                 || offlineProcessing.load (std::memory_order_acquire) != 0;
+            const auto started = audition.start (loaded, hostSynced);
+            if (started == FreeAudition::StartResult::started)
+            {
+                setStatus ("Free audition playing - local preview, not synced to the host timeline");
+                logEvent ("version.auditioned", "implicit", juce::JSON::parse ("{\"mode\": \"free-running\"}"));
+            }
+            else
+                setStatus (started == FreeAudition::StartResult::hostSyncedActive
+                               ? "Free audition refused: the host is playing the region in sync"
+                               : "Free audition refused: the selected version is not loaded");
+        }
         if (loraCatalogRequested.exchange (0, std::memory_order_acq_rel) != 0)
         {
             juce::String error;
@@ -910,6 +965,21 @@ void ReImagineProcessor::run()
             }
             if (batch)
                 performBatch (*batch);
+        }
+        if (conformRequested.exchange (0, std::memory_order_acq_rel) != 0)
+        {
+            std::optional<ConformJob> job;
+            {
+                const juce::ScopedLock lock (stateLock);
+                job.swap (pendingConform);
+                if (job)
+                    conformRunning.store (1, std::memory_order_release);
+            }
+            if (job)
+            {
+                performConform (*job);
+                conformRunning.store (0, std::memory_order_release);
+            }
         }
         if (renderRequested.exchange (0, std::memory_order_acq_rel) != 0)
         {
@@ -1040,6 +1110,8 @@ juce::StringArray ReImagineProcessor::enqueueBatch (IntentionInput input, bool r
             return refuse ({ "Choose Replace or Discard for the overlapping Transfer first" });
         if (pendingBatch || batchActive.load (std::memory_order_acquire) != 0)
             return refuse ({ "A generation is already running - Cancel it first" });
+        if (pendingConform || conformRunning.load (std::memory_order_acquire) != 0)
+            return refuse ({ "A conform is running - wait for it to finish" });
         const auto* selected = selectedRegionUnsafe();
         if (selected == nullptr)
             return refuse ({ "Transfer or Import a region first" });
@@ -1339,12 +1411,16 @@ void ReImagineProcessor::performBatch (const GenerationBatch& batch)
         // Technical checks on what actually came back (not a taste judgement).
         auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (output));
         AudioStats stats;
+        TempoConformanceReport tempo;
         if (reader && reader->lengthInSamples > 0 && reader->lengthInSamples <= std::numeric_limits<int>::max())
         {
             juce::AudioBuffer<float> audio (static_cast<int> (reader->numChannels), static_cast<int> (reader->lengthInSamples));
             reader->read (&audio, 0, audio.getNumSamples(), 0, true, true);
             stats = measureAudio (audio.getArrayOfReadPointers(), audio.getNumChannels(), audio.getNumSamples(),
                                   reader->sampleRate);
+            // Reported beside the checks, never folded into them: a drifting take stays usable.
+            tempo = checkTempoConformance (audio.getArrayOfReadPointers(), audio.getNumChannels(), audio.getNumSamples(),
+                                           reader->sampleRate, batch.snapshot.context);
         }
         reader.reset();
         const auto report = checkCandidate (stats, expectedSeconds, batch.snapshot.channels);
@@ -1384,7 +1460,8 @@ void ReImagineProcessor::performBatch (const GenerationBatch& batch)
         const auto fixture = static_cast<bool> (take.manifest.getProperty ("test_fixture", false))
                           || take.manifest.getProperty ("backend", {}).toString() == "fixture";
         setLineage (take, { batch.request.intentionId, batch.request.parentTakeId,
-                            batch.request.parentTakeId.isEmpty() ? "candidate" : "revision", false, fixture });
+                            batch.request.parentTakeId.isEmpty() ? "candidate" : "revision", false, fixture,
+                            {}, std::nullopt });
         if (auto* m1 = take.manifest.getProperty ("m1", {}).getDynamicObject())
         {
             m1->setProperty ("snapshotId", batch.snapshot.id);
@@ -1395,6 +1472,7 @@ void ReImagineProcessor::performBatch (const GenerationBatch& batch)
             m1->setProperty ("adapter", batch.adapter);
             m1->setProperty ("generationSeconds", seconds);
             m1->setProperty ("checks", technicalReportToVar (report));
+            m1->setProperty ("tempoConformance", tempoConformanceToVar (tempo));
             m1->setProperty ("request", compiledRequestToVar (batch.request));
         }
 
@@ -1434,6 +1512,7 @@ void ReImagineProcessor::performBatch (const GenerationBatch& batch)
         payload->setProperty ("assetSha256", hash);
         payload->setProperty ("rawAssetSha256", hash);   // no conforming in M1: raw == stored
         payload->setProperty ("checks", technicalReportToVar (report));
+        payload->setProperty ("tempoConformance", tempoConformanceToVar (tempo));
         payload->setProperty ("testFixture", fixture);
         const juce::var presented (payload);   // one owner: the object is ref-counted
         logAttempt (index, "ok", label, seconds, presented);
@@ -1599,6 +1678,20 @@ juce::String ReImagineProcessor::selectedReport() const
     }
     else if (m1.isObject())
         lines.add ("Checks: decodes, finite, not silent (technical only - not a taste judgement)");
+    if (m1.isObject())
+        lines.add ("Tempo conformance (technical): " + describeStoredTempoConformance (m1.getProperty ("tempoConformance", {})));
+    if (lineage.role == "conform" && lineage.stretchRatio)
+    {
+        const auto conform = m1.getProperty ("conform", {});
+        lines.add ("Conform: x" + juce::String (*lineage.stretchRatio, 4) + " ("
+                   + juce::String (static_cast<double> (conform.getProperty ("fromBpm", 0.0)), 2) + " -> "
+                   + juce::String (static_cast<double> (conform.getProperty ("toBpm", 0.0)), 2)
+                   + " BPM); timing only - downbeats not aligned, not checked by ear");
+    }
+    if (audition.playing())
+        lines.add ("Audition: FREE-RUNNING local preview - not host-synced, does not follow the timeline");
+    else if (const auto stopped = audition.lastStop(); stopped != AuditionStop::none)
+        lines.add ("Audition: free preview " + auditionStopName (stopped));
     if (auto* conditioning = m1.getProperty ("request", {}).getProperty ("conditioning", {}).getArray())
     {
         juce::StringArray notEnforced;
@@ -1609,6 +1702,272 @@ juce::String ReImagineProcessor::selectedReport() const
             lines.add ("Not enforced by the model: " + notEnforced.joinIntoString (", "));
     }
     return lines.joinIntoString ("\n");
+}
+
+// ── Conform (timing only) and free audition ───────────────────────────────────────
+
+juce::String ReImagineProcessor::conformSelected()
+{
+    const juce::ScopedLock lock (stateLock);
+    const auto refuse = [this] (const juce::String& why)
+    {
+        uiStatus = "Conform refused: " + why;
+        auto* payload = new juce::DynamicObject();
+        payload->setProperty ("refusal", why);
+        logEvent ("conform.refused", "system", juce::var (payload));
+        return why;
+    };
+    if (offlineProcessing.load (std::memory_order_acquire) != 0)
+        return refuse ("offline export never conforms");
+    if (regionCollection.pendingOverlap())
+        return refuse ("choose Replace or Discard for the overlapping Transfer first");
+    if (pendingBatch || batchActive.load (std::memory_order_acquire) != 0)
+        return refuse ("a generation is running");
+    if (pendingConform || conformRunning.load (std::memory_order_acquire) != 0)
+        return refuse ("a conform is already running");
+    const auto* region = selectedRegionUnsafe();
+    if (region == nullptr)
+        return refuse ("Transfer or Import a region first");
+    if (region->status == RegionStatus::staleTempo)
+        return refuse ("the region is stale after a tempo change - Re-transfer first");
+    const auto take = std::find_if (region->takes.begin(), region->takes.end(),
+                                    [&] (const auto& t) { return t.id == region->selectedTakeId; });
+    if (take == region->takes.end())
+        return refuse ("select the version to conform");
+    const auto context = contextForUnsafe (*region);
+    if (const auto why = conformContextRefusal (context); why.isNotEmpty())
+        return refuse (why);
+    pendingConform = ConformJob { region->id, region->sourceHash, take->id, take->assetHash, context };
+    uiStatus = "Measuring and conforming the selected version (off the audio thread)...";
+    auto* payload = new juce::DynamicObject();
+    payload->setProperty ("regionId", region->id);
+    payload->setProperty ("takeId", take->id);
+    payload->setProperty ("sessionBpm", *context.bpm);
+    payload->setProperty ("bpmFrom", provenanceName (context.bpmFrom));
+    logEvent ("conform.requested", "explicit", juce::var (payload));
+    conformRequested.store (1, std::memory_order_release);
+    workerEvent.signal();
+    return {};
+}
+
+void ReImagineProcessor::performConform (const ConformJob& job)
+{
+    const auto refuse = [this, &job] (const juce::String& why, const juce::var& measured)
+    {
+        setStatus ("Conform refused: " + why);
+        auto* payload = new juce::DynamicObject();
+        payload->setProperty ("takeId", job.parentTakeId);
+        payload->setProperty ("refusal", why);
+        payload->setProperty ("measured", measured);
+        logEvent ("conform.refused", "system", juce::var (payload));
+    };
+    const auto file = assets.renderFile (job.parentAssetHash);
+    if (! assets.verify (file, job.parentAssetHash))
+        return refuse ("the version's audio is missing or changed - Relink it first", {});
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (file));
+    if (! reader || reader->lengthInSamples <= 0 || reader->lengthInSamples > std::numeric_limits<int>::max() / 2)
+        return refuse ("the version's audio does not decode", {});
+    const auto rate = reader->sampleRate;
+    juce::AudioBuffer<float> audio (static_cast<int> (reader->numChannels), static_cast<int> (reader->lengthInSamples));
+    reader->read (&audio, 0, audio.getNumSamples(), 0, true, true);
+    reader.reset();
+
+    // Measured now, against the session as it is now (a stored report may be stale).
+    const auto before = checkTempoConformance (audio.getArrayOfReadPointers(), audio.getNumChannels(),
+                                               audio.getNumSamples(), rate, job.context);
+    const auto plan = planConform (before, job.context);
+    if (! plan.allowed)
+        return refuse (plan.refusal, tempoConformanceToVar (before));
+
+    juce::AudioBuffer<float> stretched;
+    juce::String error;
+    if (! stretchForConform (audio, rate, plan.stretchRatio, stretched, error, [this] { return threadShouldExit(); }))
+        return refuse (error, tempoConformanceToVar (before));
+    // The conformed version replaces the same region as its parent, so it keeps the
+    // parent's exact length: a sped-up take is padded with silence (never the dry source,
+    // which renderSelected would otherwise play under "Replace"), a slowed one is trimmed.
+    const auto stretchedFrames = stretched.getNumSamples();
+    const auto parentFrames = audio.getNumSamples();
+    if (stretchedFrames != parentFrames)
+    {
+        juce::AudioBuffer<float> fitted (stretched.getNumChannels(), parentFrames);
+        fitted.clear();
+        for (int channel = 0; channel < fitted.getNumChannels(); ++channel)
+            fitted.copyFrom (channel, 0, stretched, channel, 0, std::min (stretchedFrames, parentFrames));
+        stretched = std::move (fitted);
+    }
+    const auto paddedFrames = std::max (0, parentFrames - stretchedFrames);
+    const auto trimmedFrames = std::max (0, stretchedFrames - parentFrames);
+    const auto checks = checkCandidate (measureAudio (stretched.getArrayOfReadPointers(), stretched.getNumChannels(),
+                                                      stretched.getNumSamples(), rate),
+                                        static_cast<double> (parentFrames) / rate, audio.getNumChannels());
+    if (! checks.usable)
+        return refuse ("the conformed audio failed the technical checks: " + checks.failures.joinIntoString ("; "),
+                       tempoConformanceToVar (before));
+    const auto after = checkTempoConformance (stretched.getArrayOfReadPointers(), stretched.getNumChannels(),
+                                              stretched.getNumSamples(), rate, job.context);
+
+    auto work = assets.root().getSiblingFile ("work");
+    work.createDirectory();
+    const auto temp = work.getChildFile ("conform-" + juce::Uuid().toDashedString() + ".wav");
+    {
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::OutputStream> stream (temp.createOutputStream().release());
+        auto writer = stream ? wav.createWriterFor (stream, juce::AudioFormatWriterOptions()
+                                                                .withSampleRate (rate)
+                                                                .withNumChannels (stretched.getNumChannels())
+                                                                .withBitsPerSample (24))
+                             : nullptr;
+        if (! writer || ! writer->writeFromAudioSampleBuffer (stretched, 0, stretched.getNumSamples()))
+        {
+            temp.deleteFile();
+            return refuse ("could not write the conformed audio", tempoConformanceToVar (before));
+        }
+    }
+    const auto hash = assets.importWav (temp, false, error);
+    temp.deleteFile();
+    if (hash.isEmpty())
+        return refuse (error, tempoConformanceToVar (before));
+
+    bool published = false;
+    juce::String label;
+    RenderTake take;
+    {
+        const juce::ScopedLock lock (stateLock);
+        const auto target = std::find_if (pluginState.regions.begin(), pluginState.regions.end(),
+                                          [&] (const auto& r) { return r.id == job.regionId; });
+        const auto parent = target == pluginState.regions.end()
+            ? std::vector<RenderTake>::iterator {}
+            : std::find_if (target->takes.begin(), target->takes.end(),
+                            [&] (const auto& t) { return t.id == job.parentTakeId; });
+        if (target != pluginState.regions.end() && target->sourceHash == job.sourceHash && parent != target->takes.end())
+        {
+            take.id = juce::Uuid().toString();
+            take.assetHash = hash;
+            take.timestampIso8601 = juce::Time::getCurrentTime().toISO8601 (true);
+            take.seed = parent->seed;
+            take.parameters = parent->parameters;
+            take.manifest = parent->manifest.isObject() ? parent->manifest.clone() : juce::var (new juce::DynamicObject());
+            // A conform of an imported take is a conform, not an import (label and sidecar).
+            const auto parentSource = take.manifest.getProperty ("source", {}).toString();
+            take.manifest.getDynamicObject()->removeProperty ("source");
+            auto lineage = lineageOf (*parent);
+            lineage.parentTakeId = parent->id;
+            lineage.role = "conform";
+            lineage.kept = false;
+            lineage.conformedFrom = parent->id;
+            lineage.stretchRatio = plan.stretchRatio;
+            setLineage (take, lineage);
+            if (auto* m1 = take.manifest.getProperty ("m1", {}).getDynamicObject())
+            {
+                auto conform = conformPlanToVar (plan);
+                conform.getDynamicObject()->setProperty ("method", "SoundTouch (Tracktion-vendored, Better settings), pitch kept");
+                conform.getDynamicObject()->setProperty ("measuredBefore", tempoConformanceToVar (before));
+                conform.getDynamicObject()->setProperty ("rawAssetSha256", parent->assetHash);
+                conform.getDynamicObject()->setProperty ("stretchedFrames", stretchedFrames);
+                conform.getDynamicObject()->setProperty ("paddedFrames", paddedFrames);
+                conform.getDynamicObject()->setProperty ("trimmedFrames", trimmedFrames);
+                if (parentSource.isNotEmpty())
+                    conform.getDynamicObject()->setProperty ("parentSource", parentSource);
+                m1->setProperty ("conform", conform);
+                m1->setProperty ("checks", technicalReportToVar (checks));   // of the conformed audio, not the parent
+                m1->setProperty ("tempoConformance", tempoConformanceToVar (after));
+            }
+            target->takes.push_back (take);
+            target->selectedTakeId = take.id;
+            label = takeLabel (*target, target->takes.size() - 1);
+            loadRequested.store (1, std::memory_order_release);
+            published = true;
+        }
+    }
+    if (! published)
+        return refuse ("the region or version changed while conforming; result discarded", tempoConformanceToVar (before));
+    setStatus (label + ": " + juce::String (plan.fromBpm, 2) + " -> " + juce::String (plan.toBpm, 2)
+               + " BPM; now " + describeTempoConformance (after) + " (timing only, downbeats not aligned)");
+    auto* payload = new juce::DynamicObject();
+    payload->setProperty ("regionId", job.regionId);
+    payload->setProperty ("takeId", take.id);
+    payload->setProperty ("parentTakeId", job.parentTakeId);
+    payload->setProperty ("conformedFrom", job.parentTakeId);
+    payload->setProperty ("stretchRatio", plan.stretchRatio);
+    payload->setProperty ("fromBpm", plan.fromBpm);
+    payload->setProperty ("toBpm", plan.toBpm);
+    payload->setProperty ("driftMsPerBarBefore", plan.driftMsPerBar);
+    payload->setProperty ("verdictAfter", tempoVerdictName (after.verdict));
+    payload->setProperty ("paddedFrames", paddedFrames);
+    payload->setProperty ("trimmedFrames", trimmedFrames);
+    payload->setProperty ("assetSha256", hash);
+    payload->setProperty ("rawAssetSha256", job.parentAssetHash);
+    logEvent ("version.conformed", "explicit", juce::var (payload));
+    workerEvent.signal();
+}
+
+bool ReImagineProcessor::undoLastConform()
+{
+    const juce::ScopedLock lock (stateLock);
+    auto* region = selectedRegionUnsafe();
+    if (region == nullptr || region->takes.empty() || region->takes.back().id != region->selectedTakeId)
+    {
+        uiStatus = "Nothing to undo: select the newest version, which must be a conform";
+        return false;
+    }
+    const auto conformed = region->takes.back();
+    const auto lineage = lineageOf (conformed);
+    if (lineage.role != "conform" || lineage.kept)
+    {
+        uiStatus = lineage.kept ? "The conformed version is kept - not removed"
+                                : "Nothing to undo: the selected version is not a conform";
+        return false;
+    }
+    region->takes.pop_back();
+    const auto parentExists = std::any_of (region->takes.begin(), region->takes.end(),
+                                           [&] (const auto& t) { return t.id == lineage.parentTakeId; });
+    region->selectedTakeId = parentExists ? lineage.parentTakeId : juce::String();
+    uiStatus = "Conform undone - the version it was stretched from is selected again";
+    loadRequested.store (1, std::memory_order_release);
+    workerEvent.signal();
+    auto* payload = new juce::DynamicObject();
+    payload->setProperty ("regionId", region->id);
+    payload->setProperty ("takeId", conformed.id);
+    payload->setProperty ("parentTakeId", lineage.parentTakeId);
+    payload->setProperty ("assetSha256", conformed.assetHash);
+    logEvent ("version.conform-undone", "explicit", juce::var (payload));
+    return true;
+}
+
+juce::String ReImagineProcessor::startFreeAudition()
+{
+    const juce::ScopedLock lock (stateLock);
+    const auto refuse = [this] (const juce::String& why)
+    {
+        uiStatus = "Free audition refused: " + why;
+        return why;
+    };
+    if (offlineProcessing.load (std::memory_order_acquire) != 0)
+        return refuse ("offline export");
+    if (lastHostPlaying.load (std::memory_order_acquire) != 0)
+        return refuse ("the host is playing - the region already plays in sync; stop the host to preview freely");
+    const auto* region = selectedRegionUnsafe();
+    if (region == nullptr)
+        return refuse ("Transfer or Import a region first");
+    if (std::none_of (region->takes.begin(), region->takes.end(),
+                      [&] (const auto& t) { return t.id == region->selectedTakeId; }))
+        return refuse ("select a version to audition");
+    // Arm before load: the worker loads the selection, then starts from its snapshot.
+    auditionArmRequested.store (1, std::memory_order_release);
+    loadRequested.store (1, std::memory_order_release);
+    uiStatus = "Preparing free audition...";
+    workerEvent.signal();
+    return {};
+}
+
+void ReImagineProcessor::stopFreeAudition()
+{
+    auditionArmRequested.store (0, std::memory_order_release);
+    audition.stop (AuditionStop::user);
+    setStatus ("Free audition stopped");
 }
 
 juce::AudioProcessorEditor* ReImagineProcessor::createEditor()

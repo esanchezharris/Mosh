@@ -27,10 +27,10 @@ ReImagineEditor::ReImagineEditor (ReImagineProcessor& p)
     };
     for (auto* label : labels)
         addAndMakeVisible (label);
-    std::array<juce::Component*, 18> loopComponents {
+    std::array<juce::Component*, 21> loopComponents {
         &contextHeading, &intentionHeading, &reviseHeading, &contextKey, &contextChords, &contextSection,
         &contextProtected, &saveContext, &candidateCount, &generate, &cancel, &revision, &reviseFromAudio,
-        &revise, &keep, &exportWav, &dragOut, &report
+        &revise, &keep, &exportWav, &dragOut, &report, &conform, &undoConform, &preview
     };
     for (auto* component : loopComponents)
         addAndMakeVisible (component);
@@ -87,6 +87,24 @@ ReImagineEditor::ReImagineEditor (ReImagineProcessor& p)
             status.setText (error, juce::dontSendNotification);
     };
     dragOut.setTooltip ("Drag the audible version into your DAW (a durable copy is written first).");
+    conform.setTooltip ("Time-stretch the selected version to the session BPM as a NEW version, when its measured "
+                        "beat period drifts by at most 8%. Timing only: downbeats are not aligned.");
+    conform.onClick = [this]
+    {
+        if (const auto why = processorRef.conformSelected(); why.isNotEmpty())
+            status.setText ("Conform refused: " + why, juce::dontSendNotification);
+    };
+    undoConform.setTooltip ("Remove the newest conformed version and select the version it came from.");
+    undoConform.onClick = [this] { processorRef.undoLastConform(); };
+    preview.setTooltip ("Play the selected version locally when the host gives no transport. Free-running, "
+                        "not synced; stops when the host plays.");
+    preview.onClick = [this]
+    {
+        if (processorRef.freeAuditionPlaying())
+            return processorRef.stopFreeAudition();
+        if (const auto why = processorRef.startFreeAudition(); why.isNotEmpty())
+            status.setText ("Free audition refused: " + why, juce::dontSendNotification);
+    };
     cancel.setEnabled (false);
     report.setText (processorRef.selectedReport(), juce::dontSendNotification);
 
@@ -495,6 +513,8 @@ void ReImagineEditor::timerCallback()
     generate.setEnabled (! busy);
     revise.setEnabled (! busy);
     cancel.setEnabled (busy);
+    conform.setEnabled (! busy && ! processorRef.conformActive());
+    preview.setButtonText (processorRef.freeAuditionPlaying() ? "Stop preview" : "Free preview");
     report.setText (processorRef.selectedReport(), juce::dontSendNotification);
     repaint();
 }
@@ -594,6 +614,9 @@ void ReImagineEditor::resized()
     labHelp.setBounds (568, 412, 164, 48);
     replace.setBounds (568, 478, 164, 30);
     discard.setBounds (568, 516, 164, 30);
+    conform.setBounds (568, 554, 104, 28);
+    undoConform.setBounds (676, 554, 56, 28);
+    preview.setBounds (568, 588, 164, 28);
     status.setBounds (46, 642, 1000, 26);
     progressBar.setBounds (1056, 649, 102, 10);
 

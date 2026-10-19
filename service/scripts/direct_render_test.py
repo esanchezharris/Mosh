@@ -242,3 +242,62 @@ def test_cancelled_inference_still_counts_as_active_service_work(monkeypatch: py
 def test_colors_handshake_advertises_direct_decisions(http_service: int) -> None:
     code, body = request(http_service, "/colors")
     assert code == 200 and body["explicitRenderDecision"] is True
+
+
+def _chord_timing(**overrides) -> JsonMap:
+    timing: JsonMap = {"unit": "bar", "origin": "region-start", "provenance": "user", "enforced": False,
+                       "events": [{"bar": 1, "symbol": "Fm7"}, {"bar": 3, "symbol": "Db"},
+                                  {"bar": 4.5, "symbol": "Eb/G"}]}
+    timing.update(overrides)
+    return timing
+
+
+def test_direct_request_records_chord_timing_as_sent_not_enforced(http_service: int, submission: dict,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    # Given a fixture direct request carrying the user's timed chord list, with a caller
+    # that (wrongly) claims enforcement.
+    monkeypatch.setenv("MOSH_DIRECT_RENDER_TEST_FIXTURE", "1")
+    submission["adapter"] = "fake"
+    submission["params"]["chord_timing"] = _chord_timing(enforced=True)
+    # When the job runs.
+    _, submitted = request(http_service, "/submit", submission)
+    server._run_job(submitted["jobId"])
+    # Then the manifest logs the structured timing, and says it was not enforced.
+    _, status = request(http_service, f"/status?jobId={submitted['jobId']}")
+    timing = status["manifest"]["chord_timing"]
+    assert status["status"] == "ready"
+    assert [(e["bar"], e["symbol"]) for e in timing["events"]] == [(1, "Fm7"), (3, "Db"), (4.5, "Eb/G")]
+    assert timing["provenance"] == "user" and timing["enforced"] is False
+    assert timing["sent_as"] == "text-prompt+structured"
+
+
+def test_direct_request_without_chord_timing_is_unchanged(http_service: int, submission: dict,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    # Given an older client that never sends chord_timing.
+    monkeypatch.setenv("MOSH_DIRECT_RENDER_TEST_FIXTURE", "1")
+    submission["adapter"] = "fake"
+    assert "chord_timing" not in submission["params"]
+    _, submitted = request(http_service, "/submit", submission)
+    server._run_job(submitted["jobId"])
+    # Then the request is still valid and the manifest invents no chords.
+    _, status = request(http_service, f"/status?jobId={submitted['jobId']}")
+    assert status["status"] == "ready" and "chord_timing" not in status["manifest"]
+
+
+@pytest.mark.parametrize("timing", [
+    "1:Fm7 3:Db",
+    _chord_timing(events=[]),
+    _chord_timing(events=[{"bar": 0, "symbol": "Fm7"}]),
+    _chord_timing(events=[{"bar": 3, "symbol": "Fm7"}, {"bar": 2, "symbol": "Db"}]),
+    _chord_timing(events=[{"bar": float("nan"), "symbol": "Fm7"}]),
+    _chord_timing(events=[{"bar": 1, "symbol": "rm -rf"}]),
+    _chord_timing(events=[{"bar": 1, "symbol": ""}]),
+    _chord_timing(events=[{"bar": i + 1, "symbol": "C"} for i in range(65)]),
+    _chord_timing(unit="beat"),
+    _chord_timing(provenance="model"),
+])
+def test_direct_request_rejects_malformed_chord_timing(http_service: int, submission: dict, timing) -> None:
+    submission["params"]["chord_timing"] = timing
+    status, body = request(http_service, "/submit", submission)
+    assert status == 400 and body["ok"] is False and "chord_timing" in body["error"]
+    assert not server._jobs
