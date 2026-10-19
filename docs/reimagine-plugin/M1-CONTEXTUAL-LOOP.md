@@ -27,7 +27,8 @@ evidence. It claims nothing about how the music sounds.
 - **Shell:** the existing Re-Imagine VST3. Nothing is forked or re-platformed.
 - **Backend:** the existing local SA3 Medium (MLX) through `service/server.py`. The
   repository has no Gary path to reuse, and the brief rules out building one alongside
-  this. Licence obligations for SA3 and JUCE are already recorded in
+  this. Owner decision 2026-10-19: Gary is the **baseline**, used directly by the owner,
+  not a backend Mosh calls ([M1-GARY-COMPARISON.md](M1-GARY-COMPARISON.md)). Licence obligations for SA3 and JUCE are already recorded in
   [DEPENDENCY_BOM.md](../DEPENDENCY_BOM.md). The open item there is SA3 checkpoint
   provenance.
 - **Host:** Ableton Live 11, the plug-in's existing target. It uses generic capture and
@@ -36,12 +37,16 @@ evidence. It claims nothing about how the music sounds.
   does not exist in the repository.
 - **Route:** *replace*. The selected version substitutes for the source inside the
   region, so the plug-in never adds a second audible copy.
-- **Controller:** template-driven (`reimagine-transform-template/1`). **The typed request
-  is not interpreted by a language model.** It goes into the prompt verbatim, followed by
-  the user's key, the BPM and chord names. This is a known gap.
+- **Controller:** template-driven (`reimagine-transform-template/1`) by default: the typed
+  request goes into the prompt verbatim, followed by the user's key, the BPM and timed
+  chords. Since 2026-10-19 an **opt-in cloud planner** (Claude, owner opt-in to cloud
+  text providers on 2026-10-19) can write the prompt, strength and candidate count
+  instead; see "Cloud planner" below. With the planner off or unavailable the template is
+  used and the version records why.
 - **Privacy:** audio stays local. The service client refuses non-loopback hosts unless
   `MOSH_SERVICE_ALLOW_LAN=1` is set. Direct requests never fall back to another provider
-  or a cloud service. The loop makes no paid calls and sends no telemetry.
+  or a cloud service. The only cloud call is the opt-in planner, which receives text and
+  context, never audio, paths or hashes. No telemetry.
 
 ## What M1 added
 
@@ -85,7 +90,8 @@ evidence. It claims nothing about how the music sounds.
 | Tempo (BPM) | text in the prompt | no; beat alignment is not enforced. The take's beat period is **measured** afterwards (see below), which reports drift but changes nothing. An optional, explicit **conform** can stretch a drifting version afterwards; that edits the version, it does not condition the model |
 | Key | text in the prompt | no |
 | Chords | chord names **and change bars** in the prompt (`chords by bar: 1 Fm7, 3 Db`) and as the structured `chord_timing` request field (bars from the region start, with provenance); the service records it in the render manifest | no; neither harmony nor change timing is enforced, and the service's manifest copy always says `enforced: false` |
-| Meter, section, protected choices | stored and logged only | no |
+| Meter, section, protected choices | stored and logged only (template); sent to the planner as text when it is on | no |
+| Controller (opt-in) | the planner reads your text and the context above and writes the SA3 prompt, strength and candidate count | no; it never hears the audio, and what it writes is still only a prompt |
 
 ### Chord timing and tempo conformance (2026-10-15)
 
@@ -147,8 +153,9 @@ evidence. It claims nothing about how the music sounds.
 - **Stretcher:** the SoundTouch library vendored inside Tracktion Engine, with Tracktion's
   `soundtouchBetter` settings. This is the stretcher the main app's warp uses. The plug-in
   does not link the engine, so `src/reimagine/ReImagineConform.cpp` compiles those sources
-  into its own namespace. Pitch is kept. The output has exactly round(frames x ratio)
-  frames at the version's own sample rate.
+  into its own namespace. Pitch is kept. The stretcher returns round(frames x ratio)
+  frames at the version's own sample rate, which are then padded or trimmed to the
+  parent's length (above).
 - **The result is a new version.** The original take and its asset are never overwritten.
   The new take copies the parent's manifest and adds lineage in `manifest.m1`: `role:
   conform`, `parentTakeId`, `conformedFrom`, `stretchRatio`, and a `conform` record (the
@@ -178,6 +185,63 @@ evidence. It claims nothing about how the music sounds.
   and the experience log records `version.auditioned` with `mode: free-running`
   (implicit).
 
+### Cloud planner (opt-in, 2026-10-19)
+
+- **What it does.** With "Claude writes the prompt" on (editor, beside the intention
+  heading; stored with the Set), Generate and Revise first ask the helper's
+  `POST /reimagine/plan`. `service/reimagine_planner.py` makes **one** Claude Messages API
+  call with a JSON-schema answer: `prompt` (at most 600 characters), `strength`
+  (0.01-0.5), `candidate_count` (at most the count you chose), `interpretation`, and
+  `unsupported` (what SA3 cannot enforce, in your terms). Default model `claude-opus-5-5`
+  at effort `medium`, with Anthropic's server-side default fallback for safety refusals.
+- **What it receives.** Your request and revision text; key, BPM, meter, chord names with
+  bar numbers, section label and protected choices, each with provenance; the input's
+  duration and whether it is the source or a parent version. **Never** audio, file names,
+  paths, hashes or ids. `plannerRequestBody` builds it in C++, and the helper drops
+  anything else before sending.
+- **Consent and key.** Off unless `~/.config/mosh/reimagine-planner.env` (override
+  `MOSH_REIMAGINE_PLANNER_ENV`) says `MOSH_REIMAGINE_PLANNER=anthropic` and holds
+  `ANTHROPIC_API_KEY`. A key in the shell or in `~/.config/mosh/env` is not consent and is
+  never read. The helper never holds the key: the call runs in a subprocess under
+  `MOSH_REIMAGINE_PLANNER_PYTHON` (default `~/Library/Mosh/planner-venv/bin/python`, a
+  venv with the `anthropic` package), started with the shell's `ANTHROPIC_API_KEY`
+  removed.
+- **Budget.** Each call is priced from its token usage and appended to
+  `~/Library/Mosh/ReImagine/planner-ledger.jsonl` (cost, tokens, model, request id; no
+  text). A call is refused before it is made when the ledger total plus its worst case
+  would pass `MOSH_REIMAGINE_PLANNER_BUDGET_USD` (default 20). Unpriced models are
+  refused. `GET /reimagine/plan/status` reports enabled/model/spent without the key.
+- **Fit to the budget.** The template request is compiled and validated first, so the
+  attempt budget is reserved before any call. A plan can only lower the candidate count;
+  it is applied by `applyPlannerPlan` and validated again by `validateRequest`.
+- **When it is not used.** Off, no key, over budget, helper or network down, a refusal, a
+  timeout (120 s) or an unusable plan: the template request renders, the version stores
+  `controllerRecord {requested, used:false, reason}`, the report says "Prompt by:
+  template (cloud planner not used: <reason>)", and the log records
+  `controller.plan-unavailable`. This is a local fallback, never another provider.
+- **Provenance.** A planned version stores `controller: cloud-planner`, the controller
+  record (model, served model, effort, tokens, `costUsd`, latency, request id), the
+  interpretation and the unsupported list in `manifest.m1.request`; the conditioning
+  table gains a `controller` row; the report shows "Prompt by: <model> ($cost, text only -
+  it never heard the audio)". The log records `controller.planned` (`system`).
+- **Gary comparison instrumentation.** `intention.compiled` and `revision.requested`
+  carry `controlsTouched` and `controls`: the settings changed since this instance's
+  previous request, each counted once (prompt, strength, seed, count, colors, LoRAs,
+  revision text, from-selected-audio, planner switch, and user-entered context fields).
+  Every `version.presented` carries `secondsSinceRequest`; the first of a batch also
+  carries `firstCandidateSeconds`.
+- **What it does not prove.** Nothing here shows that Claude writes better prompts than
+  the template, or that SA3 follows them. Tests use a stand-in for the provider.
+
+### Review fixes (R1, 2026-10-19)
+
+- **P1**: the audible-snapshot hand-off (both reader sites and the publisher) uses
+  seq_cst, so a snapshot cannot be freed under the audio thread.
+- **P2**: a host re-prepare right after a Transfer stops no longer re-sizes the capture
+  buffer under the pending write; the Transfer is saved whole, at its capture rate.
+- **P3**: assets are named only by 64-hex digests, so a hash from a crafted Set never
+  becomes a path.
+
 ## Commands
 
 macOS, through the repository's build:
@@ -187,6 +251,19 @@ cmake --preset <your-preset> -DMOSH_BUILD_REIMAGINE_PLUGIN=ON -DMOSH_BUILD_TESTS
 cmake --build <build-dir> --target MoshTests MoshReImaginePlugin_VST3 MoshReImagineLoopE2E MoshReImagineEditorSmoke
 <build-dir>/tests/MoshTests "[reimagine]"
 ctest --test-dir <build-dir> -R MoshReImagine --output-on-failure   # Bundle, Editor and LoopE2E (LoopE2E needs python3)
+~~~
+
+Linux (CI and the cloud container) add `-DMOSH_BUILD_APP=OFF -DMOSH_BUILD_UI=OFF
+-DMOSH_BUILD_PLUGIN_FIXTURES=OFF` to the `linux-x64-debug` preset and run the editor
+smoke under `xvfb-run -a`.
+
+Planner (owner Mac, once):
+
+~~~sh
+python3 -m venv ~/Library/Mosh/planner-venv && ~/Library/Mosh/planner-venv/bin/pip install anthropic
+umask 077; cat > ~/.config/mosh/reimagine-planner.env   # MOSH_REIMAGINE_PLANNER=anthropic, ANTHROPIC_API_KEY=..., optional _MODEL/_EFFORT/_BUDGET_USD
+python3 service/reimagine_planner.py --status
+python3 service/scripts/reimagine_planner_test.py      # no network, no key
 ~~~
 
 `MoshReImagineLoopE2E <repo-root>` runs the real processor headless against
@@ -299,13 +376,37 @@ about Live.
 - A real SA3 render of an **authorized musical phrase** (the run above used a synthetic
   fixture).
 - Plug-in behaviour inside Live 11: transport, seek and loop-wrap audition, drag-out
-  landing, and save/reopen of a Live Set. The playback code is unchanged from PR #666 and
-  was not retested here at other sample rates or block sizes.
+  landing, and save/reopen of a Live Set. Host-synced playback is now tested headless at
+  44.1/48/96 kHz, five block sizes, seeks and a loop wrap against a fake playhead; that is
+  not Live.
 - Any musical judgement: is a candidate useful, does it follow the chords. The comparison
-  against direct use of Gary, with the same source and budget, has not been run.
+  against direct use of Gary, with the same source and budget, has not been run
+  ([M1-GARY-COMPARISON.md](M1-GARY-COMPARISON.md) is the sheet).
+- The cloud planner against the real API: no real key was used. Its prompts, cost per
+  call and latency on the owner's account are unmeasured, and whether planned prompts
+  beat the template is a listening question.
 - Free audition inside a real host with no transport, and its hand-off to host playback
   in Live: only a fake playhead was used.
 - Conform on real SA3 output: how often the measurement allows it, and how SoundTouch
   sounds on it. It was not checked by ear. Conform aligns the beat period only, never the
   downbeat, and does not make a take musically fit the chords. Unconformed versions still
   play raw.
+
+### Evidence (2026-10-19, Linux cloud container)
+
+- `MoshTests "[reimagine]"`: **49 cases / 581 assertions**, 3 of 3 runs.
+- `MoshReImagineLoopE2E`: **PASS, 3 of 3 runs, 133 checks**, adding:
+  - the planner through the real helper with a stand-in subprocess (no network): off by
+    default with the reason recorded; on, its prompt/strength/count reach the request,
+    cost and provenance are stored, the stand-in received the request and chords but no
+    paths, file names or hashes, the ledger has the call, and the log has
+    `controller.planned`, `controller.plan-unavailable`, `controlsTouched` and
+    `firstCandidateSeconds`;
+  - re-prepare right after a Transfer stops, 5 rounds: saved whole at 48 kHz (the same
+    test lost the Transfer 5 of 5 times without the P2 fix);
+  - the playback matrix described under "Not verified".
+- `python3 service/scripts/reimagine_planner_test.py`: 58 checks (consent gate, data
+  scope, budget, 13 malformed requests, 8 malformed plans, SDK call shape against a fake
+  `anthropic` module, the subprocess key boundary, the HTTP routes).
+- `MoshReImagineEditorSmoke` under Xvfb: the planner switch fits beside the heading.
+
