@@ -296,6 +296,19 @@ a scratch CMake project that compiles the same sources.
   - the experience log contains the expected events and signal tags
 - `MoshReImagineEditorSmoke` passes under Xvfb with the new 1180×690 layout.
 
+### Linux CI (2026-10-15)
+
+The repository build now accepts `-DMOSH_BUILD_REIMAGINE_PLUGIN=ON` on Linux. The
+default stays Apple-only, so the scratch project above is no longer needed. The
+path-filtered `reimagine-plugin` job in `.github/workflows/linux-ci.yml` builds the VST3,
+`MoshReImagineLoopE2E` and `MoshReImagineEditorSmoke`, then runs
+`xvfb-run -a ctest -R MoshReImagine`. Local run in the cloud container: both tests
+passed 3 of 3 times, and `MoshTests "[reimagine]"` passed 3 of 3 times (33 cases,
+274 assertions). `MoshReImagineBundleSmoke` is not built on Linux because it inspects
+the macOS bundle (`Info.plist` via `plutil`, the `Contents/MacOS` binary via `lipo`).
+None of this is evidence for the macOS native gate, audibility, Live 11 or a real SA3
+render.
+
 ### Conform and free audition evidence (2026-10-19, Linux cloud container)
 
 Same method as above (local-only CMake patch so the plug-in targets configure on Linux;

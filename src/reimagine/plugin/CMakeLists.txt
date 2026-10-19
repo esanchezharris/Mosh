@@ -56,22 +56,27 @@ target_link_libraries(MoshReImaginePlugin
 
 set_target_properties(MoshReImaginePlugin PROPERTIES FOLDER "mosh/plugins")
 
-juce_add_console_app(MoshReImagineBundleSmoke PRODUCT_NAME "Mosh Re-Imagine Bundle Smoke")
-target_sources(MoshReImagineBundleSmoke PRIVATE ReImagineBundleSmoke.cpp)
-target_compile_definitions(MoshReImagineBundleSmoke PRIVATE
-  JUCE_PLUGINHOST_VST3=1
-  JUCE_WEB_BROWSER=0
-  JUCE_USE_CURL=0
-)
-target_link_libraries(MoshReImagineBundleSmoke PRIVATE
-  juce::juce_audio_utils
-  juce::juce_recommended_config_flags
-)
-add_dependencies(MoshReImagineBundleSmoke MoshReImaginePlugin_VST3)
-add_test(NAME MoshReImagineBundleSmoke
-  COMMAND MoshReImagineBundleSmoke
-    "$<TARGET_BUNDLE_DIR:MoshReImaginePlugin_VST3>")
-set_tests_properties(MoshReImagineBundleSmoke PROPERTIES TIMEOUT 30)
+# The bundle smoke checks the macOS bundle itself: Contents/Info.plist via
+# /usr/bin/plutil, Contents/MacOS/<binary> via /usr/bin/lipo (native arm64). None of
+# that exists in a Linux .vst3, so it stays Apple-only.
+if (APPLE)
+  juce_add_console_app(MoshReImagineBundleSmoke PRODUCT_NAME "Mosh Re-Imagine Bundle Smoke")
+  target_sources(MoshReImagineBundleSmoke PRIVATE ReImagineBundleSmoke.cpp)
+  target_compile_definitions(MoshReImagineBundleSmoke PRIVATE
+    JUCE_PLUGINHOST_VST3=1
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+  )
+  target_link_libraries(MoshReImagineBundleSmoke PRIVATE
+    juce::juce_audio_utils
+    juce::juce_recommended_config_flags
+  )
+  add_dependencies(MoshReImagineBundleSmoke MoshReImaginePlugin_VST3)
+  add_test(NAME MoshReImagineBundleSmoke
+    COMMAND MoshReImagineBundleSmoke
+      "$<TARGET_BUNDLE_DIR:MoshReImaginePlugin_VST3>")
+  set_tests_properties(MoshReImagineBundleSmoke PROPERTIES TIMEOUT 30)
+endif()
 
 add_executable(MoshReImagineEditorSmoke ReImagineEditorSmoke.cpp)
 target_compile_definitions(MoshReImagineEditorSmoke PRIVATE
