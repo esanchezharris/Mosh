@@ -33,7 +33,6 @@ file(GLOB_RECURSE MOSH_PHONEPAD_SOURCES CONFIGURE_DEPENDS
 add_custom_command(
     OUTPUT  "${MOSH_COMPANION_DIST}/index.html"
             "${MOSH_PHONEPAD_DIST}/index.html"
-    COMMAND ${NPM_EXECUTABLE} install --no-audit --no-fund
     COMMAND ${NPM_EXECUTABLE} run build:companion
     COMMAND ${NPM_EXECUTABLE} run build:phonepad
     WORKING_DIRECTORY "${MOSH_UI_DIR}"
@@ -47,6 +46,9 @@ add_custom_command(
     VERBATIM)
 
 add_custom_target(MoshCompanionUI DEPENDS "${MOSH_COMPANION_DIST}/index.html" "${MOSH_PHONEPAD_DIST}/index.html")
+# ui/node_modules comes from MoshUIDeps (cmake/BuildUI.cmake), not a second `npm install`
+# here: two installs in the same ui/ directory racing on a fresh clone corrupt node_modules.
+add_dependencies(MoshCompanionUI MoshUIDeps)
 add_dependencies(Mosh MoshCompanionUI)
 
 if (APPLE)
