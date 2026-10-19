@@ -93,7 +93,9 @@ private:
 
     juce::var callOnMessageThread (const std::function<juce::var()>& fn,
                                    int timeoutMs = 5000) const;
-    RemoteAuthResult authorizeRequest (const juce::var& body) const;
+    /** Checks the token and, when it is valid, keeps the pairing alive (see
+        RemoteCompanionProtocol::authorizeAndRenew). */
+    RemoteAuthResult authorizeRequest (const juce::var& body);
     juce::var eventsSince (int sinceSeq) const;
     void startBonjour();
     void stopBonjour();
