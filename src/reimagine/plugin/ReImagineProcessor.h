@@ -60,6 +60,7 @@ public:
     // (plug-in never processed) 120 BPM in 4/4 is assumed and the status says so.
     void importTakeFromFile (const juce::File&, double bar);
     void setLabEnabled (bool);
+    void setCloudPlannerEnabled (bool);   // stored with the Set; the helper still needs the opt-in file
     PluginStateV1 stateSnapshot() const;
     juce::String statusText() const;
     float progress() const noexcept { return renderProgress.load (std::memory_order_acquire); }
@@ -162,9 +163,15 @@ private:
         CompiledRequest request;
         SessionSnapshot snapshot;
         juce::String adapter;
+        IntentionInput input;                 // the cloud planner's request is built from this
+        double requestedAtMs = 0.0;           // Generate/Revise pressed (getMillisecondCounterHiRes)
     };
     juce::StringArray enqueueBatch (IntentionInput, bool revision, bool fromSelectedAudio);
-    void performBatch (const GenerationBatch&);
+    void performBatch (GenerationBatch);      // by value: the planner may rewrite its request
+    void planBatch (GenerationBatch&);
+    // The settings of the previous Generate/Revise on this instance, for controlsTouched.
+    // Guarded by stateLock.
+    std::optional<ControlState> lastRequestControls;
     bool batchCancelled (uint64_t id) const noexcept
     {
         return cancelledThroughBatch.load (std::memory_order_acquire) >= id;

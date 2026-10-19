@@ -88,6 +88,7 @@ private:
     juce::TextButton cancel { "Cancel" };
     juce::TextEditor revision;
     juce::ToggleButton reviseFromAudio { "From selected audio" };
+    juce::ToggleButton cloudPlanner { "Claude writes the prompt" };
     juce::TextButton revise { "Revise" };
     juce::TextButton keep { "Keep" };
     juce::TextButton exportWav { "Export" };

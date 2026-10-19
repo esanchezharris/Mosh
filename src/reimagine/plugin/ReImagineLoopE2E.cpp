@@ -359,6 +359,22 @@ int main (int argc, char** argv)
         c->setPlayHead (nullptr);
     }
 
+    // Cloud planner: off until the opt-in file exists; its "python" is a stand-in script
+    // that records what it was sent and answers with a canned plan (no network, no key).
+    const auto plannerEnv = home.getChildFile ("planner/reimagine-planner.env");
+    const auto plannerInput = home.getChildFile ("planner/received.json");
+    const auto plannerStandIn = home.getChildFile ("planner/fake-python");
+    plannerEnv.getParentDirectory().createDirectory();
+    plannerStandIn.replaceWithText ("#!/bin/sh\ncat > '" + plannerInput.getFullPathName() + "'\n"
+        "printf '%s' '{\"plan\": {\"prompt\": \"hazy sampled keyboard loop, worn tape, sparse voicings\", "
+        "\"strength\": 0.3, \"candidate_count\": 1, \"interpretation\": \"A sparser tape-worn keys loop.\", "
+        "\"unsupported\": [\"follow the chord changes exactly\"]}, \"usage\": {\"input_tokens\": 900, "
+        "\"output_tokens\": 300}, \"model\": \"claude-opus-5-5\", \"request_id\": \"req_e2e\", "
+        "\"stop_reason\": \"end_turn\"}'\n", false, false, "\n");   // LF: a CRLF shebang does not run
+    plannerStandIn.setExecutePermission (true);
+    setEnv ("MOSH_REIMAGINE_PLANNER_ENV", plannerEnv.getFullPathName());
+    setEnv ("MOSH_REIMAGINE_PLANNER_PYTHON", plannerStandIn.getFullPathName());
+
     std::cout << "helper up (TEST FIXTURE adapter)\n";
     juce::ChildProcess helper;
     if (! helper.start (juce::StringArray { "python3", server.getFullPathName() }, 0))
@@ -484,6 +500,55 @@ int main (int argc, char** argv)
             check (xs.regions.front().takes[1].manifest["m1"]["requestId"].toString()
                        .startsWith (lineageOf (xs.regions.front().takes[1]).intentionId), "request ids are bound to the intention");
         }
+    }
+
+    std::cout << "cloud planner (stand-in subprocess, no network)\n";
+    {
+        auto q = importedProcessor (source);
+        q->setSelectedContext ("F minor", "1:Fm7 2:Db", "Verse", "chord-change timing");
+        auto planned = request (2, 300);
+        planned.useCloudPlanner = true;
+        runGeneration (*q, [&] { return q->generateCandidates (planned); }, 3);
+        auto qs = q->stateSnapshot();
+        check (takeCount (*q) == 3, "planner off: the template still renders both candidates: " + q->statusText());
+        if (takeCount (*q) == 3)
+        {
+            const auto req = qs.regions.front().takes[1].manifest["m1"]["request"];
+            check (req["controller"].toString().startsWith ("template") && req["controllerRecord"]["reason"].toString() == "disabled",
+                   "planner off: the template is used and the reason is recorded");
+            check (q->selectedReport().contains ("cloud planner not used: disabled"), "report says why the planner was not used");
+        }
+        check (! plannerInput.existsAsFile(), "planner off: nothing is sent");
+
+        plannerEnv.replaceWithText ("MOSH_REIMAGINE_PLANNER=anthropic\nANTHROPIC_API_KEY=sk-e2e-not-real\n");
+        runGeneration (*q, [&] { return q->generateCandidates (planned); }, 4);
+        qs = q->stateSnapshot();
+        check (takeCount (*q) == 4, "planner on: its plan (1 candidate) is rendered: " + q->statusText());
+        if (takeCount (*q) == 4)
+        {
+            const auto req = qs.regions.front().takes[3].manifest["m1"]["request"];
+            check (req["controller"].toString() == "cloud-planner" && req["prompt"].toString().contains ("worn tape")
+                       && std::abs (static_cast<double> (req["strength"]) - 0.3) < 1.0e-6 && req["seeds"].size() == 1,
+                   "the planner's prompt, strength and count reach the render request");
+            check (req["controllerRecord"]["model"].toString() == "claude-opus-5-5"
+                       && static_cast<double> (req["controllerRecord"]["costUsd"]) > 0.0,
+                   "controller provenance and cost are stored with the version");
+            check (q->selectedReport().contains ("Prompt by: claude-opus-5-5") && q->selectedReport().contains ("never heard"),
+                   "report names the planner and says it never heard the audio");
+        }
+        const auto sent = plannerInput.loadFileAsString();
+        check (sent.contains ("hazy sampled-keyboard loop") && sent.contains ("Fm7") && sent.contains ("F minor"),
+               "the planner receives the request and the text context");
+        check (! sent.contains (home.getFullPathName()) && ! sent.contains (".wav") && ! sent.contains (sha256 (source)),
+               "the planner never receives paths, file names or hashes");
+        check (home.getChildFile ("Library/Mosh/ReImagine/planner-ledger.jsonl").loadFileAsString().contains ("req_e2e"),
+               "the call is priced into the local ledger");
+        const auto qlog = home.getChildFile ("Library/Mosh/ReImagine/experience.jsonl").loadFileAsString();
+        check (qlog.contains ("\"controller.plan-unavailable\"") && qlog.contains ("\"controller.planned\""),
+               "experience log records planner use and non-use");
+        check (qlog.contains ("\"controlsTouched\"") && qlog.contains ("\"firstCandidateSeconds\""),
+               "experience log records controls touched and time to first candidate");
+        plannerEnv.deleteFile();
     }
 
     std::cout << "save / reopen / missing asset\n";

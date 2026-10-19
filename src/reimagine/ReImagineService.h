@@ -82,6 +82,9 @@ public:
                                const juce::var& params, juce::String& error);
     juce::var status (const juce::String& jobId);
     bool cancel (const juce::String& jobId);
+    // POST /reimagine/plan: the opt-in cloud planner (service/reimagine_planner.py). The
+    // helper answers within its own 120 s subprocess limit; worker thread only.
+    juce::var plan (const juce::var& body, int timeoutMs = 150000);
 
 private:
     juce::var get (const juce::String&, int timeoutMs = 3000);

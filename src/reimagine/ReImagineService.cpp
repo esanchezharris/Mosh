@@ -184,6 +184,11 @@ juce::var SharedServiceClient::get (const juce::String& path, int timeoutMs)
     return {};
 }
 
+juce::var SharedServiceClient::plan (const juce::var& body, int timeoutMs)
+{
+    return post ("/reimagine/plan", body, timeoutMs);
+}
+
 juce::var SharedServiceClient::post (const juce::String& path, const juce::var& body, int timeoutMs)
 {
     auto url = juce::URL (baseUrl + path).withPOSTData (juce::JSON::toString (body));

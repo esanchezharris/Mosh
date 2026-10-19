@@ -316,6 +316,7 @@ juce::String serializeState (const PluginStateV1& state)
     root->setProperty ("selectedRegion", state.selectedRegionId);
     root->setProperty ("rack", rackToVar (state.rack));
     root->setProperty ("lab", state.labEnabled);
+    root->setProperty ("cloudPlanner", state.cloudPlanner);
     root->setProperty ("mix", state.mix);
     juce::Array<juce::var> regions;
     for (const auto& region : state.regions)
@@ -363,6 +364,7 @@ std::optional<PluginStateV1> deserializeState (const juce::String& json)
     result.selectedRegionId = root->getProperty ("selectedRegion").toString();
     result.rack = rackFromVar (root->getProperty ("rack"));
     result.labEnabled = static_cast<bool> (root->getProperty ("lab"));
+    result.cloudPlanner = static_cast<bool> (root->getProperty ("cloudPlanner"));   // absent == off
     result.mix = root->hasProperty ("mix") ? static_cast<float> (root->getProperty ("mix")) : 1.0f;
     if (auto* regions = root->getProperty ("regions").getArray())
         for (const auto& item : *regions)
