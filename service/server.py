@@ -46,6 +46,7 @@ if os.name == "nt" and os.environ.get("MOSH_SERVICE_CONSOLE", "") != "1":
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import stitch  # noqa: E402  (render-ahead incremental-stitch primitive; stdlib wave only)
 from direct_render import DirectRequest, DirectRenderError  # noqa: E402
+import reimagine_planner  # noqa: E402  (opt-in cloud planner; stdlib here, the SDK runs in its own subprocess)
 from adapters import fake_adapter  # noqa: E402
 from adapters import stable_audio3_adapter  # noqa: E402  (path-only checks; heavy imports stay lazy)
 from training import lora_trainer_adapter  # noqa: E402
@@ -1159,6 +1160,9 @@ class Handler(BaseHTTPRequestHandler):
                                  "targets": ["violin", "flute", "choir", "strings",
                                              "orchestra", "synth pad", "music box", "brass"],
                                  "freeText": True, "capabilities": caps})
+        elif path == "/reimagine/plan/status":
+            # Whether the opt-in Claude planner is on, its model and budget; never the key.
+            self._send(200, reimagine_planner.status())
         elif path == "/training/health":
             self._send(200, {
                 "ok": True,
@@ -1363,6 +1367,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"ok": False, "error": str(e)})
             except Exception as e:  # noqa: BLE001
                 self._send(503, {"ok": False, "error": f"promote failed: {e}"})
+        elif path == "/reimagine/plan":
+            # One opt-in Claude call: typed request + text context -> bounded render plan.
+            # Refusals (off, no key, budget, invalid plan) are 200 with ok:false so the
+            # plug-in can fall back to its template and say why.
+            self._send(200, reimagine_planner.plan(data))
         elif path == "/stitch_windows":
             # Render-ahead primitive (Lane A): overlap-add crossfade a set of already-rendered
             # window WAVs into ONE continuous file, reusing the exact owner-measured-gapless
