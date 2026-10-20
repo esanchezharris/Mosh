@@ -253,6 +253,7 @@ run_harness_selftests() {
   run_step "harness_selftest_log_keep" bash scripts/auto-loop/selftest-log-keep-selftest.sh
   run_step "cmake_preset_bundle_metadata" bash tests/cmake-preset-bundle-metadata-test.sh
   run_step "tracktion_patch_stack" bash tests/apply-tracktion-patch-test.sh
+  run_step "install_owner_reimagine_additive" bash tests/install-owner-reimagine-plugin-test.sh
   # v3-acceptance's row_chords verdict logic (BLOCKED vs FAIL precedence) -- like run_py_tests
   # above, path-scoped-only discovery let a scripts/v3-acceptance/ regression hide (it isn't
   # under relay/ or service/), so this one runs unconditionally here too. Pure unittest, no
