@@ -960,6 +960,26 @@ void ReImagineProcessor::run()
                                ? "Free audition refused: the host is playing the region in sync"
                                : "Free audition refused: the selected version is not loaded");
         }
+        {
+            // The audio thread stops the preview itself when the host starts, the audio
+            // ends or nothing is loaded; report that here, or the status keeps saying
+            // "playing". A user stop and a selection change already set their own status.
+            const auto playingNow = audition.playing();
+            if (auditionSeenPlaying && ! playingNow)
+            {
+                const auto why = audition.lastStop();
+                if (why == AuditionStop::hostTookOver || why == AuditionStop::finished
+                    || why == AuditionStop::nothingLoaded)
+                {
+                    setStatus ("Free audition stopped: " + auditionStopName (why));
+                    juce::DynamicObject::Ptr stopped = new juce::DynamicObject();
+                    stopped->setProperty ("mode", "free-running");
+                    stopped->setProperty ("reason", auditionStopName (why));
+                    logEvent ("version.audition-stopped", "implicit", juce::var (stopped.get()));
+                }
+            }
+            auditionSeenPlaying = playingNow;
+        }
         if (loraCatalogRequested.exchange (0, std::memory_order_acq_rel) != 0)
         {
             juce::String error;
@@ -1767,7 +1787,12 @@ juce::String ReImagineProcessor::selectedReport() const
     }
     const auto index = static_cast<size_t> (std::distance (region->takes.begin(), found));
     const auto lineage = lineageOf (*found);
-    lines.add ("Audible: " + takeLabel (*region, index));
+    if (region->status == RegionStatus::staleTempo)
+        // The audio path skips a stale region and passes the input through untouched.
+        lines.add ("Audible: dry (tempo changed since the Transfer; " + takeLabel (*region, index)
+                   + " plays again after a Re-transfer)");
+    else
+        lines.add ("Audible: " + takeLabel (*region, index));
     if (lineage.testFixture)
         lines.add ("TEST FIXTURE output - not a model render");
     for (const auto& item : pluginState.intentions)

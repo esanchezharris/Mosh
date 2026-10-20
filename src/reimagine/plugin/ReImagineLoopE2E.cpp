@@ -103,10 +103,11 @@ struct FakePlayHead final : juce::AudioPlayHead
 {
     bool playing = false;
     double ppq = 0.0;
+    double bpm = 120.0;
     juce::Optional<PositionInfo> getPosition() const override
     {
         PositionInfo info;
-        info.setBpm (120.0);
+        info.setBpm (bpm);
         info.setTimeSignature (TimeSignature { 4, 4 });
         info.setPpqPosition (ppq);
         info.setTimeInSamples (static_cast<int64_t> (ppq * 0.5 * 48000.0));
@@ -406,10 +407,34 @@ int main (int argc, char** argv)
             head.ppq += 512.0 / 48000.0 * 2.0;
         }
         check (! c->freeAuditionPlaying(), "host playback stops the free preview");
+        // The status line follows the stop the audio thread made (it used to keep saying
+        // "Free audition playing" after the host took over).
+        waitFor ([&] { return c->statusText().contains ("took over"); }, 5.0);
+        check (c->statusText().contains ("Free audition stopped") && c->statusText().contains ("took over")
+                   && ! c->statusText().contains ("playing - local preview"),
+               "status reports the host took over the preview: " + c->statusText());
         check (syncedPeak > 0.1f && syncedPeak < 0.85f, "host-synced playback alone, no second copy: peak " + juce::String (syncedPeak, 3));
         check (c->startFreeAudition().contains ("host is playing"), "free audition is refused while the host plays");
         head.playing = false;
         processPeak (*c);
+
+        // A host tempo change makes the region stale: playback passes the dry input, and the
+        // report must say so instead of naming the selected version as audible.
+        head.bpm = 100.0;
+        head.ppq = 0.0;
+        head.playing = true;
+        for (int block = 0; block < 4; ++block)
+        {
+            processPeak (*c);
+            head.ppq += 512.0 / 48000.0 * (100.0 / 60.0);
+        }
+        head.playing = false;
+        processPeak (*c);
+        waitFor ([&] { return c->statusText().contains ("stale"); }, 5.0);
+        check (c->selectedReport().contains ("Audible: dry"), "a stale region's report says playback is dry: "
+                   + c->statusText() + " / "
+                   + c->selectedReport().fromFirstOccurrenceOf ("Audible:", true, false).upToFirstOccurrenceOf ("\n", false, false));
+        head.bpm = 120.0;
 
         check (c->undoLastConform(), "the conform can be undone");
         cs = c->stateSnapshot();
@@ -420,8 +445,10 @@ int main (int argc, char** argv)
 
         const auto log = home.getChildFile ("Library/Mosh/ReImagine/experience.jsonl").loadFileAsString();
         check (log.contains ("\"version.conformed\", \"signal\": \"explicit\""), "experience log: conform is an explicit signal");
-        for (const auto* needle : { "\"conform.requested\"", "\"conform.refused\"", "\"version.conform-undone\"", "free-running" })
+        for (const auto* needle : { "\"conform.requested\"", "\"conform.refused\"", "\"version.conform-undone\"", "free-running",
+                                    "\"version.audition-stopped\"" })
             check (log.contains (needle), juce::String ("experience log has ") + needle);
+
         c->setPlayHead (nullptr);
     }
 

@@ -103,6 +103,41 @@ int main (int argc, char** argv)
                 editor.findChildWithID ("lora-slot-1")))
             selector->setSelectedItemIndex (1, juce::sendNotificationSync);
     }
+    // The region menu follows a bounds change that keeps the region count: "Replace
+    // overlap" swaps one region for another, and the label used to stay stale until reload.
+    {
+        auto* regionMenu = dynamic_cast<juce::ComboBox*> (editor.findChildWithID ("regions"));
+        if (regionMenu == nullptr)
+        {
+            std::cerr << "region menu is missing\n";
+            return 10;
+        }
+        const auto restoreOneRegion = [&processor, &editor] (const juce::String& id, double ppqEnd)
+        {
+            auto state = processor.stateSnapshot();
+            mosh::reimagine::TransferRegion region;
+            region.id = id;
+            region.ppqStart = 0.0;
+            region.ppqEnd = ppqEnd;
+            region.tempoMap = { { 0.0, 83.0 } };
+            region.sourceHash = juce::String::repeatedString ("a", 64);
+            state.regions = { region };
+            state.selectedRegionId = id;
+            const auto json = mosh::reimagine::serializeState (state);
+            processor.setStateInformation (json.toRawUTF8(), static_cast<int> (json.getNumBytesAsUTF8()));
+            editor.refreshFromProcessor();
+        };
+        restoreOneRegion ("region-before", 34.45);
+        const auto before = regionMenu->getText();
+        restoreOneRegion ("region-after", 32.38);
+        const auto after = regionMenu->getText();
+        if (! before.contains ("34.45") || ! after.contains ("32.38"))
+        {
+            std::cerr << "region menu did not follow a same-count replacement: \"" << before
+                      << "\" then \"" << after << "\"\n";
+            return 11;
+        }
+    }
     const auto image = editor.createComponentSnapshot (editor.getLocalBounds());
     juce::Image::BitmapData pixels (image, juce::Image::BitmapData::readOnly);
     int nonBackgroundPixels = 0;

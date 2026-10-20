@@ -138,6 +138,7 @@ ReImagineEditor::ReImagineEditor (ReImagineProcessor& p)
     refreshLoras.setTooltip ("Refresh the local SA3 LoRA library.");
     refreshLoras.setComponentID ("refresh-loras");
     loraInfo.setComponentID ("lora-info");
+    regions.setComponentID ("regions");
     regions.setTextWhenNothingSelected ("No regions");
     regions.setTooltip ("Choose a transferred timeline region.");
     takes.setTextWhenNothingSelected ("No takes");
@@ -450,7 +451,7 @@ void ReImagineEditor::updateLoraInfo()
                           juce::dontSendNotification);
 }
 
-void ReImagineEditor::timerCallback()
+void ReImagineEditor::refreshFromProcessor()
 {
     status.setText (processorRef.statusText(), juce::dontSendNotification);
     progressValue = processorRef.progress();
@@ -465,17 +466,21 @@ void ReImagineEditor::timerCallback()
         syncLoraCatalog (catalog);
     }
     const auto state = processorRef.stateSnapshot();
-    if (static_cast<int> (state.regions.size()) != knownRegionCount)
+    // Rebuilt on any label change, not only a count change: "Replace overlap" swaps a
+    // region for one with new bounds and leaves the count as it was.
+    juce::StringArray regionLabels;
+    for (size_t i = 0; i < state.regions.size(); ++i)
+        regionLabels.add ("Region " + juce::String (static_cast<int> (i) + 1) + " - "
+                          + juce::String (state.regions[i].ppqStart, 2) + " to "
+                          + juce::String (state.regions[i].ppqEnd, 2));
+    const auto regionSignature = regionLabels.joinIntoString ("|");
+    if (static_cast<int> (state.regions.size()) != knownRegionCount || regionSignature != knownRegionSignature)
     {
         knownRegionCount = static_cast<int> (state.regions.size());
+        knownRegionSignature = regionSignature;
         regions.clear (juce::dontSendNotification);
         for (int i = 0; i < knownRegionCount; ++i)
-        {
-            const auto& region = state.regions[static_cast<size_t> (i)];
-            regions.addItem ("Region " + juce::String (i + 1) + " - "
-                             + juce::String (region.ppqStart, 2) + " to "
-                             + juce::String (region.ppqEnd, 2), i + 1);
-        }
+            regions.addItem (regionLabels[i], i + 1);
         knownTakeCount = -1;
     }
     for (int i = 0; i < knownRegionCount; ++i)
