@@ -31,7 +31,7 @@ evidence. It claims nothing about how the music sounds.
   not a backend Mosh calls ([M1-GARY-COMPARISON.md](M1-GARY-COMPARISON.md)). Licence obligations for SA3 and JUCE are already recorded in
   [DEPENDENCY_BOM.md](../DEPENDENCY_BOM.md). The open item there is SA3 checkpoint
   provenance.
-- **Host:** Ableton Live 11, the plug-in's existing target. It uses generic capture and
+- **Host:** Ableton Live (the owner's host is Live 12; this record first said Live 11), the plug-in's existing target. It uses generic capture and
   export; no REAPER adapter is built.
 - **Task:** transformation (audio-to-audio re-imagine). An isolated accompaniment part
   does not exist in the repository.
@@ -529,14 +529,13 @@ The measured "first candidate" is time to a stored, decoded version in a headles
 process. It is not "seconds to first audible" in Live, which is the owner's stopwatch
 number on the comparison sheet.
 
-### 6. Unattended pass through the listening checklist in **Live 12**, not Live 11
+### 6. Unattended pass through the listening checklist in Live 12
 
 Done overnight with the owner's go-ahead, and with no listening.
 
-**Why Live 12.** Live 11 cannot run on this Mac: `/Applications/Ableton Live 11
-Standard.app` has no `Contents/MacOS` (the executable is missing), so a reinstall is
-needed. Everything below is therefore Ableton Live **12.4.6** Suite at 48 kHz. Live 11
-behaviour stays unverified.
+**Host.** Ableton Live **12.4.6** Suite at 48 kHz, which is the owner's host (owner
+correction, 2026-10-20: the checklists' "Live 11" means the owner's Live, which is Live 12).
+A stale Live 11 Standard install on this Mac is broken and not used.
 
 **Setup.** Producer Pal 1.4.7 created the test Set and drove the transport: tempo 83,
 the source excerpt unwarped on an audio track at bar 1, and Main at −70 dB while testing.
@@ -583,7 +582,7 @@ at 0 dB.
 | D2 | 100 BPM + Play → "Tempo map changed – region is stale; Re-transfer required". Back at 83 the region **stays stale**; by code, the stale flag is latched until a re-Transfer, and the audio path skips substitution (dry). The report's "Audible:" line still names the selected version. "Plays dry" is confirmed from the code, not by ear. |
 | D3 | **Skipped.** It means changing Live's audio buffer or sample rate preferences. Covered only by the headless P2 test. |
 
-**Old Live 11 checklist item 9 (two instances at once).** A second instance on another
+**Item 9 of the 2026-10-10 checklist (two instances at once).** A second instance on another
 track had its own Transfer. Instance B queued 4 candidates, and instance A queued 2 about
 6 s later, while B was still rendering. Attempts interleaved on the shared helper, and each
 instance presented only its own versions. Under contention an attempt took about 9.3 s
@@ -599,8 +598,7 @@ instance presented only its own versions. Under contention an attempt took about
 - Listening to the owner-phrase renders above: keep/reject, chord fit, "less busy",
   texture. Also whether the measured BPM, key and chords match what the owner played,
   since they are estimates.
-- Anything in **Live 11**: the app is broken on this Mac. In Live 12 (section 6), these
-  remain unchecked: seek and loop-wrap audition, the Drag WAV landing (C1), D3, and
+- In Live 12 (section 6), these remain unchecked: seek and loop-wrap audition, the Drag WAV landing (C1), D3, and
   every audible claim (no doubling, no clicks, dry when stale). Host-synced playback is
   tested headless at 44.1/48/96 kHz, five block sizes, seeks and a loop wrap against a
   fake playhead; that is not Live.
