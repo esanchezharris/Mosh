@@ -593,6 +593,48 @@ instance presented only its own versions. Under contention an attempt took about
 **Other.** macOS asked whether Live 12 may access Apple Music / media; I answered
 "Don't Allow".
 
+### 7. Merges, reinstall and the Gary side (2026-10-20, owner-authorized)
+
+- **Merged:** #805 (additive installer), #806 (stale editor labels), #804 (this record).
+  Main `36e68a78`.
+- **Reinstalled from main** with the fixed `scripts/install-owner-reimagine-plugin.sh`.
+  The previous bundle was kept as `.bak-20261020`. Bundle smoke against the installed copy
+  passed. The helper's `server.py` matches main. The 3.5 GB of SFT data (`.adapters`,
+  `.sft-data`, `.artifacts`) survived, and the run scripts stayed executable.
+- **Gary probe (live this time).** gary4local 0.1.11:
+  - The owner approved the first-launch dialog. Only the **sa3** environment was built
+    (Python 3.11 venv, 732 MB; torch 2.7.1, MLX).
+  - Its checkpoint `stabilityai/stable-audio-3-medium` is gated. The owner accepted access
+    and saved an HF token in Gary's keychain setup.
+  - Gary downloaded 9.2 GB of weights plus a 1.2 GB t5gemma encoder, about 10 GB in all
+    under `~/Library/Application Support/GaryLocalhost/cache`.
+  - `/health`: `status healthy`, `backend mlx`, `model medium`, 44.1 kHz, DiT float32 /
+    autoencoder float16, `hf_token_configured: true`.
+  - **Listens on `*:8006`, all interfaces** (LAN-reachable), as `api.py`'s `0.0.0.0`
+    suggested. No other Gary port was started.
+- **Gary run** (`gary/run_gary.py` in the evidence folder): the same 8-bar source and the
+  same two requests, sent to `/transform` and timed POST-to-result. Settings were Gary's
+  defaults (8 steps, cfg 1.0, pingpong, **strength 0.9**) with no chord list, run one at a
+  time. The Mosh helper was not running.
+
+  | Attempt | Seconds |
+  |---|---|
+  | 1A | 39.62 (cold: includes about 33 s of model load) |
+  | 1B | 6.73 |
+  | Revision 2A of 1B | 6.68 |
+  | Revision 2B of 1B | 6.84 |
+
+  Batch 1 took 46.4 s and batch 2 13.6 s, 4 attempts in all. All outputs are 23.13 s,
+  44.1 kHz, copied to `~/Music/Mosh Re-Imagine M1 2026-10-20/` as `31`–`34`.
+  Gary's model was then unloaded (`/unload`).
+- **Read with care.** Different checkpoints: Gary uses `stable-audio-3-medium` (float32
+  DiT); Mosh uses `stable-audio-3-optimized` MLX at about 4–5 s warm. Strength differs too
+  (0.9 vs 0.4). These are the out-of-the-box settings of each tool, not a matched model
+  test. The sheet's measures (seconds to first *audible*, controls touched, keep/reject)
+  are the owner's.
+- Disk after the Gary install: 19 GB free. That is below the 32 GB the native gate's
+  memory preflight requires.
+
 ## Not verified (owner steps)
 
 - Listening to the owner-phrase renders above: keep/reject, chord fit, "less busy",
@@ -607,14 +649,10 @@ instance presented only its own versions. Under contention an attempt took about
   ([M1-GARY-COMPARISON.md](M1-GARY-COMPARISON.md) is the sheet).
 - Whether planned prompts beat the template is a listening question. Three real calls
   were measured on the owner's account (above), and one session is an anecdote.
-- The Gary side of the comparison. Gary has not been launched on this Mac, so its
-  versions, models and bind addresses are unobserved.
-- `scripts/install-owner-reimagine-plugin.sh`'s `rsync --delete` would remove untracked
-  SFT data from the shared helper. The fix is in #805 (additive sync plus a test that the
-  old script fails); until it merges, do not run the script as written.
-- Two small UI bugs found in section 6, not yet fixed: the region menu label does not
-  refresh after "Replace overlap", and the status line keeps "Free audition playing" after
-  host playback takes over.
+- The Gary side of the sheet: listening, keep/reject, seconds to first audible, controls
+  touched. The renders exist (section 7); judging them is the owner's.
+- The #806 editor fixes (region label, preview status, "Audible: dry") are only tested
+  headless. They have not been seen in Live yet.
 - Free audition inside a real host with no transport, and its hand-off to host playback
   in Live: only a fake playhead was used.
 - Conform on real SA3 output: how often the measurement allows it, and how SoundTouch
