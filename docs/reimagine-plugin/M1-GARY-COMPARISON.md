@@ -16,7 +16,7 @@ means "not observed", never "no".
 | Date | |
 | Source phrase (file name; authorized, yours) | |
 | Source length (bars, seconds), BPM, key, chords as entered | |
-| Host and project | Ableton Live 11, Set: |
+| Host and project | Ableton Live 12, Set: |
 | Gary build and backend (gary4local version; SA3 on `127.0.0.1:8006` or Carey/ACE-Step on `:8003`) | |
 | Mosh commit and backend (local SA3 Medium MLX through the Re-Imagine helper) | |
 | Mosh controller (template, or Claude planner + model) | |
