@@ -23,7 +23,16 @@ ditto "$PLUGIN_SOURCE" "$PLUGIN_DEST"
 # secret-bearing dotenv files are not copied. .sa3.env is the one permitted,
 # non-secret model pointer; owner-sa3.env remains outside the helper and is read
 # directly by run.sh.
-rsync -a --delete \
+#
+# Additive on purpose: no --delete. The shared helper also holds the owner's
+# runtime data that is not in git (SFT adapters and data under sft/.adapters/,
+# sft/.sft-data/ and sft/.artifacts/, about 3.5 GB on the owner Mac, plus the
+# training state and rights registry). A mirror would wipe it. -c compares
+# content, so unchanged files are not rewritten; -p is left out so a file stored
+# as 644 in git never strips an executable bit (run scripts are chmod'ed below).
+# A file removed from service/ in git therefore stays in the helper until removed
+# by hand.
+rsync -rlc \
   --exclude '.git/' \
   --exclude '__pycache__/' \
   --exclude '*.pyc' \
@@ -31,6 +40,11 @@ rsync -a --delete \
   --exclude 'output/' \
   --exclude 'training-output/' \
   --exclude '.*.env' \
+  --exclude 'sft/.adapters/' \
+  --exclude 'sft/.sft-data/' \
+  --exclude 'sft/.artifacts/' \
+  --exclude 'training/training_state.json' \
+  --exclude 'training/rights_registry.json' \
   "$REPO_ROOT/service/" "$HELPER_DEST/"
 if [[ -f "$REPO_ROOT/service/.sa3.env" ]]; then
   install -m 600 "$REPO_ROOT/service/.sa3.env" "$HELPER_DEST/.sa3.env"
