@@ -384,10 +384,156 @@ about Live.
   Stability-AI/stable-audio-3's own installer. That is an official Stability AI release
   under the Stability AI Community License. The licence text is not cached locally.
 
+## Owner-Mac verification (2026-10-19/20, arm64, macOS 26.4.1)
+
+Automated and engineering-only, like the 2026-10-10 pass. Nobody listened to anything, and
+Live was not opened. Evidence lives outside the repo in
+`~/Library/Mosh/task-evidence/reimagine-m1-20261019/` (manifests, harness logs, analysis
+scripts, the planner request/response and ledger lines).
+
+### 1. Canonical gate
+
+`scripts/auto-loop/gate.sh native <worktree> origin/main` ran from each candidate
+worktree's own driver. #790 and #799 were already merged, so they were not gated.
+
+| PR | Head gated | Base | Result |
+|---|---|---|---|
+| #802 | `8838ffe4` | `c01087e7` | **PASS** 25/25. `--selftest` ×3 5046/5046, ctest 12/12. Merged on that head. |
+| #803 | `baa0a104` | `d954a588` | **PASS** 24/24 (`npm_ci_native` skipped: node_modules fresh). `--selftest` ×3 5046/5046, ctest 12/12. |
+
+#803's head moved twice while being gated (`0c035e49` → `b6f2b847` → `baa0a104`, the last
+merge bringing in #789's CMake changes). Both earlier heads also passed and are superseded.
+Extra checks on the `baa0a104` build (`macos-arm64-release`,
+`-DMOSH_BUILD_REIMAGINE_PLUGIN=ON -DMOSH_BUILD_TESTS=ON`):
+
+- `Mosh --selftest` ×3, private session and port each: 5046/5046 ×3.
+- `Mosh --selftest-undo`: 92/92.
+- `MoshTests "[reimagine]"`: 49 cases / 581 assertions.
+- `ctest -R MoshReImagine --output-on-failure`: Bundle 0.85 s, Editor 0.13 s, LoopE2E
+  14.07 s, 3/3.
+
+Known side effects, not defects of these PRs: each manual `--selftest` left its spawned
+shared helper orphaned on its port, and `MoshReImagineEditorSmoke` started the real shared
+helper on :8770. All four were stopped by hand. The PR comments carry the step tables.
+Main after #803 (`938d4068`) differs from `baa0a104` only in tests, CI and harness files
+(#795), so the installed plug-in has main's product code.
+
+### 2. Gary baseline probe (read-only)
+
+- Installed: `/Applications/gary4local.app`, `thecollabagepatch.gary4local` **0.1.11**
+  (build 111), team `P8L4LGS728`.
+- Not running and apparently never launched: no Application Support folder. Nothing
+  listened on 8000/8002/8003/8006/8007/8015/8770, and `curl` to `:8006/health`,
+  `:8006/ready` and `:8003/health` returned HTTP 000. So no versions or models were
+  reported, and the 0.0.0.0 bind in its published `sa3/api.py` was not observed here.
+  Gary was not launched, because a first launch may download models.
+
+### 3. Claude planner
+
+- Venv `~/Library/Mosh/planner-venv` with `anthropic` 1.15.0. The opt-in file
+  `~/.config/mosh/reimagine-planner.env` is mode 600. The owner pasted the key; the file
+  was never printed.
+- `python3 service/reimagine_planner.py --status`: `enabled: true`, `anthropic`,
+  `claude-opus-5-5`, effort `medium`, budget $20, spent $0. No key is shown.
+- `python3 service/scripts/reimagine_planner_test.py`: OK, 57 PASS and 1 SKIP (the no-SDK
+  path, because this interpreter has `anthropic`).
+- One smoke call: `POST /reimagine/plan` on the restaged helper (scratch port 18770), with
+  `body()` text only and no paths. Result: `ok`; served model `claude-opus-5-5`;
+  1322 input / 303 output tokens; **$0.011348**; **7164 ms**; strength 0.3; 2
+  candidates. Three "unsupported" items were listed: exact chord following, chord-change
+  timing, and "less busy". One ledger line was written, with no text.
+
+### 4. Plug-in install
+
+- Built from `baa0a104` with the repository preset and the flags above. Installed as
+  `scripts/install-owner-reimagine-plugin.sh` does for the bundle: `ditto`, ad-hoc
+  `codesign --force --deep`, then `--verify --deep --strict` (valid). The previous bundle
+  was kept as `Mosh Re-Imagine.vst3.bak-20261019`.
+- `MoshReImagineBundleSmoke` against the installed copy: "scan/load/editor/dry/state smoke
+  passed".
+- **The install script was not run as written.** Its helper step is `rsync -a --delete`
+  without excluding `sft/.adapters/` or `sft/.sft-data/`, so it would have deleted
+  3.5 GB of owner SFT data in the shared helper. Instead:
+  - the helper was backed up as `service.bak-20261019` (APFS clone);
+  - main's `service/` was restaged additively (`rsync -rlc`, no `--delete`). That changed
+    9 files (`server.py`, `direct_render.py`, `reimagine_planner.py` and tests) and
+    deleted nothing.
+  - On a scratch port the restaged helper reported `explicitRenderDecision: true`,
+    `sa3: true` and planner `enabled: true`.
+  - The script's `--delete` is still a hazard for the next person who runs it.
+
+### 5. Real SA3 renders on the owner's phrase
+
+**Source.** `LasTrain 15-Rhodes_01.wav` is the isolated Rhodes stem from the owner's own
+2021 "LastTrain" multitrack export (Google Drive). The owner chose it by syncing it for this
+run. Bars 33–40 were cut: 127.241 s to 150.374 s, **23.133 s**, 44.1 kHz, written as 24-bit.
+All context was measured by script, not given by the owner:
+
+- **BPM 83, 4/4.** A grid fit put 182/182 kick onsets within 25 ms of an eighth-note grid at
+  166.00 BPM (median error 3 ms). 83 rather than 166 was chosen because 82% of the Rhodes'
+  harmonic changes fall on even grid beats. The chord loop is 4 bars at 83 (chroma
+  similarity 0.983 at a 4-bar lag).
+- **Key Eb major.** Krumhansl correlation 0.904; next best C minor, 0.63.
+- **Chords** (chroma-template estimate, not a transcription):
+  `1:Abmaj7 1.75:Ebmaj7 2.25:Bbm7 2.75:Ebmaj7 4:Cm7 5:Ebmaj7 6.25:Bbm7 6.75:Ebmaj7 8:Cm7`.
+  This is the raw labels with a 2-beat out-of-key "Cmaj7" read as Cm7 and a 2-beat tail
+  dropped.
+
+**Method.** A headless `ReImagineProcessor` (throwaway harness, not committed) ran with
+real HOME, the restaged shared helper on :8770, and no adapter or fixture env. A fake host
+playhead reported 83 BPM 4/4, so tempo is host-provided rather than assumed. Strength was
+0.4, seeds 4242+, 2 candidates, then 1 revision batch of 2 from candidate 2 using its
+audio. Requests were as in M1-GARY-COMPARISON.md. Each intention used **4/8 attempts, 0
+failed**.
+
+All 8 versions report `backend mlx`, `model_variant sa3-medium`, 8 steps, no
+`test_fixture`, checks `usable`, duration delta 0.000 s, and **44.1 kHz in and out**.
+
+| Run | Version | nl | gen s | Since request s | Tempo conformance (technical) |
+|---|---|---|---|---|---|
+| template | cand 1 | 0.40 | 2.68 | 2.84 (first candidate) | undetermined: no clear pulse within 15% |
+| template | cand 2 | 0.40 | 4.07 | 6.97 | conforms: 83.01 BPM, −0.3 ms/bar |
+| template | rev 1 of cand 2 | 0.40 | 5.83 | 6.04 (first) | undetermined |
+| template | rev 2 of cand 2 | 0.40 | 4.68 | 10.78 | drifts +365.5 ms/bar (95.01 BPM) |
+| planner | cand 1 | 0.30 | 2.60 | 9.21 (first) | undetermined |
+| planner | cand 2 | 0.30 | 4.16 | 13.44 | undetermined |
+| planner | rev 1 of cand 2 | 0.22 | 4.08 | 9.25 (first) | undetermined |
+| planner | rev 2 of cand 2 | 0.22 | 4.76 | 14.08 | undetermined |
+
+**Controller.** Template runs report "Prompt by: template". The prompt sent was the
+request verbatim, the revision text when there was one, then
+`in Eb major, 83 BPM, chords by bar: 1 Abmaj7, …`.
+
+Planner runs: two calls to `claude-opus-5-5`, served as `claude-opus-5-5`:
+
+| Batch | Cost | Latency | Prompt sent |
+|---|---|---|---|
+| Generate | $0.012032 | 6445 ms | "hazy sampled keyboard loop, dusty lo-fi electric piano sample, warm tape saturation, soft wow and flutter, vinyl crackle, muffled high end, mellow sustained chords, sparse relaxed playing, gentle reverb wash, nostalgic dreamy mood, Eb major, lo-fi hip hop production" |
+| Revise | $0.011680 | 4927 ms | "hazy sampled keyboard loop, lo-fi Rhodes-style electric piano resampled from vinyl, rough gritty texture, crunchy bit-reduced grain, tape saturation and wow, dusty crackle, muffled warm low-pass tone, mellow sparse chords, laid-back soulful mood, Eb major, boom-bap sampler character" |
+
+Neither planned prompt carries the BPM or the chord list as text. Chord timing still went
+as structured data. The planner lowered strength to 0.3 and then 0.22. Ledger total so
+far: $0.035.
+
+**Earlier aborted run.** A first template run made 2 candidates (`generationSeconds` 8.11
+cold, 4.65), then exited before its revision batch ran. The harness bug: the revision wait
+checked "batch active" 100 ms after queueing. The log has `revision.requested` and no
+revision attempt. It is kept as `template-aborted-harness-wait-bug/` and is not counted
+above.
+
+**Files for Live.** `~/Music/Mosh Re-Imagine M1 2026-10-20/` holds the source excerpt
+(`00 …`) and the 8 versions (`11`–`14` template, `21`–`24` planner, named by role, seed and
+nl). These are copies; the content-addressed originals stay in the asset store.
+
+The measured "first candidate" is time to a stored, decoded version in a headless
+process. It is not "seconds to first audible" in Live, which is the owner's stopwatch
+number on the comparison sheet.
+
 ## Not verified (owner steps)
 
-- A real SA3 render of an **authorized musical phrase** (the run above used a synthetic
-  fixture).
+- Listening to the owner-phrase renders above: keep/reject, chord fit, "less busy",
+  texture. Also whether the measured BPM, key and chords match what the owner played,
+  since they are estimates.
 - Plug-in behaviour inside Live 11: transport, seek and loop-wrap audition, drag-out
   landing, and save/reopen of a Live Set. Host-synced playback is now tested headless at
   44.1/48/96 kHz, five block sizes, seeks and a loop wrap against a fake playhead; that is
@@ -395,9 +541,12 @@ about Live.
 - Any musical judgement: is a candidate useful, does it follow the chords. The comparison
   against direct use of Gary, with the same source and budget, has not been run
   ([M1-GARY-COMPARISON.md](M1-GARY-COMPARISON.md) is the sheet).
-- The cloud planner against the real API: no real key was used. Its prompts, cost per
-  call and latency on the owner's account are unmeasured, and whether planned prompts
-  beat the template is a listening question.
+- Whether planned prompts beat the template is a listening question. Three real calls
+  were measured on the owner's account (above), and one session is an anecdote.
+- The Gary side of the comparison. Gary has not been launched on this Mac, so its
+  versions, models and bind addresses are unobserved.
+- `scripts/install-owner-reimagine-plugin.sh`'s `rsync --delete` would remove untracked
+  SFT data from the shared helper. It needs a fix before anyone runs it as written.
 - Free audition inside a real host with no transport, and its hand-off to host playback
   in Live: only a fake playhead was used.
 - Conform on real SA3 output: how often the measurement allows it, and how SoundTouch
