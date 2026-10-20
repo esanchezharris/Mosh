@@ -529,15 +529,81 @@ The measured "first candidate" is time to a stored, decoded version in a headles
 process. It is not "seconds to first audible" in Live, which is the owner's stopwatch
 number on the comparison sheet.
 
+### 6. Unattended pass through the listening checklist in **Live 12**, not Live 11
+
+Done overnight with the owner's go-ahead, and with no listening.
+
+**Why Live 12.** Live 11 cannot run on this Mac: `/Applications/Ableton Live 11
+Standard.app` has no `Contents/MacOS` (the executable is missing), so a reinstall is
+needed. Everything below is therefore Ableton Live **12.4.6** Suite at 48 kHz. Live 11
+behaviour stays unverified.
+
+**Setup.** Producer Pal 1.4.7 created the test Set and drove the transport: tempo 83,
+the source excerpt unwarped on an audio track at bar 1, and Main at −70 dB while testing.
+The plug-in UI was driven with synthetic clicks and keys plus screenshots.
+
+**Results.** Screenshots and the 54 experience-log lines of this pass are in
+`~/Library/Mosh/task-evidence/reimagine-m1-20261019/live12/`. The Set is
+`~/Music/Mosh Re-Imagine M1 2026-10-20/Live12 check/…/M1 Live12 check.als`, with Main back
+at 0 dB.
+
+**A. Set up**
+
+| Item | Observed |
+|---|---|
+| A1 | The plug-in loads and its editor opens. "Claude writes the prompt" sits beside the intention heading. "10 local adapters available". |
+| A2 | Transfer → "Transfer armed – press Play in Live"; after 8 bars → "Transfer ready". My first stop was late, so the region was 0–34.45 beats. A second Transfer → "Overlap detected – choose Replace or Discard" → Replace. The stored region is 0–32.38 beats (export sidecar), but the region menu kept showing "0.00 to 34.45" until the Set was reopened (**stale label**). |
+| A3 | Key, chords, section and protected choices saved: "Context saved for this region (user values override host values)". The report shows Tempo 83.00 BPM (host). |
+
+**B. Template, then planner.** Candidate 2 was selected mechanically, not by ear.
+
+| Item | Observed |
+|---|---|
+| Template B1 | 2 candidates, "2/8 attempts, 0 failed", "Prompt by: template". `firstCandidateSeconds` 6.90 (cold helper), second at 11.78 s. `controlsTouched` 6. |
+| Template B3 | Revision of v2 from its audio: v3 and v4 at 3.81 s and 8.94 s, "4/8". v3 reports "drifts 361.1 ms per bar slower (measured 73.79 BPM)". |
+| Planner B1 | 10.31 s and 15.71 s (includes one call: $0.012736). Report: "Prompt by: claude-opus-5-5 ($0.0127, text only - it never heard the audio)" and a "Planner: not enforceable" list. The checklist expects the words "Planned by"; the plug-in says "Prompt by". `controlsTouched` 3 counts "revision" on a Generate because the unused revision box changed since the previous request. |
+| Planner B3 | v7 and v8 at 10.79 s and 15.93 s (call $0.011844, 4992 ms), "4/8". |
+| B2 and B4 | Listening, left blank. |
+
+**C. Keep, export, conform, preview**
+
+| Item | Observed |
+|---|---|
+| C1 Keep | v7 → "kept in Mosh (not written to the DAW timeline; Export or drag to place it)". |
+| C1 Drag WAV | **Not done.** A synthetic mouse drag from Drag WAV onto a Live track created no clip. During that attempt Live's transport started and the automation-arm and draw toggles changed, leaving a stray automation envelope on 1-MIDI in the test Set only. Needs a human drag. |
+| C2 Export | `~/Music/Mosh Exports/Verse_bar1_83bpm_99ddecbd.wav` (44.1 kHz, 23.41 s, decodes) plus a JSON sidecar with region ppq 0–32.38, context, lineage and `hostPlacement: unobserved`. |
+| C3 Conform | On v3: "Conform refused: would stretch by -11.1% (limit +-8%): more likely another tempo or feel than drift". No conformed version exists, so there is nothing to judge for SoundTouch artefacts. |
+| C4 Free preview | Stopped → "Free audition playing – local preview, not synced to the host timeline". Live Play → the button resets and the report says "host-synced playback took over". The bottom status line still says "Free audition playing" (**stale status**). Only the start is logged (`version.auditioned`). Audibility is unknown. |
+
+**D. Save, reopen, safety**
+
+| Item | Observed |
+|---|---|
+| D1 | Save, quit Live, reopen: all 8 versions, v7 KEPT, the selected version, context, request text and planner switch are restored, and "Selected takes loaded". The region label now reads 0.00–32.38. The revision text box is not restored. |
+| D2 | 100 BPM + Play → "Tempo map changed – region is stale; Re-transfer required". Back at 83 the region **stays stale**; by code, the stale flag is latched until a re-Transfer, and the audio path skips substitution (dry). The report's "Audible:" line still names the selected version. "Plays dry" is confirmed from the code, not by ear. |
+| D3 | **Skipped.** It means changing Live's audio buffer or sample rate preferences. Covered only by the headless P2 test. |
+
+**Old Live 11 checklist item 9 (two instances at once).** A second instance on another
+track had its own Transfer. Instance B queued 4 candidates, and instance A queued 2 about
+6 s later, while B was still rendering. Attempts interleaved on the shared helper, and each
+instance presented only its own versions. Under contention an attempt took about 9.3 s
+(about 5 s alone), and B's 4th version arrived at 26.7 s.
+
+**Planner spend after this pass:** $0.0596 over 5 calls.
+
+**Other.** macOS asked whether Live 12 may access Apple Music / media; I answered
+"Don't Allow".
+
 ## Not verified (owner steps)
 
 - Listening to the owner-phrase renders above: keep/reject, chord fit, "less busy",
   texture. Also whether the measured BPM, key and chords match what the owner played,
   since they are estimates.
-- Plug-in behaviour inside Live 11: transport, seek and loop-wrap audition, drag-out
-  landing, and save/reopen of a Live Set. Host-synced playback is now tested headless at
-  44.1/48/96 kHz, five block sizes, seeks and a loop wrap against a fake playhead; that is
-  not Live.
+- Anything in **Live 11**: the app is broken on this Mac. In Live 12 (section 6), these
+  remain unchecked: seek and loop-wrap audition, the Drag WAV landing (C1), D3, and
+  every audible claim (no doubling, no clicks, dry when stale). Host-synced playback is
+  tested headless at 44.1/48/96 kHz, five block sizes, seeks and a loop wrap against a
+  fake playhead; that is not Live.
 - Any musical judgement: is a candidate useful, does it follow the chords. The comparison
   against direct use of Gary, with the same source and budget, has not been run
   ([M1-GARY-COMPARISON.md](M1-GARY-COMPARISON.md) is the sheet).
@@ -546,7 +612,11 @@ number on the comparison sheet.
 - The Gary side of the comparison. Gary has not been launched on this Mac, so its
   versions, models and bind addresses are unobserved.
 - `scripts/install-owner-reimagine-plugin.sh`'s `rsync --delete` would remove untracked
-  SFT data from the shared helper. It needs a fix before anyone runs it as written.
+  SFT data from the shared helper. The fix is in #805 (additive sync plus a test that the
+  old script fails); until it merges, do not run the script as written.
+- Two small UI bugs found in section 6, not yet fixed: the region menu label does not
+  refresh after "Replace overlap", and the status line keeps "Free audition playing" after
+  host playback takes over.
 - Free audition inside a real host with no transport, and its hand-off to host playback
   in Live: only a fake playhead was used.
 - Conform on real SA3 output: how often the measurement allows it, and how SoundTouch
