@@ -1,4 +1,4 @@
-# Re-Imagine M1: listening checklist (owner, Live 11)
+# Re-Imagine M1: listening checklist (owner, Live 12)
 
 For your hands-on hours. Everything automated has run elsewhere. This checklist covers
 what only your ears, your Mac and Live can answer. Write results into the "Log" column
