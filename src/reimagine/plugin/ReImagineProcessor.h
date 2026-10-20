@@ -241,6 +241,9 @@ private:
     std::atomic<int> conformRunning { 0 };
     FreeAudition audition;
     std::atomic<int> auditionArmRequested { 0 };
+    // Worker thread only: whether the preview was playing at the previous worker pass, so
+    // a stop the audio thread made (host took over, end of audio) reaches the status line.
+    bool auditionSeenPlaying = false;
 
     const juce::String instanceId { juce::Uuid().toString() };
     ExperienceLog experience;

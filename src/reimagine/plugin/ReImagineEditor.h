@@ -29,9 +29,12 @@ public:
     ~ReImagineEditor() override;
     void paint (juce::Graphics&) override;
     void resized() override;
+    // Pulls processor state into the controls; the 10 Hz timer calls it, and the editor
+    // smoke test calls it directly (no message loop there).
+    void refreshFromProcessor();
 
 private:
-    void timerCallback() override;
+    void timerCallback() override { refreshFromProcessor(); }
     RackSettings rackFromControls() const;
     void commit();
     void showLoraLoadingState();
@@ -101,6 +104,7 @@ private:
     juce::String knownContextRegion;
     int knownTakeCount = -1;
     int knownRegionCount = -1;
+    juce::String knownRegionSignature;
     uint64_t knownLoraRevision = 0;
     bool syncingLoras = false;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ReImagineEditor)
