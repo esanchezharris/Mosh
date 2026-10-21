@@ -427,3 +427,134 @@ describe("runAgentLoop — session-revision binding (step-1 slice 3)", () => {
     expect(r.reads()).toBe(1);                        // only the planning observation
   });
 });
+
+describe("runAgentLoop — exactly once, repair cycle (verifier findings 2026-09-05)", () => {
+  // The audit of the slice-3 candidate found (a) the consecutive-twin skip dropping
+  // steps whose identical re-issue IS the instruction (undo/undo, "duplicate it
+  // twice"); (b) a top-level copy that only partially overlaps the plan, or is
+  // order-swapped, still running twice; (c) a skipped step being invisible, and a
+  // bare-commands model repeating itself burning the whole step budget.
+  const A = CMD("set_track_volume", { trackId: "1", db: -13 });
+  const B = CMD("set_track_mute", { trackId: "2", mute: true });
+  const C = CMD("set_tempo", { bpm: 90 });
+
+  it.each([
+    ["undo", CMD("undo")],
+    ["redo", CMD("redo")],
+    ["duplicate_clip", CMD("duplicate_clip", { clipId: "9" })],
+    ["duplicate_track_group", CMD("duplicate_track_group", { groupId: "g1", name: "Drums 2", kind: "edit" })],
+  ])("%s issued as two consecutive plan steps runs TWICE — its repeat is a new instruction, not a duplicate", async (_name, call) => {
+    const { chat } = scriptedChat([
+      { status: "continue", plan: [{ goal: "once", commands: [call] }, { goal: "again", commands: [call] }] },
+    ]);
+    const { env, batches } = scriptedEnv(["ok", "ok"]);
+    const run = await runAgentLoop({ ask: "twice" }, { chat, env } as LoopDeps);
+
+    expect(batches.map((b) => b.commands)).toEqual([[call.command], [call.command]]);
+    expect(run.stepCount).toBe(2);
+    expect(run.outcome).toBe("done");
+  });
+
+  it("a mixed step carrying a repeatable command alongside an absolute one is not skipped either", async () => {
+    const step = [CMD("duplicate_clip", { clipId: "9" }), A];
+    const { chat } = scriptedChat([
+      { status: "continue", plan: [{ goal: "once", commands: step }, { goal: "again", commands: step }] },
+    ]);
+    const { env, batches } = scriptedEnv(["ok", "ok"]);
+    const run = await runAgentLoop({ ask: "twice" }, { chat, env } as LoopDeps);
+    expect(batches).toHaveLength(2);
+    expect(run.outcome).toBe("done");
+  });
+
+  it("a top-level copy that only PARTIALLY overlaps the plan is dropped: [A,B] + plan [[A],[B],[C]] runs A and B once each", async () => {
+    const { chat } = scriptedChat([
+      { status: "continue", commands: [A, B], plan: [
+        { goal: "a", commands: [A] }, { goal: "b", commands: [B] }, { goal: "c", commands: [C] },
+      ] },
+    ]);
+    const { env, batches } = scriptedEnv(["ok", "ok", "ok", "ok"]);
+    const run = await runAgentLoop({ ask: "x" }, { chat, env } as LoopDeps);
+
+    expect(batches.map((b) => b.commands)).toEqual([["set_track_volume"], ["set_track_mute"], ["set_tempo"]]);
+    expect(run.stepCount).toBe(3);
+    expect(run.outcome).toBe("done");
+  });
+
+  it("an ORDER-SWAPPED top-level copy [B,A] + plan [[A,B]] executes ONE batch", async () => {
+    const { chat } = scriptedChat([
+      { status: "continue", commands: [B, A], plan: [{ goal: "both", commands: [A, B] }] },
+    ]);
+    const { env, batches } = scriptedEnv(["ok", "ok"]);
+    const run = await runAgentLoop({ ask: "x" }, { chat, env } as LoopDeps);
+
+    expect(batches.map((b) => b.commands)).toEqual([["set_track_volume", "set_track_mute"]]);
+    expect(run.stepCount).toBe(1);
+    expect(run.outcome).toBe("done");
+  });
+
+  it("top-level commands the plan does NOT carry are still a genuine start step: [C] + plan [[A],[B]] runs C, A, B", async () => {
+    const { chat } = scriptedChat([
+      { status: "continue", commands: [C], plan: [{ goal: "a", commands: [A] }, { goal: "b", commands: [B] }] },
+    ]);
+    const { env, batches } = scriptedEnv(["ok", "ok", "ok"]);
+    const run = await runAgentLoop({ ask: "x" }, { chat, env } as LoopDeps);
+
+    expect(batches.map((b) => b.commands)).toEqual([["set_tempo"], ["set_track_volume"], ["set_track_mute"]]);
+    expect(run.outcome).toBe("done");
+  });
+
+  it("a top-level copy with MORE of the same command than the plan carries is kept (multiset, not set, containment)", async () => {
+    const note = CMD("add_note", { clipId: "101", pitch: 69, start: 0, length: 0.5, velocity: 88 });
+    const { chat } = scriptedChat([
+      { status: "continue", commands: [note, note], plan: [{ goal: "one", commands: [note] }] },
+    ]);
+    const { env, batches } = scriptedEnv(["ok", "ok"]);
+    const run = await runAgentLoop({ ask: "x" }, { chat, env } as LoopDeps);
+    // the start step runs (two notes); plan[0]'s single note differs from it, so it runs too
+    expect(batches.map((b) => b.commands)).toEqual([["add_note", "add_note"], ["add_note"]]);
+    expect(run.outcome).toBe("done");
+  });
+
+  it("bare-commands continue mode: a reply repeating the previous all-ok commands closes DONE after one batch and two model calls (no budget burn)", async () => {
+    const repeat = { status: "continue", commands: [C] };
+    const { chat, seen } = scriptedChat([repeat, repeat, repeat, repeat, repeat, repeat, repeat, repeat, repeat, repeat]);
+    const { env, batches } = scriptedEnv(["ok"]);
+    const run = await runAgentLoop({ ask: "x" }, { chat, env } as LoopDeps);
+
+    expect(batches.map((b) => b.commands)).toEqual([["set_tempo"]]);
+    expect(seen).toHaveLength(2);                 // the plan call + the one continue call that repeated itself
+    expect(run.outcome).toBe("done");
+    expect(run.stepCount).toBe(1);
+  });
+
+  it("a skipped twin step is reported through onProgress as step-skipped (commands included) and fires no step-start", async () => {
+    const note = CMD("add_note", { clipId: "101", pitch: 69, start: 0, length: 0.5, velocity: 88 });
+    const { chat } = scriptedChat([
+      { status: "continue", plan: [
+        { goal: "a", commands: [note] },
+        { goal: "a again", commands: [note] },
+        { goal: "b", commands: [B] },
+      ] },
+    ]);
+    const { env } = scriptedEnv(["ok", "ok", "ok"]);
+    const events: Array<{ kind: string; index?: number; goal?: string; commands?: readonly { command: string }[] }> = [];
+    const run = await runAgentLoop({ ask: "x" }, { chat, env, onProgress: (e) => events.push(e as never) } as LoopDeps);
+
+    expect(run.outcome).toBe("done");
+    const skipped = events.filter((e) => e.kind === "step-skipped");
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0]!.goal).toBe("a again");
+    expect(skipped[0]!.commands?.map((c) => c.command)).toEqual(["add_note"]);
+    expect(events.filter((e) => e.kind === "step-start").map((e) => e.goal)).toEqual(["a", "b"]);
+  });
+
+  it("a twin of the previous step is still skipped when nothing repeatable is in it (the brief's rule is intact)", async () => {
+    const { chat } = scriptedChat([
+      { status: "continue", plan: [{ goal: "a", commands: [A, B] }, { goal: "a again", commands: [A, B] }] },
+    ]);
+    const { env, batches } = scriptedEnv(["ok", "ok"]);
+    const run = await runAgentLoop({ ask: "x" }, { chat, env } as LoopDeps);
+    expect(batches).toHaveLength(1);
+    expect(run.outcome).toBe("done");
+  });
+});

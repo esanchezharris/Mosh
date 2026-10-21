@@ -44,7 +44,11 @@ export type LoopProgressEvent =
   | { kind: "phase"; phase: "planning" | "stepping" | "repairing" | "finalizing" }
   | { kind: "plan"; plan: readonly PlanStep[]; say?: string }
   | { kind: "step-start"; index: number; goal?: string; commands: readonly AgentCommandCall[] }
-  | { kind: "step-result"; index: number; results: StepRecord["results"] };
+  | { kind: "step-result"; index: number; results: StepRecord["results"] }
+  /** A step the loop did NOT run because it was JSON-identical to the previous all-ok
+   *  step (exactly once, step-1 slice 3). `index` is the transcript slot it would have
+   *  taken — the next executed step reuses it; nothing is pushed to the transcript. */
+  | { kind: "step-skipped"; index: number; goal?: string; commands: readonly AgentCommandCall[]; reason: "identical to the previous step" };
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
@@ -89,10 +93,37 @@ const canonCommands = (calls: readonly AgentCommandCall[] | undefined): string =
       ? Object.fromEntries(Object.keys(value as Record<string, unknown>).sort().map((k) => [k, (value as Record<string, unknown>)[k]]))
       : value);
 
+/** Every top-level command already appears — JSON-identical, counted as a multiset —
+ *  somewhere in the plan: the whole list on plan[0], the same list spread across steps,
+ *  a subset of it, or the same commands in another order. Then the top-level copy is
+ *  the duplicate (R3) and the plan is the one true issuance. A top-level list carrying
+ *  anything the plan does not (or more copies of it) is a genuine "start" step. */
+const coveredByPlan = (top: readonly AgentCommandCall[], plan: readonly PlanStep[]): boolean => {
+  const pool = new Map<string, number>();
+  for (const step of plan)
+    for (const c of step.commands ?? []) { const k = canonCommands([c]); pool.set(k, (pool.get(k) ?? 0) + 1); }
+  for (const c of top) {
+    const k = canonCommands([c]);
+    const n = pool.get(k) ?? 0;
+    if (n === 0) return false;
+    pool.set(k, n - 1);
+  }
+  return true;
+};
+
+/** Commands whose identical re-issue IS the instruction ("undo the last two",
+ *  "duplicate it twice"): they carry no target state, so a twin of the previous step
+ *  is never a duplicate-issuance artifact. A step carrying one of these is exempt from
+ *  the consecutive-twin skip. Everything else — an absolute edit (a no-op twice) or an
+ *  additive one (add_note would land twice) — is deduplicated per the step-1 brief. */
+const REPEATABLE_COMMANDS: ReadonlySet<string> = new Set(["undo", "redo", "duplicate_clip", "duplicate_track_group"]);
+const carriesRepeatable = (calls: readonly AgentCommandCall[]): boolean => calls.some((c) => REPEATABLE_COMMANDS.has(c.command));
+
 /** `session.revision` — the engine's per-process mutation counter (MoshOps
- *  editRevision_: bumped by every mutating command and by undo/redo), exposed by
- *  the step-1 engine slice. Read defensively: an engine or mock that does not
- *  report one yields undefined, which keeps the revision guard inert. */
+ *  editRevision_: bumped by every mutating command and by undo/redo), mirrored into
+ *  snapshot().session by MoshOps::snapshot() and volatile for the transaction
+ *  fingerprint. Read defensively: an engine or mock that does not report one yields
+ *  undefined, which keeps the revision guard inert. */
 const revisionOf = (s: Snapshot | null | undefined): number | undefined => {
   const r = (s?.session as { revision?: unknown } | undefined)?.revision;
   return typeof r === "number" && Number.isFinite(r) ? r : undefined;
@@ -156,11 +187,12 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
         // at the top level and on the plan used to run them twice — as this "start"
         // step and again as plan step 1 (live log: A,B,A,B in one transaction, two
         // batches ~20 ms apart, one model reply). The top-level copy is dropped when
-        // it is JSON-identical to plan[0]'s commands or to the whole plan flattened.
-        const top = canonCommands(first.commands);
-        const alreadyPlanned = hadPlanArray
-          && (top === canonCommands(plan[0]!.commands) || top === canonCommands(plan.flatMap((p) => p.commands ?? [])));
-        if (!alreadyPlanned) plan.unshift({ goal: "start", commands: first.commands });
+        // the plan already carries every one of its commands (JSON-identical, as a
+        // multiset): equal to plan[0], equal to the plan flattened, a subset of it, or
+        // the same commands in another order — the audit found the last two still
+        // running twice under the plain equality rule.
+        if (!(hadPlanArray && coveredByPlan(first.commands, plan)))
+          plan.unshift({ goal: "start", commands: first.commands });
       }
       if (plan.length) {
         // A real plan array = plan mode (exhaustion ⇒ done). BARE commands keep
@@ -247,11 +279,17 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
 
     // ── exactly once: a step JSON-identical to the previous ALL-OK step is not
     // re-run (an absolute edit would be a no-op, an additive one — add_note — would
-    // land twice). A twin of a FAILED step is a legitimate repair and still runs.
+    // land twice). A twin of a FAILED step is a legitimate repair and still runs, and
+    // a step carrying a REPEATABLE command (undo/redo/duplicate_*) is never a twin —
+    // its repeat is the instruction. The skip is reported (step-skipped), never
+    // silent; and a bare-commands model that repeats its last successful commands is
+    // finished, not re-asked until the step budget runs out.
     const prev = transcript[transcript.length - 1];
-    if (prev && prev.results.every((r) => r.ok) && canonCommands(prev.commands) === canonCommands(commands)) {
+    if (prev && prev.results.every((r) => r.ok) && !carriesRepeatable(commands)
+        && canonCommands(prev.commands) === canonCommands(commands)) {
+      progress({ kind: "step-skipped", index: transcript.length, goal, commands, reason: "identical to the previous step" });
       if (doneAfterStep) { outcome = "done"; break; }
-      if (planIdx >= plan.length && lastStatus === "plan") { outcome = "done"; break; }
+      if (planIdx >= plan.length && (lastStatus === "plan" || lastStatus === "continue")) { outcome = "done"; break; }
       continue;
     }
 

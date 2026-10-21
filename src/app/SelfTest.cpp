@@ -936,6 +936,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                     // correctly restores every undoable thing, and the one thing it is
                     // supposed to leave alone shows through and fails the comparison.
                     sess->removeProperty ("click");
+                    // …and `revision` (step-1 slice 3): the per-process mutation counter
+                    // moves on every jump by design — a jump IS a change — so, like the
+                    // playhead, it is not part of the edit history being compared.
+                    sess->removeProperty ("revision");
                 }
             }
             return juce::JSON::toString (s, true);
@@ -8910,6 +8914,64 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "save");
     }
 
+    // ─── session.revision: the mutation counter the agent loop binds its steps to (step-1 slice 3) ───
+    // MoshOps editRevision_ (bumped by beginTxn, undo, redo, jump_to_history) was only
+    // visible through batch_status; the agent loop reads snapshots, so snapshot() now
+    // mirrors it as session.revision. The loop records it after every batch and re-reads
+    // it before the next one: a GUI edit in between (F5 in the step-1 brief) moves it and
+    // the loop parks instead of acting on a stale plan. Pinned here: present, non-negative,
+    // stable across reads, the SAME number batch_status reports, strictly increasing across
+    // a mutation AND an undo/redo (an undo is a change too, never a rewind of the counter),
+    // and NOT part of the session's identity (agenttxn::volatilePaths lists it, so a
+    // rollback or a relaunch can still prove its pre-state).
+    section ("session.revision: monotonic across a mutation and an undo (step-1 slice 3)");
+    {
+        auto sess     = [&] { return ops.snapshot().getProperty ("session", var()); };
+        auto revision = [&] { return (juce::int64) sess().getProperty ("revision", -1); };
+        auto statusRevision = [&] {
+            return (juce::int64) cmd (ops, "batch_status", args1 ("transactionId", "revision-probe"))["data"]
+                                     .getProperty ("revision", -2);
+        };
+        const int n0 = tracks (ops);
+
+        check (sess().hasProperty ("revision"), "snapshot.session carries revision");
+        const auto r0 = revision();
+        check (r0 >= 0, "session.revision is a non-negative counter");
+        check (revision() == r0, "a second snapshot without a mutation reads the same revision");
+        check (statusRevision() == r0, "session.revision is the number batch_status reports as revision");
+
+        auto created = cmd (ops, "create_track", args1 ("name", "RevisionProbe"));
+        check (ok (created), "create_track ok");
+        const auto tid = created["data"].getProperty ("trackId", var()).toString();
+        const auto r1  = revision();
+        check (r1 > r0, "a mutating command moves session.revision forward");
+
+        const auto fpBefore = mosh::agenttxn::fingerprint (ops.snapshot());
+        check (ok (cmd (ops, "set_track_mute", objN ({ { "trackId", tid }, { "mute", true } }))), "set_track_mute ok");
+        const auto r2 = revision();
+        check (r2 > r1, "a second mutation moves it forward again");
+        check (mosh::agenttxn::fingerprint (ops.snapshot()) != fpBefore,
+               "ANTI-VACUITY: the mutation itself did move the fingerprint");
+
+        check (ok (cmd (ops, "undo")), "undo ok");
+        const auto r3 = revision();
+        check (r3 > r2, "an undo moves session.revision FORWARD too (a change, not a rewind)");
+        check (mosh::agenttxn::fingerprint (ops.snapshot()) == fpBefore,
+               "the counter is not part of the session's identity: after undo the fingerprint is back to its pre-edit value");
+        check (statusRevision() == r3, "batch_status agrees with the snapshot after the undo");
+
+        check (ok (cmd (ops, "redo")), "redo ok");
+        const auto r4 = revision();
+        check (r4 > r3, "a redo moves it forward");
+
+        // Teardown: revert the redo and the probe track; the counter keeps climbing.
+        check (ok (cmd (ops, "undo")), "undo redo (teardown)");
+        check (ok (cmd (ops, "undo")), "undo create_track (teardown)");
+        check (tracks (ops) == n0, "probe track reverted (clean teardown)");
+        check (revision() > r4, "teardown undos kept the counter monotonic");
+        cmd (ops, "save");
+    }
+
     // ─── Project safety: reopen last project on relaunch (gap 2) ───
     // Relaunch always loaded the fixed session.tracktionedit, never the project the user
     // last worked in (no Recent list either). The fix persists session/last-project.json
@@ -15382,6 +15444,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 if (auto* sess = o->getProperty ("session").getDynamicObject())
                 {
                     sess->removeProperty ("dirty");
+                    // The per-process mutation counter (step-1 slice 3): every row's
+                    // mutate + undo moves it forward by design, exactly like `dirty`.
+                    sess->removeProperty ("revision");
                     sess->removeProperty ("recentProjects");
                     sess->removeProperty ("recoveryAvailable");
                     sess->removeProperty ("recoverableCount");

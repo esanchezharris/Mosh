@@ -119,6 +119,9 @@ TEST_CASE ("fingerprint: the volatile declaration excludes only leaves it names"
     // Guards the dot-path semantics: "session.dirty" must not also swallow "session",
     // and a path that names no real key must not silently match everything.
     REQUIRE (tx::isVolatilePath ("session.dirty"));
+    // Step-1 slice 3: the per-process mutation counter surfaced as session.revision moves
+    // on every mutation and on undo/redo and restarts per process — identity must not see it.
+    REQUIRE (tx::isVolatilePath ("session.revision"));
     REQUIRE_FALSE (tx::isVolatilePath ("session"));
     REQUIRE_FALSE (tx::isVolatilePath ("tracks"));
     REQUIRE_FALSE (tx::isVolatilePath ("session.tempo"));

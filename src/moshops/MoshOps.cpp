@@ -3213,6 +3213,15 @@ juce::var MoshOps::snapshot()
     session->setProperty ("length", edit.getLength().inSeconds());
     session->setProperty ("editFile", eng.editFile().getFullPathName());
     session->setProperty ("dirty", eng.isDirty());   // unsaved-changes flag (gap 1)
+    // Step-1 slice 3 — the per-process mutation counter (editRevision_: bumped by
+    // beginTxn, undo, redo, jump_to_history, multiplayer apply), so a client can tell
+    // "the session moved since I last looked" without diffing two snapshots. The agent
+    // loop (ui/src/agent/loop/loop.ts) records it after every batch and re-reads it before
+    // the next one, parking need_user when it moved in between (a GUI edit between the
+    // plan and its step — F5 in the brief). It is the same number batch_status reports as
+    // `revision`. NOT identity: it restarts per process and moves on undo, so
+    // agenttxn::volatilePaths() lists it and the P6 matrix's canon() drops it.
+    session->setProperty ("revision", editRevision_);
     // PRJ-FMT — cold-start refusal: the launch session file was made by a newer Mosh, so a
     // safe empty fallback is live. The UI shows this as a blocking "please update Mosh" banner.
     if (eng.hasProjectLoadError())

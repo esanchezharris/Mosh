@@ -79,6 +79,12 @@ inline const juce::StringArray& volatilePaths()
         // markDirty() is one-way: a rollback restores CONTENT but the edit is still
         // legitimately unsaved, so `dirty` must not be part of the identity.
         "session.dirty",
+        // The per-process mutation counter (MoshOps editRevision_, mirrored as
+        // session.revision for the agent loop's step binding — step-1 slice 3). It moves
+        // on every mutation AND on undo/redo and restarts at 0 per process, so a
+        // fingerprint that included it could never match its own pre-state after a
+        // rollback or a relaunch.
+        "session.revision",
         // Device / machine / latency readouts.
         "session.sampleRate",
         "session.audioEnabled",
