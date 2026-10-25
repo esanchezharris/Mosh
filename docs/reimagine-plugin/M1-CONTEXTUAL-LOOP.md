@@ -1,6 +1,7 @@
 # Re-Imagine M1: contextual generation loop
 
-Owner brief of 2026-10-10 ("session-aware local generation agent"). Milestone M1 has one
+[Owner brief of 2026-10-10](SESSION-AGENT-BRIEF-2026-10-10.md) ("session-aware local generation
+agent"; its §10 sets the milestone ladder M0–M4). Milestone M1 has one
 workflow: transform a selected instrumental phrase into variations that fit its musical
 context, then revise, keep and export them. It uses one backend and one primary host.
 This file is the repo-truth note, the record of decisions, the run commands and the test
