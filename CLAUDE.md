@@ -1,6 +1,6 @@
 # Mosh pre-pivot run manifest
 
-> **Re-Imagine M1, 2026-10-10:** the [contextual generation loop](docs/reimagine-plugin/M1-CONTEXTUAL-LOOP.md) (context → generate → revise → keep/export in the VST3, local SA3 only, template controller) is implemented and fixture-tested; the real-model render and Live 11 audition remain owner steps.
+> **Re-Imagine, 2026-10-10:** the owner's [session-aware generation agent brief](docs/reimagine-plugin/SESSION-AGENT-BRIEF-2026-10-10.md) is the current direction; its §10 milestone ladder (M1 loop → M2 evaluator → M3 feedback search → M4 persistent experience) is the roadmap. M1, the [contextual generation loop](docs/reimagine-plugin/M1-CONTEXTUAL-LOOP.md) (context → generate → revise → keep/export in the VST3, local SA3 only, template prompt or opt-in Claude planner), is implemented and fixture-tested, with real-model renders on 2026-10-20; listening in Live 12 and the [comparison against Gary](docs/reimagine-plugin/M1-GARY-COMPARISON.md) remain owner steps. M2 has not started.
 >
 > **General V3 repair, 2026-09-17:** [bounded workspace scope](docs/V3-WORKSPACE-SCOPE-2026-09-17.md) is a separate ordinary-UI verification pass; no new model execution.
 >
