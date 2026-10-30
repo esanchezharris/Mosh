@@ -8,8 +8,8 @@ import {
   type LoopAction,
 } from "./loopPolicy";
 import { phoneStatusLine } from "./phoneStatus";
-import { trackPresetLabel } from "./MixInspector";
-import { DEFAULT_VOCAL_CHAIN, defaultChainTargets, looksLikeSpeakers } from "./vocalSetup";
+import { setupVocalLoop, type VocalSetupIO } from "./vocalSetup";
+import { speakerMutedNote, useSpeakerGuard } from "./useSpeakerGuard";
 
 // The Booth is the DESKTOP phone pad: the same eleven commands, the same availability
 // model (loopPolicy.ts, a port of ui/src/phonepad/src/policy.ts), so a producer who
@@ -114,13 +114,6 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
   }, [pendingMonitor, takesTrack]);
 
   const outputDevice = snapshot.audio?.outputDevice ?? "";
-  const onSpeakers = looksLikeSpeakers(outputDevice);
-  // Set when the producer turns Hear myself ON while the output still looks like speakers
-  // (headphones with an odd name, a booth monitor they trust): the guard below then stands
-  // down instead of fighting them. Re-armed whenever the output changes.
-  const speakerOverride = useRef(false);
-  const autoMuting = useRef(false);
-  useEffect(() => { speakerOverride.current = false; }, [outputDevice]);
 
   // Every loop command answers with a human `detail` — including the ones that committed
   // the edit but could not roll again ("Kept Part 2; recording did not restart: …"). Show
@@ -177,58 +170,34 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
     return !!result?.ok;
   };
 
+  // Headphones pulled out mid-session (or a relaunch, which resets monitoring to automatic,
+  // on a Mac playing through its speakers): turn Hear myself off before the mic howls.
+  const { onSpeakers, markOverride } = useSpeakerGuard({
+    outputDevice,
+    hearingMyself,
+    takesTrackId: takesTrack?.id,
+    pendingMonitor: pendingMonitor !== null,
+    turnOff: (takesTrackId) => setMonitor(takesTrackId, "off"),
+    onMuted: (device) => setNote(speakerMutedNote(device)),
+  });
+
   const toggleHearMyself = async () => {
     if (!loop?.takesTrackId) return;
     const targetMode: "off" | "automatic" = hearingMyself ? "off" : "automatic";
-    if (targetMode === "automatic" && onSpeakers) speakerOverride.current = true;
+    if (targetMode === "automatic" && onSpeakers) markOverride();
     await setMonitor(loop.takesTrackId, targetMode);
   };
 
-  // Headphones pulled out mid-session (or a relaunch, which resets monitoring to automatic,
-  // on a Mac playing through its speakers): turn Hear myself off before the mic howls.
-  // Keyed on the conditions only, not on run/setNote identity.
-  useEffect(() => {
-    if (!onSpeakers || !hearingMyself || !takesTrack || pendingMonitor !== null) return;
-    if (speakerOverride.current || autoMuting.current) return;
-    autoMuting.current = true;
-    void setMonitor(takesTrack.id, "off").then((done) => {
-      if (done) setNote(`Sound is playing through ${outputDevice}, so Hear myself is off. Plug in headphones, then turn it back on.`);
-    }).finally(() => { autoMuting.current = false; });
-  }, [onSpeakers, hearingMyself, takesTrack?.id, pendingMonitor, outputDevice]);
-
-  // The default vocal chain for a fresh setup. Each preset application is its own undo
-  // step (apply_track_preset), so ⌘Z peels it off without touching the setup itself.
-  const addDefaultChain = async (leadId: string, takesId: string): Promise<string | null> => {
-    const tracks = (useStore.getState().snapshot ?? snapshot).tracks;
-    const targets = defaultChainTargets(tracks, leadId, takesId);
-    if (targets.length === 0) return null;
-    let file: string | undefined;
-    try {
-      const listed = await exec("list_presets", { plugin: "track-chain" });
-      const presets = (listed?.data as { presets?: { name: string; file: string }[] } | undefined)?.presets ?? [];
-      file = presets.find((p) => p.name === DEFAULT_VOCAL_CHAIN)?.file;
-    } catch {
-      file = undefined;
-    }
-    if (!file) return null;   // a build without the bundled chain: the setup still stands
-    for (const target of targets) {
-      const applied = await run("apply_track_preset", { trackId: target.id, file });
-      if (!applied?.ok) return `Vocal chain not added to ${target.name}: ${applied?.error ?? "apply_track_preset failed"}`;
-    }
-    return `Added the ${trackPresetLabel(DEFAULT_VOCAL_CHAIN)} vocal chain; change it in Mix`;
-  };
-
+  // The same recipe the Start page runs (vocalSetup.ts): loop_setup, then Hear myself off on
+  // speakers, then the default chain on Lead and Takes -- each its own undo step.
   const setupLoop = async (leadId: string) => {
-    const setup = await run("loop_setup", { trackId: leadId });
-    const takesId = (setup?.data as { takesTrackId?: unknown } | undefined)?.takesTrackId;
-    if (!setup?.ok || typeof takesId !== "string" || !takesId) return;
-    const notes: string[] = [];
-    if (looksLikeSpeakers((useStore.getState().snapshot ?? snapshot).audio?.outputDevice)
-      && await setMonitor(takesId, "off")) {
-      notes.push("Hear myself is off: plug in headphones first");
-    }
-    const chain = await addDefaultChain(leadId, takesId);
-    if (chain) notes.push(chain);
+    const io: VocalSetupIO = {
+      run,
+      query: (command, args) => exec(command, args ?? {}),
+      snapshot: () => useStore.getState().snapshot,
+      setMonitor,
+    };
+    const { notes } = await setupVocalLoop(io, leadId, snapshot);
     if (notes.length > 0) setNote(notes.join(" · "));
   };
 

@@ -178,6 +178,40 @@ async function writeSessionSummary(ctx: ActionCtx, digest: string): Promise<void
 }
 
 
+/** What `new_project {template:"vocal"}` answers with: the template's own track ids, so a
+ *  caller can drive the next steps without guessing which track is which. */
+export interface VocalProjectResult {
+  ok: boolean;
+  error?: string;
+  backingTrackId: string;
+  vocalTrackId: string;
+  /** Set when the engine did not recognise the template (an older build): the project is
+   *  then an empty one, and the caller must create its own tracks. */
+  templateError: string;
+}
+
+/** TPL-001 — the vocal recording template, with the same lifecycle as File › New (the
+ *  outgoing project's summary note, a cleared session log, a refresh, a dropped memory
+ *  cache). Shared by the menu action and the V3 Start page, which needs the result. */
+export async function startVocalProject(ctx: ActionCtx): Promise<VocalProjectResult> {
+  const { store } = ctx;
+  const digest = sessionDigestFor(ctx);
+  if (digest) await writeSessionSummary(ctx, digest);
+  clearSessionLog();
+  const result = await store.exec("new_project", { template: "vocal" });
+  await store.refresh();
+  store.invalidateMemory?.();
+  const data = (result.data ?? {}) as { backingTrackId?: unknown; vocalTrackId?: unknown; templateError?: unknown };
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  return {
+    ok: !!result.ok,
+    ...(result.ok ? {} : { error: result.error ?? "new_project failed" }),
+    backingTrackId: str(data.backingTrackId),
+    vocalTrackId: str(data.vocalTrackId),
+    templateError: str(data.templateError),
+  };
+}
+
 export interface RunActionOptions {
   file?: string;
   index?: number;
@@ -250,12 +284,7 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
     // recipe (Backing + armed Vocal, count-in, overdub takes, a four-bar loop) composed
     // natively so a singer lands one Record press away from a stacked take.
     case "new_vocal_project": {
-      const digest = sessionDigestFor(ctx);
-      if (digest) await writeSessionSummary(ctx, digest);
-      clearSessionLog();
-      await store.exec("new_project", { template: "vocal" });
-      await store.refresh();
-      store.invalidateMemory?.();
+      await startVocalProject(ctx);
       return;
     }
 
