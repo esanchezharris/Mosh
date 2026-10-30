@@ -33,7 +33,10 @@ companion — see [IPHONE_COMPANION.md](IPHONE_COMPANION.md).
 Recording lands on a **LEAD** track. Every pass ("contribution") the phone or the
 Booth records goes to a paired **"`<Lead>` · Takes"** track (`loop_setup` creates and
 arms it; the Booth never creates a track on its own — it prompts "Use \<track\> as
-Lead" first). At any moment:
+Lead" first). The Booth's setup then applies first-run defaults
+(`ui/src/v3/vocalSetup.ts`): a Lead with no effects gets **Mosh Clean Lead v0** on Lead
+and Takes (one `apply_track_preset` undo step each), and when the output looks like
+speakers it turns Hear myself off and says to plug in headphones. At any moment:
 
 - **LEAD** holds whole, playable contributions: the current keeper plus older ones
   still marked as kept and audible.
