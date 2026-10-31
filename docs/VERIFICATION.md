@@ -143,9 +143,23 @@ relay/multiplayer → MP-two-mac · phone pad → PHONE rows.
 | EAR-stems | `export_stems` + `export_audio` the same song; import the stems to fresh tracks and A/B against the mixdown. | Indistinguishable by ear (the sample-level `sum≈mix` null lives in `verify.py`, automated). | 4 | — |
 | MIDI-in | Connect a MIDI keyboard (picker from G11); play live, then record 2 bars. | Live notes sound with low latency; recorded notes land where played. If a MIDI *take* can't be recorded, that's a capability-matrix MISSING row — file it, don't shrug. | 4 | — |
 | MP-two-mac | Two Macs, one session: claim a track from Mac B, move a clip on Mac A. | Lock icon + live clip motion on both within ~1 s. | 5 | — |
-| PHONE-pair | V3 → Phone; scan the QR with the iPhone Camera app on the same Wi-Fi. | Safari opens `/pad#token=…`; the banner reads IDLE (or SETUP NEEDED if no Lead/Takes pair exists yet) rather than PAIR PHONE, and the URL host is the Mac's LAN IP (never `.local`, never `pairingUrl`). | 2 | — |
+| PHONE-pair | V3 → Phone (or the Start page's Phone step); scan the QR with the iPhone Camera app on the same Wi-Fi. | Safari opens `/pad#token=…`; the banner reads IDLE (or SETUP NEEDED if no Lead/Takes pair exists yet) rather than PAIR PHONE, and the URL host is the Mac's LAN IP (never `.local`, never `pairingUrl`). | 2 | — |
 | PHONE-loop | From the phone: Put Me In / Keep / Again / Review Selected Take / Play All / Stop. | The Booth mirrors every action live; Lead and Takes clips land where expected and are audible. | 5 | — |
 | PHONE-recover | Background/foreground the phone page; drop Wi-Fi and reconnect; from the Booth's Phone modal, press Stop. | Background/foreground survives without a new scan; Wi-Fi drop/reconnect resumes polling; Stop in the modal ends the pairing and the pad falls back to a PAIR PHONE state — reloading the page then requires a fresh scan. | 3 | — |
+
+### Start page (owner; [docs/LAUNCH-PAGE-BRIEF-2026-10-30.md](LAUNCH-PAGE-BRIEF-2026-10-30.md))
+
+*The packaged app on a Mac, with headphones and a real mic. `ui/e2e/v3-start*.spec.ts` and the START-FLOW / START-RELAUNCH selftest sections are software evidence only; none of these rows can be closed by them.*
+
+| id | Steps | Expect | ~min | last-passed |
+| --- | --- | --- | --- | --- |
+| START-fresh | A new macOS user account, the packaged app: open it, Start a new song. | Gatekeeper opens it; the mic prompt appears before the song is created, not during it; the page reaches the Booth. | 10 | — |
+| START-first-take | From launch: Start a new song, choose a beat, confirm the tempo, Clean Lead, I'm ready, Go to the Booth, Put Me In, sing, Keep. Time it. | First Keep in under 90 s; the arrangement never shows first; the splat laughs on Keep. | 5 | — |
+| START-beat | Three of your real beats (an MP3, a WAV, one with a long intro). | Each lands on Backing at bar 1; the tempo is right or fixed with one ÷2/×2 tap; the click lines up in the preview. | 10 | — |
+| START-speakers | Laptop speakers: start a song; then plug headphones in, turn Hear myself on, and unplug them mid-session. | Hear myself starts off and the page says why; unplugging turns it off again; no howl. | 5 | — |
+| START-phone | Physical iPhone on your Wi-Fi: Ready → Add your phone → Show the code → scan. | Safari opens the pad in IDLE (never SETUP NEEDED); the page hands off to the Booth; Put Me In from the phone lands a Part. Closes PHONE-pair and PHONE-loop. | 5 | — |
+| START-mic-denied | At the macOS prompt choose Don't Allow. | The Voice step says what to do; after turning Mosh on in System Settings, Retry passes. | 5 | — |
+| START-listen | Clean Lead and Tuned Lead (with your key) on your own voice. | Fit to be every friend's default; updates `validation.listening` in both preset files. | 15 | — |
 
 ### V3 default-shell acceptance (owner; the last row of the V3 parity gate)
 

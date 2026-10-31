@@ -29,6 +29,15 @@ Reuse the existing Mixer and PianoRoll, with the same V3 tokens. Mixer is a reve
 
 Native acceptance covers empty start, added audio/MIDI tracks, MIDI editing and undo, mixer level/mute changes and undo, Browser/Plugins reachability, Booth/count-in, Settings/Escape, save/reopen and exported scratch content. Capture the repaired states at the built Release identity; browser fixtures additionally check narrow containment and colorways.
 
+## 10. Start page (2026-10-30)
+The friends-first way in ([brief](../../../docs/LAUNCH-PAGE-BRIEF-2026-10-30.md)). A posture, not a modal: `"start"` replaces the rail, panes, arrangement, inspector and dock; the TopBar, device/recovery/missing-media notices and the modals stay. One centred column, at most 640px wide, with a 16px gutter: the splat and a four-pip rail (Beat · Voice · Phone · Record), one step card, a status line, and a footer (Show this when Mosh opens; Open the studio).
+
+Copy speaks to a nervous singer in the second person: short, no jargon, no blame. Mic, speaker and pairing problems are rewritten for a friend (`micCheck.ts`); other engine strings show verbatim. Numbers are tabular. A pip is done only once the singer has moved past it. Headphones are a warning, never a block. Every state stays readable: loading, opening, recording-disabled, and each failure in the brief.
+
+Tokens only, all four colorways. Motion: the existing `--ease-out` colour/border transitions; the drop zone, countdown and pips are state changes, not animations. The splat uses its existing idle, thinking and laugh states.
+
+Verification: fresh native Release screenshots of welcome, beat (with a beat and its tempo), voice, ready and phone in four colorways; `ui/e2e/v3-start*.spec.ts` on the mock. Fixtures are software evidence, not listening or phone acceptance.
+
 ## Moshi in the dock
 
-Moshi's face is the **splat** — the five-lobe ink blot the owner built with Grok Bot, vendored at `ui/src/vendor/agent-sprites/` (its `TRUTH.md` stills are authoritative; do not re-derive proportions). `v3/splat.ts` maps the four colorways onto its palettes (lime→encre, bone→creme, violet/coral keep the ink body with the shell accent as the mouth) and the dock's mood onto its states (sleep / thinking / wide / notify / idle, laugh on celebrate). The raymarched `vendor/moshi.js` creature stays v2's.
+Moshi's face is the **splat** — the five-lobe ink blot the owner built with Grok Bot, vendored at `ui/src/vendor/agent-sprites/` (its `TRUTH.md` stills are authoritative; do not re-derive proportions). `v3/splat.ts` maps the four colorways onto its palettes (lime→encre, bone→creme, violet/coral keep the ink body with the shell accent as the mouth) and the dock's mood onto its states (sleep / thinking / wide / notify / idle, laugh on celebrate). The splat also hosts the Start page header, and since 2026-10-30 a landed Keep in the Booth plays one laugh, which may overlap the next pass's count-in. A face that mounts after a celebration does not replay it. The raymarched `vendor/moshi.js` creature stays v2's.

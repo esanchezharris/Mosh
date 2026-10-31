@@ -1,11 +1,11 @@
 # Tester quickstart — welcome to Mosh
 
-Someone invited you to jam on **Mosh**, a little Mac music app they're building. This page
-gets you from "just got a zip file" to "making sound together" in about ten minutes. No
-coding, no accounts, nothing to sign up for.
+Someone sent you **Mosh**, a Mac app for recording yourself rapping or singing over a beat,
+as if an engineer were in the room. This page gets you from "just got a zip file" to "hearing
+my first take" in about ten minutes. No coding, no accounts, nothing to sign up for.
 
-> Keep **Discord** (or any voice call) open the whole time — that's how you'll talk to your
-> host. Mosh syncs the *song*, not your voices.
+Bring **headphones** (any wired or Bluetooth pair) and a **beat** (an MP3 or WAV file). Your
+Mac's built-in mic is fine to start.
 
 ## 1. What you need
 
@@ -14,7 +14,8 @@ coding, no accounts, nothing to sign up for.
 - **macOS 11 (Big Sur) or newer.**
 - About **1 GB** of free disk space for the app itself. If you later opt into the real AI
   engine (step 7, totally optional), budget another **~10 GB**.
-- **Discord**, or any way to voice-call your host, open on the side.
+- **Headphones.** Without them the mic hears the beat through the speakers.
+- An **iPhone** if you want to use it as a remote (optional).
 
 ## 2. Install
 
@@ -37,16 +38,48 @@ coding, no accounts, nothing to sign up for.
    **Or — if macOS still won't budge:** open **System Settings → Privacy & Security**,
    scroll down, and click **Open Anyway** next to the Mosh warning.
 
-## 3. First launch
+## 3. First launch: the Start page
 
 - The very first launch can take a **moment longer than usual** — Mosh is quietly scanning
   your Mac for audio plugins (instruments/effects) in the background. Just give it a few
   seconds; you don't need to do anything.
-- Mosh does not request microphone access on launch. macOS asks for **Microphone** only
-  when you explicitly select an audio input or arm an audio track for recording. MIDI
-  editing, instrument tracks, playback, typing to Moshi, and mixing do not need it.
+- Mosh opens on the **Start page**. It walks you through four steps: your beat, your voice,
+  your phone (optional), then recording. You can come back to it any time with the **Start**
+  button at the top of the window.
 
-## 4. Sound check
+## 4. Record your first take
+
+1. **Put your headphones on**, then click **Start a new song**. macOS asks to use the
+   microphone: choose **OK**. (If you chose Don't Allow by mistake, the Voice step tells you
+   how to turn it back on.)
+2. **Your beat.** Drag your beat file onto the page, or click **Choose a file…**. Mosh listens
+   for the tempo and says something like *"Sounds like 88 BPM."* Click **▶ Hear it with the
+   click**: if the click drifts away from the beat, try **÷2** or **×2**, or type the BPM
+   (it's often in the file name). Then click **Use 88 BPM** and **Next**. No beat handy?
+   **Use a drum beat**.
+3. **Your voice.** **Clean Lead** is already on: your voice cleaned up and evened out. Pick
+   **Tuned Lead** if you want pitch correction; choose your song's key if you know it, or
+   leave it loose. The **Room check** shows your mic and headphones. Turn **Hear myself** on
+   and say something: the meter should move. Click **I'm ready**.
+4. **Record.** Click **Go to the Booth**, then **Put Me In**. You get a one-bar count-in, then
+   you're recording. Every pass is kept: **Keep** the good ones, **Again** for another try,
+   **Review** to listen back. The counter shows how many takes you've done.
+
+## 5. Your phone as a remote (optional)
+
+On the "You're set" screen, click **Add your phone**, then **Show the code**, and scan it with
+the iPhone Camera. It opens in Safari: nothing to install. The phone has the same buttons as
+the Booth (Put Me In, Keep, Again…), so you can record from across the room. Your phone and
+Mac must be on the **same Wi-Fi**, with any VPN paused; if your Mac asks whether Mosh can
+accept network connections, choose **Allow**. The code is good for five minutes; the page
+offers a new one. You can always skip this and use the buttons on screen.
+
+## 6. Jam with your host (optional)
+
+Mosh can also share one song between two Macs. Keep **Discord** (or any voice call) open:
+Mosh syncs the *song*, not your voices.
+
+### Sound check
 
 1. Make sure the right **output device** is selected — check both macOS's own **Sound**
    settings and Mosh's own audio-device picker in its **Settings** panel (they can differ,
@@ -55,7 +88,7 @@ coding, no accounts, nothing to sign up for.
 3. If it crackles or stutters, raise the **buffer size** in Mosh's audio settings — a bigger
    buffer trades a little latency for stability, which is the right trade for a first jam.
 
-## 5. Join the session
+### Join the session
 
 1. Open the **2-player panel** (top-right of the Mosh window).
 2. Your host clicks **Create session** there and pastes you a **room code** (send it over
@@ -65,7 +98,7 @@ coding, no accounts, nothing to sign up for.
 4. You should both see two names in the roster with a green "online" dot next to them.
    You're in — same song, two windows.
 
-## 6. What to try first
+### What to try first
 
 - Start with **MIDI clips + Mosh's built-in instruments** (the drum kit, the 4OSC synth) —
   this is the most solid, best-tested path, and it syncs between you two instantly with no

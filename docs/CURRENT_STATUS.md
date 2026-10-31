@@ -45,6 +45,14 @@ installed-app behaviour are NOT RUN**, so the preset is an internal candidate, n
 claim. "Mosh Telephone" and "Mosh Slap" are planned only. No commercial preset was acquired,
 inspected or ported; the creator inquiry is an unsent draft.
 
+**2026-10-30 Start page:** the V3 shell gains a friends-first Start page: beat → voice →
+optional phone → the Booth, for a novice rapper or singer. It sequences existing commands
+(the vocal template, the Booth's own setup recipe, import, `detect_clip_bpm`, `set_tempo`, the
+two bundled vocal presets, phone pairing) and adds no MoshOps command. See
+[the brief](LAUNCH-PAGE-BRIEF-2026-10-30.md). Unit, mock e2e and native selftest evidence only:
+**the listening pass on the presets, a physical phone pairing, time-to-first-take on a real Mac
+and a notarized build are NOT RUN** (rows START-* in [VERIFICATION.md](VERIFICATION.md)).
+
 The pre-pivot ownership snapshot below is preserved as historical evidence.
 Older recording/mixing-agent and reconstruction priorities are deferred.
 
