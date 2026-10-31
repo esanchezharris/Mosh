@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CommandResult, Snapshot, Track } from "../types";
-import { defaultChainTargets, looksLikeSpeakers, setInputMonitor, setupVocalLoop, type VocalSetupIO } from "./vocalSetup";
+import { defaultChainTargets, looksLikeSpeakers, setInputMonitor, setupVocalLoop, switchVocalPreset, type VocalSetupIO } from "./vocalSetup";
 
 const track = (id: string, over: Partial<Track> = {}): Track =>
   ({ id, index: 0, name: id, type: "audio", volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [], ...over }) as unknown as Track;
@@ -109,5 +109,134 @@ describe("setInputMonitor", () => {
     expect(await setInputMonitor(answer({ applied: false, reason: "no input device" }), "T", "off"))
       .toEqual({ ok: false, deferred: false, reason: "no input device" });
     expect(await setInputMonitor(answer(undefined, false), "T", "off")).toEqual({ ok: false, deferred: false, reason: "nope" });
+  });
+});
+
+describe("switchVocalPreset", () => {
+  type Call = { command: string; args?: Record<string, unknown> };
+  const CLEAN = "/p/mosh-clean-lead-v0.json";
+  const TUNED = "/p/mosh-tuned-lead-v0.json";
+  const tagged = (id: string, type: string, index: number, stage = index) =>
+    ({ index, name: type, type, enabled: true, external: false, isInstrument: false, params: [], preset: { id, name: id, revision: 1, stage } });
+  const plain = (type: string, index: number) =>
+    ({ index, name: type, type, enabled: true, external: false, isInstrument: false, params: [] });
+  const cleanAt = (...indices: number[]) => indices.map((i, s) => tagged("mosh.clean-lead", s === 0 ? "highpass" : "compressor", i, s));
+  const tunedStages = () => [tagged("mosh.tuned-lead", "moshAutoTune", 0), tagged("mosh.tuned-lead", "eq", 1), tagged("mosh.tuned-lead", "compressor", 2)];
+
+  /** A fake engine behind VocalSetupIO: remove_plugin re-indexes, apply_track_preset appends
+   *  the chain at the end of the rack (Tuned has its AutoTune first), and the snapshot is live,
+   *  as `io.run` refreshing after every ok command makes it in the page. */
+  function fakeIo(over: { tracks: Track[]; refuse?: (call: Call, nth: number) => string | null; shipped?: string[] }) {
+    const calls: Call[] = [];
+    const tracks = JSON.parse(JSON.stringify(over.tracks)) as Track[];
+    const counts = new Map<string, number>();
+    const shipped = over.shipped ?? ["mosh-clean-lead-v0", "mosh-tuned-lead-v0"];
+    const io: VocalSetupIO = {
+      run: async (command, args = {}) => {
+        calls.push({ command, args });
+        const nth = (counts.get(command) ?? 0) + 1;
+        counts.set(command, nth);
+        const refused = over.refuse?.({ command, args }, nth);
+        if (refused) return { ok: false, command, error: refused };
+        const t = tracks.find((x) => x.id === args.trackId);
+        if (command === "remove_plugin") {
+          const at = (t?.plugins ?? []).findIndex((p) => p.index === args.index);
+          if (!t || at < 0) return { ok: false, command, error: "plugin not found" };
+          t.plugins!.splice(at, 1);
+          t.plugins!.forEach((p, i) => { p.index = i; });
+        }
+        if (command === "apply_track_preset") {
+          if (!t) return { ok: false, command, error: "no track" };
+          const fresh = args.file === TUNED ? tunedStages() : cleanAt(0, 1);
+          t.plugins = [...(t.plugins ?? []), ...fresh] as Track["plugins"];
+          t.plugins!.forEach((p, i) => { p.index = i; });
+        }
+        return { ok: true, command };
+      },
+      query: async (command, args) => {
+        calls.push({ command, args });
+        const all = [{ name: "mosh-clean-lead-v0", file: CLEAN }, { name: "mosh-tuned-lead-v0", file: TUNED }];
+        return { ok: true, command, data: { presets: all.filter((p) => shipped.includes(p.name)) } };
+      },
+      snapshot: () => ({ tracks }) as unknown as Snapshot,
+      setMonitor: async () => true,
+    };
+    return { io, calls, tracks, names: () => calls.map((c) => c.command) };
+  }
+  const lane = (id: string, plugins: unknown[]) => track(id, { plugins: plugins as Track["plugins"] });
+
+  it("Tuned with a key: one batch, each lane cleared highest-first, Tuned applied, Key then Scale on that lane's AutoTune", async () => {
+    // Takes carries the producer's Gate first, so its AutoTune lands at index 1, not 0.
+    const f = fakeIo({ tracks: [lane("L", cleanAt(0, 1)), lane("T", [plain("gate", 0), ...cleanAt(1, 2)])] });
+    const r = await switchVocalPreset(f.io, { leadId: "L", takesId: "T", to: "tuned", key: { keyLabel: "F#/Gb", scale: "Major" } });
+    expect(r).toEqual({ ok: true, error: null });
+    expect(f.calls).toEqual([
+      { command: "list_presets", args: { plugin: "track-chain" } },
+      { command: "batch_begin", args: { name: "Tuned Lead" } },
+      { command: "remove_plugin", args: { trackId: "L", index: 1 } },
+      { command: "remove_plugin", args: { trackId: "L", index: 0 } },
+      { command: "apply_track_preset", args: { trackId: "L", file: TUNED } },
+      { command: "set_plugin_param", args: { trackId: "L", index: 0, paramIndex: 0, value: 6 / 11 } },
+      { command: "set_plugin_param", args: { trackId: "L", index: 0, paramIndex: 1, value: 0.5 } },
+      { command: "remove_plugin", args: { trackId: "T", index: 2 } },
+      { command: "remove_plugin", args: { trackId: "T", index: 1 } },
+      { command: "apply_track_preset", args: { trackId: "T", file: TUNED } },
+      { command: "set_plugin_param", args: { trackId: "T", index: 1, paramIndex: 0, value: 6 / 11 } },
+      { command: "set_plugin_param", args: { trackId: "T", index: 1, paramIndex: 1, value: 0.5 } },
+      { command: "batch_end", args: {} },
+    ]);
+    expect(f.tracks[1]!.plugins!.map((p) => p.type)).toEqual(["gate", "moshAutoTune", "eq", "compressor"]);
+  });
+
+  it("a refused batch_begin touches nothing and says Moshi is busy", async () => {
+    const f = fakeIo({ tracks: [lane("L", cleanAt(0, 1)), lane("T", cleanAt(0, 1))], refuse: (c) => (c.command === "batch_begin" ? "agent transaction t1 is open" : null) });
+    const r = await switchVocalPreset(f.io, { leadId: "L", takesId: "T", to: "tuned" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("middle of something");
+    expect(f.names()).toEqual(["list_presets", "batch_begin"]);
+  });
+
+  it("a failure before anything landed ends the batch and does NOT undo (that would revert the previous edit)", async () => {
+    const f = fakeIo({ tracks: [lane("L", cleanAt(0, 1)), lane("T", cleanAt(0, 1))], refuse: (c) => (c.command === "remove_plugin" ? "plugin is locked" : null) });
+    const r = await switchVocalPreset(f.io, { leadId: "L", takesId: "T", to: "tuned" });
+    expect(r).toEqual({ ok: false, error: "plugin is locked" });
+    expect(f.names()).toEqual(["list_presets", "batch_begin", "remove_plugin", "batch_end"]);
+    expect(f.names()).not.toContain("undo");
+  });
+
+  it("a failed apply after removals ends the batch, then undoes it exactly once", async () => {
+    const f = fakeIo({ tracks: [lane("L", cleanAt(0, 1)), lane("T", cleanAt(0, 1))], refuse: (c) => (c.command === "apply_track_preset" ? "cannot apply a preset while recording" : null) });
+    const r = await switchVocalPreset(f.io, { leadId: "L", takesId: "T", to: "tuned" });
+    expect(r).toEqual({ ok: false, error: "cannot apply a preset while recording" });
+    expect(f.names()).toEqual(["list_presets", "batch_begin", "remove_plugin", "remove_plugin", "apply_track_preset", "batch_end", "undo"]);
+    expect(f.names().filter((c) => c === "undo")).toHaveLength(1);
+  });
+
+  it("a failure on the second lane after the first landed still undoes once, after batch_end", async () => {
+    const f = fakeIo({ tracks: [lane("L", cleanAt(0, 1)), lane("T", cleanAt(0, 1))], refuse: (c, nth) => (c.command === "apply_track_preset" && nth === 2 ? "busy" : null) });
+    const r = await switchVocalPreset(f.io, { leadId: "L", takesId: "T", to: "clean" });
+    expect(r.ok).toBe(false);
+    expect(f.names().slice(-2)).toEqual(["batch_end", "undo"]);
+    expect(f.names().filter((c) => c === "undo")).toHaveLength(1);
+  });
+
+  it("a build without the preset file says so and opens no batch", async () => {
+    const f = fakeIo({ tracks: [lane("L", cleanAt(0, 1)), lane("T", cleanAt(0, 1))], shipped: ["mosh-clean-lead-v0"] });
+    const r = await switchVocalPreset(f.io, { leadId: "L", takesId: "T", to: "tuned" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("doesn't include");
+    expect(f.names()).toEqual(["list_presets"]);
+  });
+
+  it("a stacked lane (six tuned stages, two AutoTunes) is fully cleared before the one chain goes on", async () => {
+    const stacked = [...tunedStages(), ...tunedStages()].map((p, i) => ({ ...p, index: i }));
+    const f = fakeIo({ tracks: [lane("L", stacked), lane("T", tunedStages())] });
+    const r = await switchVocalPreset(f.io, { leadId: "L", takesId: "T", to: "tuned" });
+    expect(r.ok).toBe(true);
+    const lead = f.calls.slice(0, f.calls.findIndex((c) => c.command === "apply_track_preset") + 1);
+    expect(lead.filter((c) => c.command === "remove_plugin").map((c) => c.args?.index)).toEqual([5, 4, 3, 2, 1, 0]);
+    expect(lead[lead.length - 1]).toEqual({ command: "apply_track_preset", args: { trackId: "L", file: TUNED } });
+    expect(f.tracks[0]!.plugins!.map((p) => p.type)).toEqual(["moshAutoTune", "eq", "compressor"]);
+    expect(f.names()).not.toContain("set_plugin_param");
   });
 });

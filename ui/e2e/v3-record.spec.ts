@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { bootV3 } from "./helpers";
+import { bootV3, useHeadphones } from "./helpers";
 
 // V3 parity brief row 4, rewritten for the Moshi recording loop (the Booth is now the
 // desktop twin of the phone pad): pick a Lead, Put Me In, and every pass is PRESERVED —
@@ -134,6 +134,7 @@ test("from a drum-only session the Booth adds a Vocal track as Lead, and Hear my
   });
   const tracks = page.locator('[data-testid="v3-track"]');
   await expect(tracks).toHaveCount(1);                                                // anti-vacuity baseline
+  await useHeadphones(page);   // on speakers the guard keeps Hear myself off (v3-start-failures covers that)
 
   await enterBooth(page);
   const setup = page.getByTestId("v3-booth-setup");

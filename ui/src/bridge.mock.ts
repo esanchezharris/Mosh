@@ -2128,6 +2128,17 @@ function mockLoopState(): LoopState {
  *  loop command, exactly as the native side embeds loopStateVar() in snapshot(). */
 function syncLoopSnapshot(): void {
   snapshot.loop = mockLoopState();
+  // snapshot.audio, as native publishes it (MoshOps.cpp: root "audio" =
+  // currentAudioSelection()). The Start page, setupVocalLoop and the speaker guard all read
+  // the output device from here; without it ?mockFault=speakers was inert.
+  const dead = Boolean(snapshot.session?.audioDeviceError);
+  snapshot.audio = {
+    type: mockAudioSel.type,
+    outputDevice: dead ? "" : mockAudioSel.outputDevice,
+    inputDevice: dead ? "" : mockAudioSel.inputDevice,
+    sampleRate: SR,
+    bufferSize: snapshot.session?.bufferSize ?? 512,
+  };
 }
 
 const loopActionId = (args: Record<string, unknown>): string =>

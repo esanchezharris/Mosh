@@ -189,9 +189,12 @@ export async function switchVocalPreset(io: VocalSetupIO, opts: {
     if (!applied?.ok) return fail(applied?.error ?? "Couldn't add the vocal chain");
     landed = true;
 
-    if (opts.to === "tuned" && opts.key && opts.key.scale !== "Chromatic") {
+    if (opts.to === "tuned") {
+      // Tuned Lead without its AutoTune is not Tuned Lead (a build or project that drops the
+      // type): refuse and roll back rather than announce a voice the singer won't hear.
       const tuner = io.snapshot()?.tracks.find((t) => t.id === laneId)?.plugins?.find((p) => p.type === "moshAutoTune");
       if (!tuner) return fail("The tuner didn't load. Try again.");
+      if (!opts.key || opts.key.scale === "Chromatic") continue;
       const keyIdx = AUTOTUNE_KEY_LABELS.indexOf(opts.key.keyLabel);
       const scaleIdx = AUTOTUNE_SCALE_LABELS.indexOf(opts.key.scale);
       for (const [paramIndex, value] of [[0, norm(keyIdx, 12)], [1, norm(scaleIdx, 3)]] as const) {

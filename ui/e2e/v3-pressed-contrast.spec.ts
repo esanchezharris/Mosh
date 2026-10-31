@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import { bootV3 } from "./helpers";
+import { bootV3, useHeadphones } from "./helpers";
 
 // Round-2 review (U4): the Booth's "Hear myself: On" was unreadable — lime text on a lime fill.
 // mosh.css paints every pressed .btn (`.btn.on`, `.btn[aria-pressed=true]`) with a --lime fill,
@@ -54,6 +54,7 @@ async function hearMyselfOn(page: Page): Promise<Locator> {
     await store.getState().refresh();
     store.getState().setSelectedTrack((drums.data as { trackId: string }).trackId);
   });
+  await useHeadphones(page);   // on speakers the speaker guard keeps Hear myself off
   await page.getByTestId("v3-file-trigger").click();
   await page.getByTestId("v3-templates").hover();
   await page.getByTestId("v3-template-booth").click();

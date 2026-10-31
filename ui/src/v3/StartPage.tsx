@@ -486,8 +486,18 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
   useEffect(() => {
     if (pairRequested && !pairing && lastError && /remote companion|phone/i.test(lastError)) setPairError(lastError);
   }, [lastError, pairRequested, pairing]);
-  // The phone's start error lives in the app's ONE error slot: leave it behind with the step.
-  useEffect(() => () => { if (pairError) useStore.getState().setLastError(null); }, [step]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // The phone's start error lives in the app's ONE error slot: leave it behind with the step,
+  // along with the page's own record of it. Read through a ref: the cleanup belongs to the
+  // render the singer ARRIVED in, when there was no error yet.
+  const pairErrorRef = useRef(pairError);
+  pairErrorRef.current = pairError;
+  useEffect(() => () => {
+    if (pairErrorRef.current) {
+      useStore.getState().setLastError(null);
+      setPairError(null);
+      setPairRequested(false);
+    }
+  }, [step]);
 
   const showCode = () => busyWhile(async () => {
     useStore.getState().setLastError(null);
