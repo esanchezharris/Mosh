@@ -85,3 +85,14 @@ export function loopActionTarget(action: LoopAction, context: LoopContext): stri
     return loopTarget(context.loop, context.selected);
   return null;
 }
+
+/** The Booth's take counter: "No takes yet", "Take 1", "Take 3 · 1 kept". A pass in flight
+ *  counts as the take it is: the engine only lists a pass among the contributions once it
+ *  lands at stop, so while recording the take being sung is one past the list. */
+export function takeCountLabel(loop: LoopState | null | undefined): string {
+  const parts = loop?.contributions ?? [];
+  const kept = parts.filter((p) => p.keeper).length;
+  const take = parts.length + (loopRecording(loop) ? 1 : 0);
+  if (take === 0) return "No takes yet";
+  return kept > 0 ? `Take ${take} · ${kept} kept` : `Take ${take}`;
+}

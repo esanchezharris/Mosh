@@ -17,7 +17,21 @@ import { useStore } from "../store";
 
 const AUDIO_EXTENSIONS = [".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg"];
 
-function looksLikeAudio(file: File): boolean {
+// A screen that wants dropped files for itself (the V3 Start page's Beat step: the beat
+// must land on the Backing track at bar 1, never on the selected track at the playhead)
+// registers an intercept. While one is set, a drop goes to it INSTEAD of the default
+// import, non-audio files included, so the screen can say "that isn't an audio file".
+export type FileDropIntercept = (files: File[]) => void;
+let dropIntercept: FileDropIntercept | null = null;
+
+/** Set (or clear with null) the drop intercept. Returns a cleanup that clears it only if
+ *  it is still the one set, so two screens never clear each other's. */
+export function setFileDropIntercept(handler: FileDropIntercept | null): () => void {
+  dropIntercept = handler;
+  return () => { if (dropIntercept === handler) dropIntercept = null; };
+}
+
+export function looksLikeAudio(file: File): boolean {
   const name = file.name.toLowerCase();
   if (AUDIO_EXTENSIONS.some((ext) => name.endsWith(ext))) return true;
   return file.type.startsWith("audio/");
@@ -26,7 +40,7 @@ function looksLikeAudio(file: File): boolean {
 // Robust chunked base64 encoder. Encoding a large Uint8Array via
 // String.fromCharCode(...arr) spreads every byte as an argument and overflows
 // the call stack on big files; chunk it so each fromCharCode call stays small.
-function toBase64(bytes: Uint8Array): string {
+export function toBase64(bytes: Uint8Array): string {
   const CHUNK = 0x8000; // 32 KB per chunk — well under the arg-count limit
   let binary = "";
   for (let i = 0; i < bytes.length; i += CHUNK) {
@@ -83,6 +97,11 @@ export function useFileDrop(): boolean {
 
       const files = e.dataTransfer?.files;
       if (!files || files.length === 0) return;
+
+      if (dropIntercept) {
+        dropIntercept(Array.from(files));
+        return;
+      }
 
       void (async () => {
         const store = useStore.getState();

@@ -87,12 +87,48 @@ export async function bootV3(page: Page): Promise<void> {
   await page.addInitScript(() => {
     window.localStorage.clear();
     window.localStorage.setItem("mosh.settings", JSON.stringify({
-      version: 2, template: null, values: { colorway: "lime" }, keyOverrides: {},
+      // startOnLaunch:false: these specs drive the workspace, not the Start page.
+      version: 2, template: null, values: { colorway: "lime", startOnLaunch: false }, keyOverrides: {},
     }));
   });
   await page.goto("/?shell=v3");
   await expect(page.getByTestId("v3-shell")).toBeVisible();
   await expect(page.getByTestId("v3-arrangement")).toBeVisible();
+}
+
+/** Boot V3 onto the Start page (StartPage.tsx) with the startOnLaunch setting ON. The
+ *  seed is written ONCE per test (a sessionStorage marker), not on every navigation like
+ *  the other boots: a reload must keep what the page's own "Show this when Mosh opens"
+ *  checkbox wrote. `seed` picks a mock session (?mockSeed=), `fault` the mock's
+ *  ?mockFault= knobs (bridge.mock.ts). */
+export async function bootV3Start(page: Page, opts: { seed?: string; fault?: string; colorway?: string } = {}): Promise<void> {
+  await page.addInitScript((colorway) => {
+    if (window.sessionStorage.getItem("mosh.e2e.seeded")) return;
+    window.sessionStorage.setItem("mosh.e2e.seeded", "1");
+    window.localStorage.clear();
+    window.localStorage.setItem("mosh.settings", JSON.stringify({
+      version: 2, template: null, values: { colorway, startOnLaunch: true }, keyOverrides: {},
+    }));
+  }, opts.colorway ?? "lime");
+  const q = new URLSearchParams({ shell: "v3" });
+  if (opts.seed) q.set("mockSeed", opts.seed);
+  if (opts.fault) q.set("mockFault", opts.fault);
+  await page.goto(`/?${q.toString()}`);
+  await expect(page.getByTestId("v3-shell")).toBeVisible();
+  await expect(page.getByTestId("v3-start")).toBeVisible();
+}
+
+/** Switch the mock's output to headphones. The default mock session plays through
+ *  "MacBook Pro Speakers", where the Booth's speaker guard (and the Start page's) keeps
+ *  Hear myself OFF, exactly as native does; a spec about monitoring itself needs headphones. */
+export async function useHeadphones(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const store = (window as unknown as { __moshStore: { getState: () => {
+      exec: (c: string, a?: Record<string, unknown>) => Promise<unknown>; refresh: () => Promise<void>;
+    } } }).__moshStore;
+    await store.getState().exec("set_audio_device", { outputDevice: "External Headphones" });
+    await store.getState().refresh();
+  });
 }
 
 /** Boot the Pro Tools Edit Window shell against the isolated in-memory backend. */

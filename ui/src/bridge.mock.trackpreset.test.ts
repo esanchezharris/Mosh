@@ -28,7 +28,10 @@ describe("bridge.mock — apply_track_preset mirrors the engine", () => {
     const listed = await run("list_presets", { plugin: "track-chain" });
     expect(listed.ok).toBe(true);
     const presets = (listed.data as { presets: { plugin: string; name: string; file: string }[] }).presets;
-    expect(presets).toEqual([{ plugin: "track-chain", name: "mosh-clean-lead-v0", file: FILE, source: "bundled" }]);
+    expect(presets).toEqual([
+      { plugin: "track-chain", name: "mosh-clean-lead-v0", file: FILE, source: "bundled" },
+      { plugin: "track-chain", name: "mosh-tuned-lead-v0", file: "/presets/track-chain/mosh-tuned-lead-v0.json", source: "bundled" },
+    ]);
     // …and the instrument pickers, which filter by their own key, never see it
     const fosc = (await run("list_presets", { plugin: "4osc" })).data as { presets: { plugin: string }[] };
     expect(fosc.presets.every((p) => p.plugin === "4osc")).toBe(true);

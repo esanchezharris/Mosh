@@ -105,6 +105,15 @@ function forwardNativeEditAction(action: ActionId): boolean {
   return true;
 }
 
+/** Clip and selection edits, inert while the V3 Start page covers the arrangement. */
+const START_PAGE_BLOCKED = new Set<string>([
+  EA.DELETE, EA.COPY, EA.CUT, EA.PASTE, EA.DUPLICATE, EA.GROUP, EA.UNGROUP,
+  EA.NUDGE_LEFT, EA.NUDGE_RIGHT, EA.NUDGE_UP, EA.NUDGE_DOWN,
+  EA.TOOL_MOVE, EA.TOOL_SPLIT, EA.TOOL_RANGE, EA.SPLIT, EA.GRID_NARROW, EA.GRID_WIDEN,
+  EA.INSERT_SILENCE, EA.DEACTIVATE, EA.CONSOLIDATE, EA.CROP, EA.CREATE_FADE, EA.QUANTIZE,
+  EA.SELECT_ALL, EA.INVERT_SELECTION, EA.SELECT_LOOP, EA.BOUNCE, EA.FREEZE_TRACK,
+]);   // EditorAction ids are the native menu's action ids too (mosh_menu below).
+
 export function useKeyboardShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -135,6 +144,10 @@ export function useKeyboardShortcuts() {
       // handler, so arrangement-level keyboard behavior is unchanged.
       if (nativeButtonActivation(e.target, e) || nativeButtonActivation(keyboardOwner, e)) return;
       if (nativeMenuPresent() && NATIVE_MENU_ACTIONS.has(action)) return;
+
+      // The V3 Start page hides the arrangement: a stray Delete or ⌘D there would edit
+      // clips the singer cannot see. Transport, undo, save and record keep working.
+      if (shell === "v3" && useV3.getState().posture === "start" && START_PAGE_BLOCKED.has(action)) return;
 
       const s = useStore.getState();
       const prevent = () => e.preventDefault();
@@ -308,6 +321,9 @@ export function useKeyboardShortcuts() {
         textFieldEdit(p.action);
         return;
       }
+      // The packaged app's Edit menu (⌘X/⌘V, Edit › Delete) arrives here, not as a keydown:
+      // the same Start-page block applies, or it edits clips the singer cannot see.
+      if (activeShell() === "v3" && useV3.getState().posture === "start" && START_PAGE_BLOCKED.has(p.action)) return;
       void runAction(p.action, ctx(), p.file ? { file: p.file } : {});
     });
   }, []);

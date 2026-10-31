@@ -32,7 +32,7 @@ export function FileMenu({ title }: { title: string }) {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open, setOpen]);
 
-  const run = (id: "new_project" | "open_project" | "save" | "save_as" | "export_audio") => {
+  const run = (id: "new_project" | "new_vocal_project" | "open_project" | "save" | "save_as" | "export_audio") => {
     setOpen(false);
     void runAction(id, actionCtx());
   };
@@ -47,6 +47,11 @@ export function FileMenu({ title }: { title: string }) {
         ref={(el) => { if (el) el.inert = !open; }}>
         <button type="button" className="mi" role="menuitem" onClick={() => run("new_project")}>
           <span>New Session</span><kbd>⌘N</kbd>
+        </button>
+        {/* TPL-001: Backing + armed Vocal, a one-bar count-in, overdub takes and a loop. */}
+        <button type="button" className="mi" role="menuitem" data-testid="v3-new-vocal"
+          onClick={() => run("new_vocal_project")}>
+          <span>New Vocal Recording</span>
         </button>
         <button type="button" className="mi" role="menuitem" onClick={() => run("open_project")}>
           <span>Open…</span><kbd>⌘O</kbd>
@@ -82,6 +87,11 @@ export function FileMenu({ title }: { title: string }) {
               onClick={() => { useStore.getState().setView("arrange"); setPosture("studio"); close(); }}>
               <span>Full Studio</span>
               {posture === "studio" ? <span className="check">✓</span> : null}
+            </button>
+            <button type="button" className="mi" role="menuitem" data-testid="v3-template-start"
+              onClick={() => { useStore.getState().setView("arrange"); setPosture("start"); close(); }}>
+              <span>Start page</span>
+              {posture === "start" ? <span className="check">✓</span> : null}
             </button>
             <div className="mi muted"><span>Mix Focus</span><span className="soon">soon</span></div>
           </div>

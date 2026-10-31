@@ -20,7 +20,11 @@ const V3_HIDDEN_IDS = new Set([
   "liveClipExpanded",
 ]);
 
+/** Settings with their own control elsewhere, hidden from every Settings surface. */
+const HIDDEN_EVERYWHERE = new Set(["startOnLaunch"]);
+
 export function settingHiddenForShell(shell: ShellId, category: string, id: string): boolean {
+  if (HIDDEN_EVERYWHERE.has(id)) return true;
   if (shell === "v2") return V2_HIDDEN_CATEGORIES.has(category) || id === "skin";
   if (shell === "live") return id === "skin";
   if (shell === "v3") return V3_HIDDEN_IDS.has(id) || category === "Pro Tools";

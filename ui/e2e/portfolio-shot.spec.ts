@@ -45,7 +45,7 @@ test.describe("portfolio screenshot", () => {
     mkdirSync(OUT, { recursive: true });
     await page.addInitScript((cw) => {
       window.localStorage.clear();
-      window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 2, template: null, values: { colorway: cw }, keyOverrides: {} }));
+      window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 2, template: null, values: { colorway: cw, startOnLaunch: false }, keyOverrides: {} }));
     }, colorway);
     await page.goto("/?shell=v3&mockSeed=portfolio");
     await expect(page.getByTestId("v3-shell")).toHaveAttribute("data-colorway", colorway);

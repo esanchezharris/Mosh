@@ -333,6 +333,7 @@ def launch(args: list[str]) -> int:
         if pid_text:
             time.sleep(2.0)
             CURRENT_PID = int(pid_text)
+            leave_start_page()
             return CURRENT_PID
         time.sleep(0.25)
     raise RuntimeError("Mosh did not launch")
@@ -359,6 +360,21 @@ def activate() -> None:
     else:
         run(["osascript", "-e", 'tell application "Mosh" to activate'], check=False)
     time.sleep(0.2)
+
+
+def leave_start_page(timeout: float = 6.0) -> None:
+    """The V3 Start page opens at launch while the startOnLaunch setting is on (the
+    fresh-settings default since 2026-10-30), and the real app's WebView storage is shared,
+    so it may be showing. These checks drive the workspace: press "Open the studio" when it
+    is there, and carry on when it is not."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for row in ax_rows():
+            if row["role"] == "AXButton" and ax_text(row).strip() == "Open the studio":
+                press_or_click_ax(row)
+                time.sleep(0.5)
+                return
+        time.sleep(0.3)
 
 
 def dismiss_permission_prompts() -> None:

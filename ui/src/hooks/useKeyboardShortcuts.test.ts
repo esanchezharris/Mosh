@@ -809,4 +809,73 @@ describe("useKeyboardShortcuts", () => {
     await vi.waitFor(() => expect(execCalls.map((c) => c.command)).toContain("paste_clip"));
   });
 
+  // Review fix: the V3 Start page covers the arrangement, so clip/selection edits it cannot
+  // show are inert there — by key (↓, ⌘A) AND by the packaged app's Edit menu (mosh_menu).
+  describe("V3 Start page posture", () => {
+    const startFixture = () => {
+      // The ableton keymap binds ↓ (nudge_down) and ⌘A (select_all); mosh's core does not,
+      // so under it these keys would be inert anyway and the block would go untested.
+      useSettings.setState({ values: { gestureTable: "mosh", keymap: "ableton", uiShell: "v3" }, keyOverrides: {} });
+      const t1 = { id: "t1", name: "Backing", type: "audio", clips: [{ id: "clip-1", name: "Beat", type: "wave", start: 0, length: 2 }] };
+      const t2 = { id: "t2", name: "Vocal", type: "audio", clips: [{ id: "clip-2", name: "Vox", type: "wave", start: 4, length: 2 }] };
+      useStore.setState({
+        selection: new Set(["clip-1"]),
+        selectedTrackId: "t1",
+        clipboard: null,
+        editingClipId: null,
+        automationTrackId: null,
+        snapshot: { session: {}, tracks: [t1, t2] } as unknown as import("../types").Snapshot,
+      });
+      (document.activeElement as HTMLElement | null)?.blur?.();
+    };
+    const key = (init: KeyboardEventInit) =>
+      act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })); });
+
+    afterEach(() => { useV3.setState({ posture: "studio" }); });
+
+    it("ArrowDown and ⌘A do nothing while posture is start", async () => {
+      startFixture();
+      useV3.setState({ posture: "start" });
+      act(() => root.render(React.createElement(Harness)));
+
+      key({ key: "ArrowDown" });
+      key({ key: "a", metaKey: true });
+      await flushQueue();
+
+      expect(execCalls).toEqual([]);
+      expect([...useStore.getState().selection]).toEqual(["clip-1"]);
+    });
+
+    it("a native-menu Cut (mosh_menu) is ignored while posture is start", async () => {
+      startFixture();
+      useV3.setState({ posture: "start" });
+      act(() => root.render(React.createElement(Harness)));
+
+      menu("cut");
+      await flushQueue();
+
+      expect(execCalls).toEqual([]);
+      expect(useStore.getState().clipboard).toBeNull();
+      expect(useStore.getState().selection.has("clip-1")).toBe(true);
+    });
+
+    it("in posture studio the same ArrowDown, ⌘A and menu Cut still dispatch", async () => {
+      startFixture();
+      useV3.setState({ posture: "studio" });
+      act(() => root.render(React.createElement(Harness)));
+
+      key({ key: "ArrowDown" });
+      await vi.waitFor(() => expect(execCalls).toContainEqual({ command: "move_clip", args: { clipId: "clip-1", trackId: "t2" } }));
+
+      key({ key: "a", metaKey: true });
+      await flushQueue();
+      expect([...useStore.getState().selection].sort()).toEqual(["clip-1", "clip-2"]);
+
+      useStore.setState({ selection: new Set(["clip-1"]) });
+      menu("cut");
+      await vi.waitFor(() => expect(execCalls.map((c) => c.command)).toContain("remove_clip"));
+      expect(useStore.getState().clipboard?.clips.map((c) => c.clip.id)).toEqual(["clip-1"]);
+    });
+  });
+
 });

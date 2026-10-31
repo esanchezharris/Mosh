@@ -1,3 +1,4 @@
+import { useLayoutEffect } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { isNative } from "../bridge";
@@ -29,7 +30,14 @@ import { Mixer } from "../ui/Mixer";
 import { PianoRoll } from "../ui/PianoRoll";
 import { MoshTipProvider } from "../chrome/Tooltip";
 import { ContextMenu } from "./ContextMenu";
+import { StartPage } from "./StartPage";
 import "./shell.css";
+
+// The Start page's launch decision is made ONCE per app run (not per shell mount), so
+// switching shells and back never re-shows it.
+let launchPostureDecided = false;
+/** Test hook: forget the launch decision. */
+export function __resetLaunchPostureForTests() { launchPostureDecided = false; }
 
 export function AppV3() {
   const snapshot = useStore((s) => s.snapshot);
@@ -41,9 +49,17 @@ export function AppV3() {
   const posture = useV3((s) => s.posture);
   const colorway = colorwayAttr(useSettings((s) => s.get("colorway")));
 
+  // Before paint, so a Start-page launch never flashes the Studio first. Settings hydrate
+  // in main.tsx before the first render.
+  useLayoutEffect(() => {
+    if (launchPostureDecided) return;
+    launchPostureDecided = true;
+    if (useSettings.getState().get("startOnLaunch") === true) useV3.getState().setPosture("start");
+  }, []);
+
   useKeyboardShortcuts();
   useQwertyMidi();
-  useFileDrop();
+  const dragging = useFileDrop();
 
   if (!isNative()) {
     return (
@@ -65,6 +81,13 @@ export function AppV3() {
       <AudioDeviceNotice />
       <MissingMediaBanner />
       <FeltWrongDialog />
+      {posture === "start" ? (
+        <div className="body start-body">
+          {snapshot
+            ? <StartPage snapshot={snapshot} />
+            : <div className="main"><div className="set-hint" style={{ padding: 16 }}>Loading session…</div></div>}
+        </div>
+      ) : (
       <div className={`body${posture === "booth" ? " booth-morph" : ""}`}>
         <LeftRail />
         {pane === "browser" && <BrowserPane />}
@@ -85,6 +108,10 @@ export function AppV3() {
         </div>
         {snapshot && posture === "studio" && <MixInspector snapshot={snapshot} />}
       </div>
+      )}
+      {dragging && posture !== "start" && (
+        <div className="drop-veil" data-testid="v3-drop-veil" aria-hidden="true"><span>Drop to add audio</span></div>
+      )}
       <HistoryFlyout />
       {snapshot && <SettingsModal snapshot={snapshot} />}
       <MultiplayerLauncher />

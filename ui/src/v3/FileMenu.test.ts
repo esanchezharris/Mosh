@@ -7,6 +7,7 @@ import { useV3 } from "./shellState";
 import { useStore } from "../store";
 import type { Snapshot } from "../types";
 import { escapeStackDepth, pushEscapeHandler } from "../hooks/escapeStack";
+import { runAction } from "../menuActions";
 
 vi.mock("../menuActions", () => ({ runAction: vi.fn() }));
 
@@ -87,6 +88,14 @@ describe("v3 File menu + top bar", () => {
     } finally {
       pop();
     }
+  });
+
+  it("offers New Vocal Recording, which runs the vocal template action and closes the menu", () => {
+    vi.mocked(runAction).mockClear();
+    act(() => root.render(React.createElement(FileMenu, { title: "untitled" })));
+    act(() => host.querySelector<HTMLElement>('[data-testid="v3-new-vocal"]')?.click());
+    expect(vi.mocked(runAction)).toHaveBeenCalledWith("new_vocal_project", expect.anything());
+    expect(useV3.getState().fileOpen).toBe(false);
   });
 
   it.each(["Enter", " ", "ArrowRight"])("enters Templates with %s when its trigger is focused", (key) => {

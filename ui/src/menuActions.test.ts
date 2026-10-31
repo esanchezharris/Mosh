@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { runAction, type ActionCtx, type ActionStore } from "./menuActions";
+import { runAction, startVocalProject, type ActionCtx, type ActionStore } from "./menuActions";
 import { recordSessionCommand, getSessionLog, __resetSessionLogForTests } from "./agent/memory/sessionLog";
 import type { Snapshot } from "./types";
 
@@ -1046,5 +1046,34 @@ describe("runAction — keymap-audit wave (nudge_up/down, ungroup, insert_silenc
     const nothing = makeCtx({}, { snapshot: snapFor([{ id: "t1", clips: [] }]), selection: new Set<string>() });
     await runAction("group", nothing.ctx);
     expect(nothing.execCalls).toEqual([]);
+  });
+});
+
+describe("startVocalProject — the vocal template, shared by File › New Vocal Recording and the Start page", () => {
+  it("runs the template with File › New's lifecycle and hands back the template's track ids", async () => {
+    const { ctx, store, execCalls } = makeCtx({}, {
+      exec: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        execCalls.push({ command, args });
+        return { ok: true, data: { template: "vocal", backingTrackId: "7", vocalTrackId: "8" } };
+      }),
+    });
+    const r = await startVocalProject(ctx);
+    expect(execCalls.find((c) => c.command === "new_project")).toEqual({ command: "new_project", args: { template: "vocal" } });
+    expect(store.refresh).toHaveBeenCalled();
+    expect(store.invalidateMemory).toHaveBeenCalled();
+    expect(r).toEqual({ ok: true, backingTrackId: "7", vocalTrackId: "8", templateError: "" });
+  });
+
+  it("reports an unknown template and a refused switch instead of pretending ids exist", async () => {
+    const older = makeCtx({}, { exec: vi.fn(async () => ({ ok: true, data: { template: "", templateError: "unknown template: vocal" } })) });
+    expect(await startVocalProject(older.ctx)).toMatchObject({ ok: true, vocalTrackId: "", templateError: "unknown template: vocal" });
+    const refused = makeCtx({}, { exec: vi.fn(async () => ({ ok: false, error: "busy" })) });
+    expect(await startVocalProject(refused.ctx)).toMatchObject({ ok: false, error: "busy", backingTrackId: "" });
+  });
+
+  it("the menu action is the same path", async () => {
+    const { ctx, execCalls } = makeCtx();
+    await runAction("new_vocal_project", ctx);
+    expect(execCalls.find((c) => c.command === "new_project")?.args).toEqual({ template: "vocal" });
   });
 });

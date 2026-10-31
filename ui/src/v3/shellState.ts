@@ -1,7 +1,9 @@
 import { create } from "zustand";
 
 export type V3Pane = "none" | "browser" | "plugins";
-export type V3Posture = "studio" | "booth";
+/** studio: the arrangement. booth: the recording loop. start: the guided Start page
+ *  (StartPage.tsx), which replaces the workspace for a first-time singer. */
+export type V3Posture = "studio" | "booth" | "start";
 export type V3BrowserTab = "files" | "midi" | "presets";
 
 /** The top bar's LoRA button: the training dialog hands focus back to it on close. */
@@ -55,7 +57,8 @@ export const useV3 = create<V3ShellState>((set, get) => ({
   context: null,
   setPane: (pane) => set({ pane }),
   togglePane: (pane) => set({ pane: get().pane === pane ? "none" : pane }),
-  setPosture: (posture) => set({ posture, fileOpen: false }),
+  // The Start page owns the whole workspace, so a side pane would sit beside nothing.
+  setPosture: (posture) => set(posture === "start" ? { posture, fileOpen: false, pane: "none" } : { posture, fileOpen: false }),
   setBrowserTab: (browserTab) => set({ browserTab }),
   setFileOpen: (fileOpen) => set({ fileOpen, historyOpen: false, settingsOpen: false, mpOpen: false, phoneOpen: false, trainingOpen: false, context: null }),
   setHistoryOpen: (historyOpen) => set({ historyOpen, fileOpen: false, settingsOpen: false, mpOpen: false, phoneOpen: false, trainingOpen: false, context: null }),

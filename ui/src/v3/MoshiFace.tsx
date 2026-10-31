@@ -27,7 +27,9 @@ export function MoshiFace({ celebrateTick, mood }: { celebrateTick: number; mood
   want.current.colorway = colorway;
   const engineRef = useRef<ReturnType<Api["createEngine"]> | null>(null);
   const originRef = useRef<number>(0);
-  const lastCelebrate = useRef(0);
+  // Seeded with the tick at MOUNT: a face that mounts after a celebration (the dock
+  // re-mounting on a posture switch, the Start page's own face) must not replay that laugh.
+  const lastCelebrate = useRef(celebrateTick);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -72,6 +74,7 @@ export function MoshiFace({ celebrateTick, mood }: { celebrateTick: number; mood
       const sprites = api();
       const dur = sprites?.STATE_DEFS?.laugh?.duration ?? 1.7;
       want.current.laughUntil = performance.now() / 1000 - originRef.current + dur;
+      if (canvasRef.current) canvasRef.current.dataset.laughs = String(Number(canvasRef.current.dataset.laughs ?? 0) + 1);
     }
   }, [celebrateTick]);
 

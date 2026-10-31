@@ -4,10 +4,13 @@ import type { CommandResult, LoopState, Snapshot, Track } from "../types";
 import { useV3 } from "./shellState";
 import { SilhouetteWave } from "./waves/SilhouetteWave";
 import {
-  contributionLabel, loopActionTarget, loopAvailable, loopRecording, loopTarget, loopTargetLabel,
+  contributionLabel, loopActionTarget, loopAvailable, loopRecording, loopTarget, loopTargetLabel, takeCountLabel,
   type LoopAction,
 } from "./loopPolicy";
 import { phoneStatusLine } from "./phoneStatus";
+import { setupVocalLoop, type VocalSetupIO } from "./vocalSetup";
+import { speakerMutedNote, useSpeakerGuard } from "./useSpeakerGuard";
+import { InputMeter } from "./InputMeter";
 
 // The Booth is the DESKTOP phone pad: the same eleven commands, the same availability
 // model (loopPolicy.ts, a port of ui/src/phonepad/src/policy.ts), so a producer who
@@ -17,6 +20,11 @@ import { phoneStatusLine } from "./phoneStatus";
 //
 // It does NOT create tracks on its own: entering the Booth is a navigation, not an edit,
 // so the un-engaged state offers the setup rather than performing it.
+//
+// The setup a producer DOES click starts a first-time singer somewhere sensible
+// (vocalSetup.ts): a fresh Lead with no effects gets the default vocal chain on Lead and
+// Takes, and a Mac playing through its own speakers starts with Hear myself off -- a live
+// mic into laptop speakers howls.
 
 const PADS = [
   { action: "record", command: "loop_record", testId: "v3-loop-record", label: "Put Me In", primary: true },
@@ -106,6 +114,8 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
     if (pendingMonitor !== null && (!takesTrack || takesTrack.monitor === pendingMonitor)) setPendingMonitor(null);
   }, [pendingMonitor, takesTrack]);
 
+  const outputDevice = snapshot.audio?.outputDevice ?? "";
+
   // Every loop command answers with a human `detail` — including the ones that committed
   // the edit but could not roll again ("Kept Part 2; recording did not restart: …"). Show
   // it: a half-applied result that reads as plain success is the one thing this line is for.
@@ -140,21 +150,56 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
     if (!created?.ok) return;
     const trackId = (created.data as { trackId?: unknown } | undefined)?.trackId;
     if (typeof trackId !== "string" || !trackId) { setNote("create_track did not name the new track"); return; }
-    await run("loop_setup", { trackId });
+    await setupLoop(trackId);
   };
 
-  const toggleHearMyself = async () => {
-    if (!loop?.takesTrackId) return;
-    const targetMode: "off" | "automatic" = hearingMyself ? "off" : "automatic";
-    const result = await run("set_input_monitor", { trackId: loop.takesTrackId, mode: targetMode });
+  // One monitoring change, honest about its outcome. Returns true when it applied (or is
+  // pending until the take ends).
+  const setMonitor = async (takesTrackId: string, targetMode: "off" | "automatic"): Promise<boolean> => {
+    const result = await run("set_input_monitor", { trackId: takesTrackId, mode: targetMode });
     const data = result?.ok ? result.data as { applied?: unknown; deferred?: unknown; reason?: unknown } | undefined : undefined;
     if (data?.deferred === true) {
       // Recording is still rolling (2026-09-24 finding c): the change is honestly pending,
       // not applied -- show that instead of a toggle that looks like it did nothing.
       setPendingMonitor(targetMode);
-    } else if (data?.applied === false) {
-      setNote(`Monitoring unchanged: ${typeof data.reason === "string" && data.reason ? data.reason : "the engine did not apply it"}`);
+      return true;
     }
+    if (data?.applied === false) {
+      setNote(`Monitoring unchanged: ${typeof data.reason === "string" && data.reason ? data.reason : "the engine did not apply it"}`);
+      return false;
+    }
+    return !!result?.ok;
+  };
+
+  // Headphones pulled out mid-session (or a relaunch, which resets monitoring to automatic,
+  // on a Mac playing through its speakers): turn Hear myself off before the mic howls.
+  const { onSpeakers, markOverride } = useSpeakerGuard({
+    outputDevice,
+    hearingMyself,
+    takesTrackId: takesTrack?.id,
+    pendingMonitor: pendingMonitor !== null,
+    turnOff: (takesTrackId) => setMonitor(takesTrackId, "off"),
+    onMuted: (device) => setNote(speakerMutedNote(device)),
+  });
+
+  const toggleHearMyself = async () => {
+    if (!loop?.takesTrackId) return;
+    const targetMode: "off" | "automatic" = hearingMyself ? "off" : "automatic";
+    if (targetMode === "automatic" && onSpeakers) markOverride();
+    await setMonitor(loop.takesTrackId, targetMode);
+  };
+
+  // The same recipe the Start page runs (vocalSetup.ts): loop_setup, then Hear myself off on
+  // speakers, then the default chain on Lead and Takes -- each its own undo step.
+  const setupLoop = async (leadId: string) => {
+    const io: VocalSetupIO = {
+      run,
+      query: (command, args) => exec(command, args ?? {}),
+      snapshot: () => useStore.getState().snapshot,
+      setMonitor,
+    };
+    const { notes } = await setupVocalLoop(io, leadId, snapshot);
+    if (notes.length > 0) setNote(notes.join(" · "));
   };
 
   const line = note ?? (loop?.blockReason || null);
@@ -174,18 +219,26 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
           </div>
         </div>
 
+        {onSpeakers && (
+          <div className="set-hint" role="alert" data-testid="v3-booth-speakers">
+            Sound is playing through {outputDevice}. Plug in headphones before you sing: the
+            mic hears the speakers and feeds back.
+          </div>
+        )}
+
         {!loop?.engaged ? (
           <div className="booth-pads">
             <div className="set-hint">
               Pick the track you sing on, and Moshi keeps a Takes lane beside it. Nothing is recorded over.
             </div>
             <button type="button" className="btn pri" data-testid="v3-booth-setup" disabled={pending}
-              onClick={() => void (leadTrack ? run("loop_setup", { trackId: leadTrack.id }) : addVocalTrack())}>
+              onClick={() => void (leadTrack ? setupLoop(leadTrack.id) : addVocalTrack())}>
               {leadTrack ? `Use ${leadTrack.name} as Lead` : "Add a Vocal track"}
             </button>
           </div>
         ) : (
           <>
+            <div className="take-count" data-testid="v3-booth-take-count" aria-live="polite">{takeCountLabel(loop)}</div>
             <div className="booth-pads" data-testid="v3-booth-pads">
               {PADS.map((pad) => (
                 <button key={pad.testId} type="button"
@@ -193,7 +246,14 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
                   data-testid={pad.testId} disabled={!loopAvailable(pad.action, context)}
                   onClick={() => {
                     const target = loopActionTarget(pad.action, context);
-                    void run(pad.command, target ? { targetId: target } : {});
+                    // Keep on a take that is ALREADY kept (transport stopped) only resumes
+                    // recording (cmdLoopKeep): not a reward. Decide from the snapshot first.
+                    const keepsSomething = pad.action === "keep"
+                      && (recording || !loop?.contributions.find((part) => part.id === target)?.keeper);
+                    void run(pad.command, target ? { targetId: target } : {}).then((result) => {
+                      // Tier 1: a landed Keep is the reward moment -- the splat laughs once.
+                      if (keepsSomething && result?.ok) useStore.getState().bumpCelebrate();
+                    });
                   }}>
                   {pad.action === "hear"
                     ? (recording ? "Review Current Recording" : "Review Selected Take")
@@ -212,6 +272,7 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
                 Hear myself: {hearingMyself ? "On" : "Off"}
                 {pendingMonitor !== null ? ` (pending ${pendingMonitor === "off" ? "Off" : "On"})` : ""}
               </button>
+              <InputMeter trackId={takesTrack?.id} monitoring={hearingMyself} />
             </div>
 
             {/* Engineering readouts stay one click away: useful to a producer steering
@@ -254,6 +315,8 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
         )}
 
         <div className="row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button type="button" className="btn ghost" data-testid="v3-booth-start"
+            onClick={() => setPosture("start")}>← Start</button>
           <button type="button" className="btn ghost" data-testid="v3-booth-studio"
             onClick={() => setPosture("studio")}>← Studio</button>
           {/* Only once a phone is paired or attached — until then the TopBar's Phone pairs one. */}

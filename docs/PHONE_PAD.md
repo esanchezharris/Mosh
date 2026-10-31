@@ -27,13 +27,21 @@ companion — see [IPHONE_COMPANION.md](IPHONE_COMPANION.md).
 | Server routing (`GET /pad`, `GET /api/state`, `POST /api/action`) | `src/remote/RemoteCompanionServer.cpp` |
 | Desktop QR/pairing modal | `ui/src/v3/PhoneLauncher.tsx` |
 | Booth (rewritten on the loop) | `ui/src/v3/BoothView.tsx` |
+| Start page Phone step (inline QR, countdown, New code) | `ui/src/v3/StartPage.tsx`, `ui/src/v3/phonePairing.ts` |
 
 ## The loop model
 
 Recording lands on a **LEAD** track. Every pass ("contribution") the phone or the
 Booth records goes to a paired **"`<Lead>` · Takes"** track (`loop_setup` creates and
 arms it; the Booth never creates a track on its own — it prompts "Use \<track\> as
-Lead" first). At any moment:
+Lead" first). The Booth's setup then applies first-run defaults
+(`ui/src/v3/vocalSetup.ts`): a Lead with no effects gets **Mosh Clean Lead v0** on Lead
+and Takes (one `apply_track_preset` undo step each), and when the output looks like
+speakers it turns Hear myself off and says to plug in headphones. The V3 Start page runs the
+same recipe (`setupVocalLoop`) before its optional Phone step, so a pad reached from the Start
+page never shows SETUP NEEDED. Its QR shows a countdown from `pairing.expiresAtMs` (5 minutes
+unscanned), offers **New code** only until a phone connects (a re-mint would cut it off), and
+after 60 s without a phone explains same Wi-Fi, VPNs and the local-network prompt. At any moment:
 
 - **LEAD** holds whole, playable contributions: the current keeper plus older ones
   still marked as kept and audible.

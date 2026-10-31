@@ -9,6 +9,7 @@
 #include "state/ProjectName.h"
 #include "state/TakeIdentity.h"
 #include "plugins/mixer/TrackMutePlugin.h"
+#include "plugins/MoshPluginTypes.h"
 #include "plugins/moshfx/MoshCompressorPlugin.h"
 #include "plugins/moshfx/MoshDelayLinePlugins.h"
 #include "plugins/moshfx/MoshFourOscPlugin.h"
@@ -379,16 +380,16 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
             enginePtr->getDeviceManager().deviceManager.addAudioDeviceType (std::move (type));
    #endif
 
-    // CAP-AUT-006 — register the mute gate's type HERE, not with the rest of the Mosh
-    // built-ins in PluginHost::initialise(). PluginHost runs from the MoshOps ctor,
-    // which is AFTER this ctor loads the persisted Edit below — and
+    // Register EVERY Mosh-owned plugin type HERE, before this ctor loads the persisted
+    // Edit below. PluginHost::initialise runs later, from the MoshOps ctor, and
     // PluginManager::createPlugin drops an unknown type with a log line
-    // (tracktion_PluginManager.cpp:461), leaving the <PLUGIN> child orphaned in the
-    // tree. The next ensureTrackMuteGate would then add a SECOND gate and the saved
-    // mute curve would be silently dead. The Engine ctor has already run
-    // pluginManager->initialise(), and registerBuiltInType ignores a duplicate type, so
-    // PluginHost's own pass stays a harmless no-op.
-    enginePtr->getPluginManager().createBuiltInType<mosh::TrackMutePlugin>();
+    // (tracktion_PluginManager.cpp:461), leaving the <PLUGIN> child orphaned in the tree.
+    // CAP-AUT-006 first hit this with the mute gate (a second gate, a dead mute curve);
+    // until 2026-10-14 only the gate was registered here, so every relaunch dropped the
+    // saved Mosh AutoTune, OTT, Soft Clipper, X-FDBK and master spectral tap
+    // (MoshPluginTypes.h). The Engine ctor has already run pluginManager->initialise(),
+    // and registerBuiltInType ignores a duplicate type, so PluginHost's pass is a no-op.
+    mosh::registerMoshPluginTypes (enginePtr->getPluginManager());
 
     // Session directory: a stable per-app-data folder so save/reload round-trips.
     // Each harness run gets its own dir so it can't be polluted by (or clobber) a real

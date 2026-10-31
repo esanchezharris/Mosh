@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   contributionLabel, loopActionTarget, loopAvailable, loopPlaying, loopRecording,
-  loopTarget, loopTargetLabel, LOOP_ACTIONS, type LoopAction,
+  loopTarget, loopTargetLabel, LOOP_ACTIONS, takeCountLabel, type LoopAction,
 } from "./loopPolicy";
 import type { LoopContribution, LoopState } from "../types";
 
@@ -161,5 +161,22 @@ describe("transport readers", () => {
     expect(loopPlaying(loop({ transport: { recording: false, playing: true, positionSec: 0 } }))).toBe(true);
     expect(loopRecording(null)).toBe(false);
     expect(loopPlaying(undefined)).toBe(false);
+  });
+});
+
+describe("takeCountLabel (the Booth's take counter)", () => {
+  const rec = { recording: true, playing: true, positionSec: 0 };
+  it("reads No takes yet, then Take 1 while the first pass records", () => {
+    expect(takeCountLabel(loop())).toBe("No takes yet");
+    expect(takeCountLabel(loop({ transport: rec, phase: "recording", currentId: "p1" }))).toBe("Take 1");
+  });
+  it("counts landed passes and kept ones", () => {
+    expect(takeCountLabel(loop({ contributions: [part("1"), part("2", { keeper: true }), part("3")] }))).toBe("Take 3 · 1 kept");
+    expect(takeCountLabel(loop({ contributions: [part("1"), part("2")] }))).toBe("Take 2");
+  });
+  it("counts the pass in flight: the engine lists a pass only once it lands (review finding)", () => {
+    const recording = loop({ transport: rec, phase: "recording", currentId: "p3",
+      contributions: [part("1"), part("2", { keeper: true })] });
+    expect(takeCountLabel(recording)).toBe("Take 3 · 1 kept");
   });
 });
