@@ -140,6 +140,21 @@ describe("v3 Booth — the desktop recording pad", () => {
     expect(useStore.getState().refresh).toHaveBeenCalled();
   });
 
+  // Review fix: Keep on a take that is ALREADY kept (transport stopped) only resumes
+  // recording; it is not a reward, so the splat must not laugh for it.
+  it("Keep celebrates a newly kept take, never one that was already kept", async () => {
+    render(snapshot(loopState({ lastId: "p1", contributions: [part("p1", "Part 1", { keeper: true })] })));
+    const before = useStore.getState().celebrateTick;
+    await act(async () => { pad("v3-loop-keep")!.click(); });
+    expect(calls).toEqual([{ command: "loop_keep", args: { targetId: "p1" } }]);
+    expect(useStore.getState().celebrateTick, "already kept: no laugh").toBe(before);
+
+    render(snapshot(loopState({ lastId: "p2", contributions: [part("p1", "Part 1", { keeper: true }), part("p2", "Part 2")] })));
+    await act(async () => { pad("v3-loop-keep")!.click(); });
+    expect(calls.at(-1)).toEqual({ command: "loop_keep", args: { targetId: "p2" } });
+    expect(useStore.getState().celebrateTick, "newly kept: one laugh").toBe(before + 1);
+  });
+
   it("shows the result's own detail — including a Keep that committed but did not roll again", async () => {
     useStore.setState({
       exec: vi.fn(async (command: string, args?: Record<string, unknown>) => {

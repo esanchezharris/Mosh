@@ -17,8 +17,8 @@ import { SilhouetteWave } from "./waves/SilhouetteWave";
 import { InputMeter } from "./InputMeter";
 import { dropDrumBeat } from "./beats";
 import {
-  AUTOTUNE_KEYS, PIPS, beatClipOf, beatDone, firstIncomplete, hasOwnChain, pickBackingTrack, pickContinueLead,
-  pipStates, readyBlocker, setKeyArgs, songReady, trackById, voicePresetOf,
+  AUTOTUNE_KEYS, AUTOTUNE_SCALES, PIPS, beatClipOf, beatDone, firstIncomplete, hasOwnChain, pickBackingTrack, pickContinueLead,
+  pipStates, readyBlocker, repairTarget, setKeyArgs, songReady, tempoStillConfirmed, trackById, voicePresetOf,
   type AutoTuneScale, type BeatLocal, type MicState, type PhoneLocal, type StartIds, type StartStep,
 } from "./startFlow";
 import { MIC_COPY, micFromEngineError, micFromPermission, type MicReport } from "./micCheck";
@@ -81,7 +81,6 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
   const mpActive = useStore((s) => s.mp.active);
   const remote = useStore((s) => s.remoteStatus);
   const lastError = useStore((s) => s.lastError);
-  const celebrateTick = useStore((s) => s.celebrateTick);
   const peaks = useStore((s) => s.peaks);
   const ensurePeaks = useStore((s) => s.ensurePeaks);
   const setPosture = useV3((s) => s.setPosture);
@@ -111,6 +110,11 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
   const [now, setNow] = useState(() => Date.now());
   const ownTransition = useRef(false);
   const metronomeBefore = useRef<boolean | null>(null);
+  // How many beat imports are in flight: a drop is not gated by the disabled buttons.
+  const importing = useRef(0);
+  // The page's OWN laugh: bumped only by "I'm ready". Passing the store's tick would let a
+  // re-entry that lands on Ready replay whatever was celebrated before (review finding).
+  const [laughTick, setLaughTick] = useState(0);
 
   const recording = !!snapshot.transport?.recording;
   const lead = trackById(snapshot, ids.leadTrackId);
@@ -118,6 +122,10 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
   const hearingMyself = takes ? takes.monitor !== "off" : false;
   const outputDevice = snapshot.audio?.outputDevice ?? "";
   const leadOwnChain = hasOwnChain(lead) && voicePresetOf(lead) === "none";
+  // The producer's own effects sit on a lane that also has a bundled preset: switching would
+  // re-insert the new chain ahead of the fader, i.e. AFTER their effects (apply_track_preset
+  // puts a fresh group there). Leave the switch to the studio rather than reorder their chain.
+  const leadHasOwnEffects = hasOwnChain(lead) && !leadOwnChain;
   const chainNotRequired = (presets !== null && !presets.clean) || leadOwnChain;
   const blocker = readyBlocker({ snapshot, ids, mic, chainNotRequired });
   const voiceReady = blocker === null;
@@ -182,6 +190,9 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
     if (m.epoch === null || ownTransition.current || transitioning) return;
     if (projectEpoch !== m.epoch) {
       m.reset();
+      // A preview belonged to the old song: never write its saved click into the new one.
+      metronomeBefore.current = null;
+      setPreviewing(false);
       setStep("welcome");
       setNote("The song changed. Start again, or continue with what's open.");
     }
@@ -198,19 +209,31 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
   });
 
   // ── Welcome → Song ──────────────────────────────────────────────────────────────────
-  const ensureMicAsked = async (): Promise<MicrophonePermissionStatus | "unknown"> => {
+  /** Ask macOS about the mic BEFORE anything arms a track. Re-reads the live status every
+   *  time (a timed-out or failed request is asked again). Returns false while macOS is
+   *  STILL undecided: the vocal template would then raise the prompt synchronously inside
+   *  new_project and freeze the app for up to two minutes, so the caller must stop. */
+  const ensureMicAsked = async (): Promise<boolean> => {
     let status: MicrophonePermissionStatus | "unknown" = mic;
     try {
-      if (status === "unknown") status = (await microphonePermissionStatus()).status;
+      if (status !== "granted") status = (await microphonePermissionStatus()).status;
       if (status === "not-determined") {
         setNote(MIC_COPY.ask);
         status = (await requestMicrophonePermission()).status;
+        if (status === "not-determined" || status === "timed-out") {
+          // Ask once more: a prompt dismissed by a focus change reads as not answered.
+          status = (await microphonePermissionStatus()).status;
+        }
       }
     } catch {
       status = "unknown";
     }
     setMic(status);
-    return status;
+    if (status === "not-determined") {
+      setNote(`${MIC_COPY.ask} Then press the button again.`);
+      return false;
+    }
+    return true;
   };
 
   const finishSong = async (backingId: string | null, leadId: string, alreadyEngaged: boolean) => {
@@ -234,7 +257,7 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
 
   const startNewSong = () => busyWhile(async () => {
     setSongError(null);
-    await ensureMicAsked();
+    if (!(await ensureMicAsked())) return;
     setStep("song");
     ownTransition.current = true;
     try {
@@ -262,7 +285,7 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
 
   const continueSong = () => busyWhile(async () => {
     setSongError(null);
-    await ensureMicAsked();
+    if (!(await ensureMicAsked())) return;
     const snap = useStore.getState().snapshot ?? snapshot;
     let leadTrack = pickContinueLead(snap, useStore.getState().selectedTrackId);
     if (!leadTrack) {
@@ -276,7 +299,10 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
     if (!(await finishSong(backing?.id ?? null, leadTrack.id, engaged))) { setStep("song"); return; }
     const m = useStartMemory.getState();
     const existingBeat = beatClipOf(useStore.getState().snapshot, m.ids, m.beat);
-    if (existingBeat) patchBeat({ confirmed: true, bpmText: formatBpm(Math.round(useStore.getState().snapshot?.session.tempo ?? 120)) });
+    if (existingBeat) {
+      const tempo = useStore.getState().snapshot?.session.tempo ?? 120;
+      patchBeat({ clipId: existingBeat.id, confirmed: true, adopted: true, confirmedBpm: tempo, bpmText: formatBpm(Math.round(tempo)) });
+    }
     const after = useStore.getState().snapshot;
     const next = firstIncomplete(after, useStartMemory.getState().ids, useStartMemory.getState().beat,
       voiceReadyNow(after, useStartMemory.getState().ids));
@@ -302,19 +328,37 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
     return id;
   };
 
-  const addBeat = (source: BeatSource, fileName: string) => busyWhile(async () => {
-    setNote(null);
-    const backingId = await ensureBacking();
-    if (!backingId) { setNote("The Backing track couldn't be made."); return; }
-    const previous = useStartMemory.getState().beat.clipId;
-    const added = await importBeat(run, source, backingId, previous && trackById(useStore.getState().snapshot, backingId)?.clips.some((c) => c.id === previous) ? previous : null);
-    if (!added.ok || !added.clipId) { setNote(added.error ? `Couldn't add that beat: ${added.error}` : "Couldn't add that beat."); return; }
-    await useStore.getState().refresh();
-    const detected = await detectBpm(run, added.clipId);
-    const proposal = proposeTempo(detected, fileName, useStore.getState().snapshot?.session.tempo ?? 120);
-    patchBeat({ clipId: added.clipId, fileName, proposal, bpmText: formatBpm(proposal.bpm), confirmed: false, skipped: false });
-    if (!detected) setNote(null);
-  });
+  const addBeat = async (source: BeatSource, fileName: string) => {
+    // One beat at a time. Buttons are disabled while busy, but a DROP is not a button: two
+    // overlapping imports would stack both beats at bar 1 (review finding).
+    if (importing.current > 0) { setNote("One beat at a time: wait for this one to land."); return; }
+    importing.current += 1;
+    try {
+      await busyWhile(async () => {
+        setNote(null);
+        const backingId = await ensureBacking();
+        if (!backingId) { setNote("The Backing track couldn't be made."); return; }
+        // What is replaced: the beat this flow imported, else the one already on Backing
+        // (continue mode), so "Choose a different beat…" never stacks a second one.
+        const m = useStartMemory.getState();
+        const fresh = useStore.getState().snapshot;
+        const onBacking = trackById(fresh, backingId)?.clips ?? [];
+        const remembered = m.beat.clipId && onBacking.some((c) => c.id === m.beat.clipId) ? m.beat.clipId : null;
+        const previous = remembered ?? beatClipOf(fresh, { ...m.ids, backingTrackId: backingId }, m.beat)?.id ?? null;
+        const added = await importBeat(run, source, backingId, previous);
+        if (!added.ok || !added.clipId) { setNote(added.error ? `Couldn't add that beat: ${added.error}` : "Couldn't add that beat."); return; }
+        // Remember the new clip before detection runs, so nothing in between can lose it.
+        patchBeat({ clipId: added.clipId, fileName, proposal: null, confirmed: false, confirmedBpm: null, adopted: false, skipped: false });
+        await useStore.getState().refresh();
+        const detected = await detectBpm(run, added.clipId);
+        const proposal = proposeTempo(detected, fileName, useStore.getState().snapshot?.session.tempo ?? 120);
+        patchBeat({ proposal, bpmText: formatBpm(proposal.bpm) });
+        setNote(added.error);   // null, or "the old one is still there"
+      });
+    } finally {
+      importing.current -= 1;
+    }
+  };
 
   const chooseBeat = async () => {
     const picked = await pickFiles({ title: "Choose a beat", filters: AUDIO_FILTERS });
@@ -353,8 +397,13 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
     };
   }, [step, recording, dropBeat]);
 
-  const bpmValue = clampBpm(Number(beat.bpmText));
-  const setBpm = (bpm: number) => patchBeat({ bpmText: formatBpm(clampBpm(bpm)), confirmed: false });
+  // A blank or non-numeric field is NOT 0 → 40 BPM: it is "not typed yet". The Use button
+  // is disabled then, and anything that needs a number falls back to the session tempo.
+  const typedBpm = Number(beat.bpmText);
+  const bpmTyped = beat.bpmText.trim() !== "" && Number.isFinite(typedBpm) && typedBpm > 0;
+  const bpmValue = clampBpm(bpmTyped ? typedBpm : (snapshot.session.tempo ?? 120));
+  const setBpm = (bpm: number) => patchBeat({ bpmText: formatBpm(clampBpm(bpm)), confirmed: false, confirmedBpm: null });
+  const beatConfirmed = tempoStillConfirmed(snapshot, beat);
 
   const stopPreview = async () => {
     if (!previewing && metronomeBefore.current === null) return;
@@ -381,9 +430,24 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
     await stopPreview();
     const error = await confirmTempo(run, bpmValue, beatClip);
     if (error) { setNote(friendlyError("set_tempo", error)); return; }
-    patchBeat({ confirmed: true });
+    patchBeat({ confirmed: true, confirmedBpm: clampBpm(bpmValue), adopted: false });
     await run("set_transport", { action: "play", position: beatClip.start });
   });
+
+  // Leaving the Beat step by ANY route (New song, a re-entry, a foreign project) ends the
+  // preview; unmounting the page (File › Templates, a posture change) restores the click
+  // and stops the loop too. The saved click lives in a ref the cleanup can still read.
+  useEffect(() => {
+    if (step !== "beat" && (previewing || metronomeBefore.current !== null)) void stopPreview();
+  }, [step]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => {
+    const saved = metronomeBefore.current;
+    if (saved === null) return;
+    metronomeBefore.current = null;
+    const execNow = useStore.getState().exec;
+    void execNow("set_transport", { action: "stop" }).catch(() => undefined)
+      .then(() => execNow("set_metronome", { enabled: saved })).catch(() => undefined);
+  }, []);
 
   const useDrumBeat = () => busyWhile(async () => {
     const dropped = await dropDrumBeat();
@@ -433,10 +497,30 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
     await checkMic();
   });
 
-  const switchVoice = (to: "clean" | "tuned") => busyWhile(async () => {
+  /** The Key/Scale the Lead's AutoTune is set to now, or null (no tuner, or Chromatic). */
+  const currentTunerKey = (): { keyLabel: string; scale: AutoTuneScale } | null => {
+    const tuner = (trackById(useStore.getState().snapshot, ids.leadTrackId)?.plugins ?? []).find((p) => p.type === "moshAutoTune");
+    const keyParam = tuner?.params.find((p) => p.index === 0);
+    const scaleParam = tuner?.params.find((p) => p.index === 1);
+    if (!keyParam || !scaleParam) return null;
+    const scaleLabel = AUTOTUNE_SCALES[Math.round(Math.min(1, Math.max(0, scaleParam.value)) * (AUTOTUNE_SCALES.length - 1))];
+    if (!scaleLabel || scaleLabel === "Chromatic") return null;
+    const keyLabelNow = AUTOTUNE_KEYS[Math.round(Math.min(1, Math.max(0, keyParam.value)) * (AUTOTUNE_KEYS.length - 1))];
+    return keyLabelNow ? { keyLabel: keyLabelNow, scale: scaleLabel } : null;
+  };
+  /** Opening the Tuned card starts from the key the tuner already has, so "Update the key"
+   *  or a Fix never erases it with the page's default. */
+  const openTuned = () => {
+    const now = currentTunerKey();
+    if (now) { setKeyLabel(now.keyLabel); setScale(now.scale); }
+    setTunedOpen(true);
+  };
+
+  const switchVoice = (to: "clean" | "tuned", keep?: { keyLabel: string; scale: AutoTuneScale } | null) => busyWhile(async () => {
     if (!ids.leadTrackId || !ids.takesTrackId) return;
-    const key = to === "tuned" && keyLabel !== KEY_LOOSE
-      ? { keyLabel, scale } : to === "tuned" ? { keyLabel: "C", scale: "Chromatic" as const } : undefined;
+    const key = to !== "tuned" ? undefined
+      : keep ? keep
+        : keyLabel !== KEY_LOOSE ? { keyLabel, scale } : { keyLabel: "C", scale: "Chromatic" as const };
     const r = await switchVocalPreset(io, { leadId: ids.leadTrackId, takesId: ids.takesTrackId, to, key });
     if (!r.ok) { setNote(r.error); return; }
     const keyArgs = key ? setKeyArgs(key.keyLabel, key.scale) : null;
@@ -454,11 +538,18 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
 
   const goReady = () => {
     setStep("ready");
+    setLaughTick((t) => t + 1);
     useStore.getState().bumpCelebrate();
   };
 
   const goBooth = () => busyWhile(async () => {
-    if (useStore.getState().transport.playing && !recording) await run("set_transport", { action: "stop" });
+    // Read the transport NOW: this also runs from the phone hand-off timer, scheduled
+    // before a take may have started from the phone (review finding: a stale `recording`
+    // would stop that take).
+    const t = useStore.getState().transport;
+    if (t.playing && !t.recording && !useStore.getState().snapshot?.transport?.recording) {
+      await run("set_transport", { action: "stop" });
+    }
     useStore.getState().setView("arrange");
     setPosture("booth");
   });
@@ -467,6 +558,11 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
   const pairing = remote?.pairing ?? null;
   const phoneConnected = snapshot.loop?.phoneConnected === true;
   useEffect(() => { if (phoneConnected && !phone.everConnected) patchPhone({ everConnected: true }); }, [phoneConnected]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // The "connected" latch is per visit: coming back to pair again (a dead battery, another
+  // phone) must show a code, not bounce to the Booth on a phone that left long ago.
+  useEffect(() => {
+    if (step === "phone" && !phoneConnected && useStartMemory.getState().phone.everConnected) patchPhone({ everConnected: false });
+  }, [step]);   // eslint-disable-line react-hooks/exhaustive-deps
   const view = pairingView({ requested: pairRequested || !!pairing, pairing, error: pairError,
     everConnected: phone.everConnected, shownAtMs: pairShownAt, nowMs: now });
 
@@ -524,7 +620,7 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
     <div className="start-stage" data-testid="v3-start" data-step={step}>
       <div className="start-col">
         <div className="start-head">
-          <MoshiFace celebrateTick={step === "ready" ? celebrateTick : 0} mood={{ safe: false, busy: moodBusy, listening: false, clarify: false }} />
+          <MoshiFace celebrateTick={laughTick} mood={{ safe: false, busy: moodBusy, listening: false, clarify: false }} />
           <ol className="start-rail" data-testid="v3-start-progress" aria-label="Steps">
             {PIPS.map((pip) => (
               <li key={pip.key} className={`pip ${pips[pip.key]}`} data-testid={`v3-start-pip-${pip.key}`} data-state={pips[pip.key]}
@@ -615,8 +711,8 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
             {beatClip && (
               <div className="start-tempo" data-testid="v3-start-tempo">
                 <p className="start-lead" data-testid="v3-start-tempo-line">
-                  {beat.confirmed
-                    ? <>Your beat is at <b>{formatBpm(bpmValue)}</b> BPM.</>
+                  {beatConfirmed
+                    ? <>Your beat is at <b>{formatBpm(beat.confirmedBpm ?? bpmValue)}</b> BPM.</>
                     : beat.proposal === null
                       ? <>Still <b>{beat.bpmText || formatBpm(Math.round(snapshot.session.tempo ?? 120))}</b> BPM?</>
                       : beat.proposal.source === "session"
@@ -641,8 +737,8 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
                     onClick={() => void togglePreview()}>{previewing ? "■ Stop" : "▶ Hear it with the click"}</button>
                 </div>
                 <div className="start-actions">
-                  {!beat.confirmed ? (
-                    <button type="button" className="btn pri" data-testid="v3-start-bpm-confirm" disabled={disabledAll}
+                  {!beatConfirmed ? (
+                    <button type="button" className="btn pri" data-testid="v3-start-bpm-confirm" disabled={disabledAll || !bpmTyped}
                       onClick={() => void useTempo()}>Use {formatBpm(bpmValue)} BPM</button>
                   ) : (
                     <button type="button" className="btn pri" data-testid="v3-start-beat-next" disabled={disabledAll}
@@ -669,22 +765,29 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
             ) : presets !== null && !presets.clean ? (
               <p className="set-hint">Plain voice: this build has no vocal presets.</p>
             ) : (
+              <>
+              {leadHasOwnEffects && (
+                <p className="set-hint" data-testid="v3-start-own-effects">
+                  Your own effects are on this voice too, so switch sounds in the studio, where you can see the order.
+                </p>
+              )}
               <div className="start-presets" role="radiogroup" aria-label="Vocal sound">
                 <button type="button" role="radio" aria-checked={leadPreset === "clean"} data-testid="v3-start-clean"
-                  className={`start-preset${leadPreset === "clean" ? " sel" : ""}`} disabled={disabledAll}
+                  className={`start-preset${leadPreset === "clean" ? " sel" : ""}`} disabled={disabledAll || leadHasOwnEffects}
                   onClick={() => { if (leadPreset !== "clean") void switchVoice("clean"); }}>
                   <b>Clean Lead</b>
                   <span className="set-hint">Your voice, cleaned up and evened out. A record-ready start.</span>
                 </button>
                 {presets?.tuned && (
                   <button type="button" role="radio" aria-checked={leadPreset === "tuned"} data-testid="v3-start-tuned"
-                    className={`start-preset${leadPreset === "tuned" ? " sel" : ""}`} disabled={disabledAll}
-                    onClick={() => setTunedOpen(true)}>
+                    className={`start-preset${leadPreset === "tuned" ? " sel" : ""}`} disabled={disabledAll || leadHasOwnEffects}
+                    onClick={openTuned}>
                     <b>Tuned Lead</b>
                     <span className="set-hint">The same, plus pitch correction that snaps you to the key.</span>
                   </button>
                 )}
               </div>
+              </>
             )}
             {tunedOpen && (
               <div className="start-key" data-testid="v3-start-key">
@@ -709,11 +812,16 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
                 <button type="button" className="btn ghost sm" onClick={() => setTunedOpen(false)}>Cancel</button>
               </div>
             )}
-            {needsFix && !leadOwnChain && (
+            {needsFix && !leadOwnChain && !leadHasOwnEffects && (
               <div className="start-warn" role="alert" data-testid="v3-start-fix-chain">
                 Your vocal chain needs a quick fix after Mosh restarted.
                 <button type="button" className="btn sm" disabled={disabledAll}
-                  onClick={() => void switchVoice(leadPreset === "clean" ? "clean" : "tuned")}>Fix it</button>
+                  onClick={() => {
+                    // Repair to the preset that is actually there (a doubled Clean chain stays
+                    // Clean) and keep the key the tuner already had.
+                    const target = repairTarget(lead);
+                    void switchVoice(target, target === "tuned" ? currentTunerKey() : null);
+                  }}>Fix it</button>
               </div>
             )}
 

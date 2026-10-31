@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { LoopState, Plugin, Snapshot, Track } from "../types";
 import {
   beatClipOf, beatDone, firstIncomplete, hasOwnChain, loopCoversClip, pickBackingTrack, pickContinueLead,
-  pipStates, PRESET_IDS, readyBlocker, setKeyArgs, songReady, voicePresetOf,
+  pipStates, PRESET_IDS, readyBlocker, repairTarget, setKeyArgs, songReady, tempoStillConfirmed, voicePresetOf,
   type BeatLocal, type MicState, type StartIds,
 } from "./startFlow";
 
@@ -163,6 +163,66 @@ describe("pickContinueLead", () => {
   it("falls back to the Booth's choice when the loop is not engaged", () => {
     const s = snap({ tracks: [track("A"), track("L"), track("T")], loop: loop({ engaged: false }) });
     expect(pickContinueLead(s, "A")?.id).toBe("A");
+  });
+
+  // Review finding (high): Continue made the BEAT the Lead — a Takes lane on the beat,
+  // Clean Lead on the beat, and every Keep landing on the beat track.
+  const idle = loop({ engaged: false, leadTrackId: undefined, takesTrackId: undefined });
+  const beatClip = [clip("beat", 0, 21.8)] as unknown as Track["clips"];
+  it("never picks the Backing track, even when it is selected and first", () => {
+    const s = snap({ tracks: [track("B", { name: "Backing", clips: beatClip }), track("V", { name: "Vocal" })], loop: idle });
+    expect(pickContinueLead(s, "B")?.id).toBe("V");
+  });
+  it("prefers a vocal-named track over the selection", () => {
+    const s = snap({ tracks: [track("K", { name: "Keys" }), track("V", { name: "Lead vox" })], loop: idle });
+    expect(pickContinueLead(s, "K")?.id).toBe("V");
+  });
+  it("never picks a selected track that only holds a dropped beat: asks for a new Vocal instead", () => {
+    const s = snap({ tracks: [track("D", { name: "beat.wav", clips: beatClip })], loop: idle });
+    expect(pickContinueLead(s, "D")).toBeUndefined();
+  });
+  it("still takes an armed or empty plain track", () => {
+    const armed = snap({ tracks: [track("D", { name: "beat.wav", clips: beatClip }), track("M", { name: "Mic 1", armed: true, clips: beatClip })], loop: idle });
+    expect(pickContinueLead(armed, "D")?.id).toBe("M");
+    const empty = snap({ tracks: [track("D", { name: "beat.wav", clips: beatClip }), track("E", { name: "Audio 2" })], loop: idle });
+    expect(pickContinueLead(empty, "D")?.id).toBe("E");
+  });
+});
+
+describe("repairTarget", () => {
+  it("repairs a doubled Clean chain to Clean, never upgrading it to Tuned", () => {
+    expect(repairTarget(track("L", { plugins: [...cleanChain(), ...cleanChain()] }))).toBe("clean");
+  });
+  it("repairs to Tuned only when a Tuned stage is there", () => {
+    expect(repairTarget(track("L", { plugins: [stage(PRESET_IDS.tuned, 1, "eq")] }))).toBe("tuned");
+    expect(repairTarget(track("L", { plugins: [...cleanChain(), ...tunedChain()] }))).toBe("tuned");
+    expect(repairTarget(undefined)).toBe("clean");
+  });
+});
+
+describe("tempoStillConfirmed / beatDone after ⌘Z of the tempo", () => {
+  const backing = (tracks: Track[]) => tracks;
+  const withBeat = (tempo: number, loopEnd = 21.8) => {
+    const s = snap({ tracks: backing([track("B", { clips: [clip("c", 0, 21.8)] as unknown as Track["clips"] }), track("L"), track("T")]) });
+    (s.session as { tempo: number }).tempo = tempo;
+    (s.transport as { loopStart: number; loopEnd: number }).loopStart = 0;
+    (s.transport as { loopStart: number; loopEnd: number }).loopEnd = loopEnd;
+    return s;
+  };
+  it("is done while the session is still at the confirmed tempo", () => {
+    const b = beat({ clipId: "c", confirmed: true, confirmedBpm: 88 });
+    expect(tempoStillConfirmed(withBeat(88), b)).toBe(true);
+    expect(beatDone(withBeat(88), IDS, b)).toBe(true);
+  });
+  it("is NOT done once the tempo was undone back to 120 (review finding)", () => {
+    const b = beat({ clipId: "c", confirmed: true, confirmedBpm: 88 });
+    expect(tempoStillConfirmed(withBeat(120), b)).toBe(false);
+    expect(beatDone(withBeat(120), IDS, b)).toBe(false);
+  });
+  it("an adopted beat (continue mode) is done as found, without this page's loop range", () => {
+    const b = beat({ clipId: "c", confirmed: true, adopted: true, confirmedBpm: 120 });
+    expect(beatDone(withBeat(120, 8), IDS, b)).toBe(true);
+    expect(beatDone(withBeat(120, 8), IDS, { ...b, adopted: false })).toBe(false);
   });
 });
 

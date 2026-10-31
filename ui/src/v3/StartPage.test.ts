@@ -42,6 +42,8 @@ interface EngineOpts {
   blockReason?: string;
   /** Return an error string to refuse a call. */
   refuse?: (call: Call) => string | null;
+  /** Return a promise to hold a call (logged at once) until the test settles it. */
+  hold?: (call: Call) => Promise<void> | null;
 }
 
 interface FakeState {
@@ -232,6 +234,8 @@ function makeEngine(opts: EngineOpts = {}) {
   const exec = vi.fn(async (command: string, args: Record<string, unknown> = {}): Promise<CommandResult> => {
     const call = { command, args };
     calls.push(call);
+    const held = opts.hold?.(call);
+    if (held) await held;
     const refused = opts.refuse?.(call);
     if (refused) return err(command, refused);
     return handle(command, args);
@@ -482,6 +486,24 @@ describe("v3 Start page (StartPage.tsx) against a fake engine", () => {
       expect(engine.byName("Backing")!.clips).toHaveLength(1);
       expect(engine.byName("Vocal")!.clips).toHaveLength(0);
     });
+
+    // Review fix 1: a drop is not a button, so `busy` never gated it.
+    it("a second drop while the first import is still in flight is refused: one import, one beat", async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      await boot({ hold: (call) => (call.command === "import_clip_data" ? gate : null) });
+      await newSong();
+      const mark = engine.calls.length;
+      await drop(fileOf("RIFF-one", "one.wav", "audio/wav"));
+      expect(commands(mark)).toEqual(["import_clip_data"]);   // in flight, held by the engine
+      await drop(fileOf("RIFF-two", "two.wav", "audio/wav"));
+      expect(commands(mark), "no second import while the first is in flight").toEqual(["import_clip_data"]);
+      expect(must("v3-start-note").textContent).toContain("One beat at a time");
+      await act(async () => { release(); });
+      await settle();
+      expect(argsOf("import_clip_data", mark).map((a) => a.name)).toEqual(["one.wav"]);
+      expect(engine.byName("Backing")!.clips.map((c) => c.name)).toEqual(["one.wav"]);
+    });
   });
 
   // (8)
@@ -680,5 +702,255 @@ describe("v3 Start page (StartPage.tsx) against a fake engine", () => {
     expect(stepOf()).toBe("welcome");
     expect(must("v3-start-note").textContent).toContain("The song changed");
     expect(useStartMemory.getState().ids).toEqual({ backingTrackId: null, leadTrackId: null, takesTrackId: null });
+  });
+
+  // ── Regressions for the review findings fixed after 0689cfcd ───────────────────────────
+  describe("review fixes", () => {
+    const audioTrack = (id: string, name: string, over: Partial<Track> = {}): Track => ({
+      id, index: 0, name, type: "audio", volumeDb: 0, pan: 0, mute: false, solo: false, armed: false,
+      monitor: "automatic", clips: [], plugins: [], ...over,
+    }) as unknown as Track;
+    const waveClip = (id: string, name: string) => ({ id, name, type: "wave", start: 0, length: BEAT_SECONDS, offset: 0 });
+    /** Leave the page and come back (the Booth's "← Start", a posture switch). */
+    const remount = async () => {
+      act(() => root.unmount());
+      root = createRoot(host);
+      await act(async () => { root.render(React.createElement(Host)); });
+      await settle();
+    };
+    const engineTrack = (id: string) => engine.state.tracks.find((t) => t.id === id)!;
+    const setPlugins = async (trackId: string, plugins: Plugin[]) => {
+      await act(async () => {
+        const t = engineTrack(trackId);
+        t.plugins = plugins;
+        t.plugins.forEach((p, i) => { p.index = i; });
+        await engine.refresh();
+      });
+      await settle();
+    };
+    const fixButton = () => {
+      const b = host.querySelector<HTMLButtonElement>('[data-testid="v3-start-fix-chain"] button');
+      if (!b) throw new Error("no Fix it button");
+      return b;
+    };
+    const typeInto = async (id: string, value: string) => {
+      await act(async () => {
+        const input = must<HTMLInputElement>(id);
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await settle();
+    };
+    const chooseFile = async (path: string) => {
+      vi.mocked(pickFiles).mockResolvedValue({ ok: true, files: [path] });
+      await click("v3-start-choose");
+    };
+
+    // (2) the singer's beat is on Backing; Continue adopts it; a different beat REPLACES it.
+    it("Continue on a song whose Backing holds a beat: 'Choose a different beat…' imports first, then removes the old clip", async () => {
+      await boot({ tracks: [audioTrack("1", "Backing", { clips: [waveClip("old-beat", "old.wav")] as Track["clips"] })] });
+      await click("v3-start-continue");
+      // Continue adopted the beat as done; a tempo change elsewhere (⌘Z in the studio) and
+      // a return to the page bring the singer back to the Beat step with that beat in it.
+      await act(async () => { engine.state.tempo = 100; await engine.refresh(); });
+      await remount();
+      expect(stepOf()).toBe("beat");
+      expect(must("v3-start-choose").textContent).toBe("Choose a different beat…");
+      const mark = engine.calls.length;
+      await chooseFile("/Users/me/beats/new.wav");
+      expect(commands(mark)).toEqual(["import_clip", "remove_clip", "detect_clip_bpm"]);
+      expect(argsOf("remove_clip", mark)).toEqual([{ clipId: "old-beat" }]);
+      expect(engine.byName("Backing")!.clips.map((c) => c.name)).toEqual(["new.wav"]);
+    });
+
+    // (2b) the same replacement when the page never imported or adopted anything: it adopts
+    // a Booth-engaged song on re-entry, and the beat on Backing came from the studio.
+    it("re-entering on a Booth-engaged song: a chosen beat replaces the one already on Backing", async () => {
+      await boot({ tracks: [
+        audioTrack("1", "Backing", { clips: [waveClip("studio-beat", "studio.wav")] as Track["clips"] }),
+        audioTrack("2", "Vocal"),
+        audioTrack("3", "Vocal · Takes", { armed: true }),
+      ] });
+      engine.state.loop = { engaged: true, leadTrackId: "2", takesTrackId: "3" };
+      await act(async () => { await engine.refresh(); });
+      await act(async () => { useStartMemory.setState({ visited: true }); });
+      await remount();
+      expect(stepOf()).toBe("beat");
+      expect(useStartMemory.getState().beat.clipId).toBeNull();
+      const mark = engine.calls.length;
+      await chooseFile("/Users/me/beats/new.wav");
+      expect(commands(mark)).toEqual(["import_clip", "remove_clip", "detect_clip_bpm"]);
+      expect(argsOf("remove_clip", mark)).toEqual([{ clipId: "studio-beat" }]);
+      expect(engine.byName("Backing")!.clips.map((c) => c.name)).toEqual(["new.wav"]);
+    });
+
+    // (3)
+    it("a refused import with a beat already in place removes nothing and keeps the old beat", async () => {
+      let broken = false;
+      await boot({ refuse: (call) => (broken && call.command === "import_clip" ? "invalid audio file" : null) });
+      await newSong();
+      await chooseFile("/Users/me/beats/good.wav");
+      const good = engine.byName("Backing")!.clips.map((c) => c.id);
+      expect(good).toHaveLength(1);
+      broken = true;
+      const mark = engine.calls.length;
+      await chooseFile("/Users/me/beats/broken.wav");
+      expect(commands(mark)).toEqual(["import_clip"]);
+      expect(commands(mark)).not.toContain("remove_clip");
+      expect(engine.byName("Backing")!.clips.map((c) => c.id)).toEqual(good);
+      expect(must("v3-start-note").textContent).toContain("invalid audio file");
+    });
+
+    // (4)
+    it("a blank BPM field disables Use (never 'Use 40 BPM')", async () => {
+      await boot();
+      await newSong();
+      await chooseFile("/Users/me/beats/late night.wav");
+      expect(must<HTMLButtonElement>("v3-start-bpm-confirm").disabled).toBe(false);
+      await typeInto("v3-start-bpm", "");
+      expect(must<HTMLInputElement>("v3-start-bpm").value).toBe("");
+      const confirm = must<HTMLButtonElement>("v3-start-bpm-confirm");
+      expect(confirm.disabled).toBe(true);
+      expect(confirm.textContent).not.toBe("Use 40 BPM");
+    });
+
+    // (5)
+    it("after Use 88 BPM, an engine-side tempo change back to 120 (⌘Z) brings Use back and un-does the step", async () => {
+      await boot();
+      await newSong();
+      await chooseFile("/Users/me/beats/late night.wav");
+      await click("v3-start-bpm-confirm");
+      expect(el("v3-start-beat-next")).not.toBeNull();
+      await act(async () => { engine.state.tempo = 120; await engine.refresh(); });
+      await settle();
+      expect(el("v3-start-bpm-confirm")).not.toBeNull();
+      expect(must("v3-start-bpm-confirm").textContent).toBe("Use 88 BPM");
+      expect(el("v3-start-beat-next")).toBeNull();
+    });
+
+    // (6)
+    it("Fix it on a lane with TWO Clean Lead groups repairs to Clean, not Tuned", async () => {
+      await boot();
+      const { lead } = await toVoice();
+      await setPlugins(lead.id, [...presetStages(CLEAN_FILE), ...presetStages(CLEAN_FILE)]);
+      expect(el("v3-start-fix-chain")).not.toBeNull();
+      const mark = engine.calls.length;
+      await act(async () => { fixButton().click(); });
+      await settle();
+      const files = argsOf("apply_track_preset", mark).map((a) => a.file);
+      expect(files.length).toBeGreaterThan(0);
+      expect(files.every((f) => f === CLEAN_FILE), `applied ${JSON.stringify(files)}`).toBe(true);
+      expect(engine.byName("Vocal")!.plugins!.filter((p) => p.preset?.id === "mosh.clean-lead")).toHaveLength(2);
+    });
+
+    // (7)
+    it("Fix it on a stacked TUNED lane keeps the key the AutoTune already had (A minor)", async () => {
+      await boot();
+      const { lead } = await toVoice();
+      const tuner = (): Plugin => ({
+        ...stage("mosh.tuned-lead", "moshAutoTune", 0),
+        params: [{ index: 0, name: "Key", value: 9 / 11 }, { index: 1, name: "Scale", value: 2 / 2 }],
+      });
+      const group = (): Plugin[] => [tuner(), stage("mosh.tuned-lead", "eq", 1), stage("mosh.tuned-lead", "compressor", 2)];
+      await setPlugins(lead.id, [...group(), ...group()]);
+      expect(el("v3-start-fix-chain")).not.toBeNull();
+      const mark = engine.calls.length;
+      await act(async () => { fixButton().click(); });
+      await settle();
+      expect(argsOf("apply_track_preset", mark).map((a) => a.file)).toEqual([TUNED_FILE, TUNED_FILE]);
+      const params = argsOf("set_plugin_param", mark).map((a) => [a.paramIndex, a.value]);
+      expect(params).toEqual([[0, 9 / 11], [1, 1], [0, 9 / 11], [1, 1]]);
+      expect(argsOf("set_key", mark)).toEqual([{ tonic: "A", mode: "minor" }]);
+    });
+
+    // (8)
+    it("a bundled preset plus the producer's own effect: says so and disables both preset cards", async () => {
+      await boot();
+      const { lead } = await toVoice();
+      const gate: Plugin = { index: 0, name: "Gate", type: "gate", enabled: true, external: false, isInstrument: false, params: [] };
+      await setPlugins(lead.id, [...(engineTrack(lead.id).plugins ?? []), gate]);
+      expect(el("v3-start-own-effects")).not.toBeNull();
+      expect(must<HTMLButtonElement>("v3-start-clean").disabled).toBe(true);
+      expect(must<HTMLButtonElement>("v3-start-tuned").disabled).toBe(true);
+    });
+
+    // (9)
+    it("the page's face laughs once on I'm ready, never on mount or on a re-entry that lands on Ready", async () => {
+      useStore.setState({ celebrateTick: 3 });
+      await boot();
+      const laughs = () => Number(must("v3-moshi-canvas").dataset.laughs ?? 0);
+      expect(laughs(), "mount").toBe(0);
+      await toVoice();
+      expect(laughs()).toBe(0);
+      await click("v3-start-ready");
+      expect(laughs(), "I'm ready").toBe(1);
+      expect(useStore.getState().celebrateTick).toBeGreaterThan(0);
+      await remount();
+      expect(stepOf()).toBe("ready");
+      expect(laughs(), "re-entry on Ready").toBe(0);
+    });
+
+    // (10)
+    it("back on the Phone step after a phone that has since left: shows a code, not 'connected'", async () => {
+      await boot();
+      await toVoice();
+      await click("v3-start-ready");
+      await act(async () => { useStartMemory.setState((m) => ({ phone: { ...m.phone, everConnected: true } })); });
+      expect(engine.snapshot().loop?.phoneConnected).toBe(false);
+      await click("v3-start-add-phone");
+      expect(stepOf()).toBe("phone");
+      expect(el("v3-start-show-code")).not.toBeNull();
+      expect(useV3.getState().posture).toBe("start");
+    });
+
+    // (11)
+    describe("a running preview", () => {
+      async function previewing() {
+        await boot();
+        await newSong();
+        await chooseFile("/Users/me/beats/late night.wav");
+        expect(engine.state.metronome).toBe(false);
+        await click("v3-start-preview");
+        expect(must("v3-start-preview").getAttribute("aria-pressed")).toBe("true");
+        expect(engine.state.metronome).toBe(true);
+        expect(engine.state.transport.playing).toBe(true);
+      }
+
+      it("is stopped, and the click restored, when the page unmounts", async () => {
+        await previewing();
+        const mark = engine.calls.length;
+        act(() => root.unmount());
+        await settle();
+        expect(engine.calls.slice(mark)).toEqual([
+          { command: "set_transport", args: { action: "stop" } },
+          { command: "set_metronome", args: { enabled: false } },
+        ]);
+        expect(engine.state.metronome).toBe(false);
+        expect(engine.state.transport.playing).toBe(false);
+      });
+
+      it("is stopped when the singer leaves the Beat step by the header's New song", async () => {
+        await previewing();
+        const mark = engine.calls.length;
+        await click("v3-start-over");
+        expect(stepOf()).toBe("welcome");
+        expect(engine.calls.slice(mark)).toContainEqual({ command: "set_transport", args: { action: "stop" } });
+        expect(engine.calls.slice(mark)).toContainEqual({ command: "set_metronome", args: { enabled: false } });
+        expect(engine.state.metronome).toBe(false);
+        expect(engine.state.transport.playing).toBe(false);
+      });
+    });
+
+    // (12)
+    it("a microphone still undecided after the request: no new_project, and the note asks to press again", async () => {
+      vi.mocked(microphonePermissionStatus).mockResolvedValue({ status: "not-determined" });
+      vi.mocked(requestMicrophonePermission).mockResolvedValue({ status: "not-determined" });
+      await boot();
+      await click("v3-start-new");
+      expect(requestMicrophonePermission).toHaveBeenCalled();
+      expect(commands()).not.toContain("new_project");
+      expect(stepOf()).toBe("welcome");
+      expect(must("v3-start-note").textContent).toContain("press the button again");
+    });
   });
 });

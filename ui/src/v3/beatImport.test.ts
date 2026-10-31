@@ -123,12 +123,19 @@ describe("importBeat", () => {
     expect(f.calls).toEqual([{ command: "import_clip_data", args: { name: "a.wav", dataBase64: "QUJD", trackId: "B", start: 0 } }]);
   });
 
-  it("removes the previous beat first, so a second drop replaces it", async () => {
+  it("imports the new beat FIRST, then removes the previous one, so a second drop replaces it", async () => {
     const f = fakeExec({ import_clip: imported({ clipId: "c2", trackId: "B" }) });
     const r = await importBeat(f.exec, { kind: "path", file: "/b.wav" }, "B", "c1");
-    expect(r.ok).toBe(true);
-    expect(f.calls[0]).toEqual({ command: "remove_clip", args: { clipId: "c1" } });
-    expect(f.commands()).toEqual(["remove_clip", "import_clip"]);
+    expect(r).toEqual({ ok: true, clipId: "c2", error: null });
+    expect(f.commands()).toEqual(["import_clip", "remove_clip"]);
+    expect(f.calls[1]).toEqual({ command: "remove_clip", args: { clipId: "c1" } });
+  });
+
+  it("keeps the old beat when the new file is refused (review finding: the old order lost it)", async () => {
+    const f = fakeExec({ import_clip: { ok: false, command: "import_clip", error: "invalid audio file" } });
+    expect(await importBeat(f.exec, { kind: "path", file: "/corrupt.mp3" }, "B", "c1"))
+      .toEqual({ ok: false, clipId: null, error: "invalid audio file" });
+    expect(f.commands()).toEqual(["import_clip"]);   // no remove_clip: the old beat stays
   });
 
   it("tolerates a previous beat that is already gone", async () => {
@@ -137,21 +144,24 @@ describe("importBeat", () => {
       import_clip: imported({ clipId: "c2", trackId: "B" }),
     });
     expect(await importBeat(f.exec, { kind: "path", file: "/b.wav" }, "B", "c1")).toEqual({ ok: true, clipId: "c2", error: null });
-    expect(f.commands()).toEqual(["remove_clip", "import_clip"]);
+    expect(f.commands()).toEqual(["import_clip", "remove_clip"]);
   });
 
-  it("aborts with no import when the previous beat cannot be removed", async () => {
-    const f = fakeExec({ remove_clip: { ok: false, command: "remove_clip", error: "clip is locked" } });
-    expect(await importBeat(f.exec, { kind: "path", file: "/b.wav" }, "B", "c1"))
-      .toEqual({ ok: false, clipId: null, error: "clip is locked" });
-    expect(f.commands()).toEqual(["remove_clip"]);
+  it("keeps the new beat and says so when the old one cannot be removed", async () => {
+    const f = fakeExec({
+      import_clip: imported({ clipId: "c2", trackId: "B" }),
+      remove_clip: { ok: false, command: "remove_clip", error: "clip is locked" },
+    });
+    const r = await importBeat(f.exec, { kind: "path", file: "/b.wav" }, "B", "c1");
+    expect(r.ok).toBe(true);
+    expect(r.clipId).toBe("c2");
+    expect(r.error).toMatch(/old one is still there: clip is locked/);
   });
 
-  it("aborts with a default message when the remove gets no answer", async () => {
-    const f = fakeExec({ remove_clip: null });
-    expect(await importBeat(f.exec, { kind: "path", file: "/b.wav" }, "B", "c1"))
-      .toEqual({ ok: false, clipId: null, error: "Couldn't replace the previous beat" });
-    expect(f.commands()).toEqual(["remove_clip"]);
+  it("never removes the clip it just imported", async () => {
+    const f = fakeExec({ import_clip: imported({ clipId: "c1", trackId: "B" }) });
+    await importBeat(f.exec, { kind: "path", file: "/b.wav" }, "B", "c1");
+    expect(f.commands()).toEqual(["import_clip"]);
   });
 
   it("undoes a beat that landed on another track and reports it", async () => {

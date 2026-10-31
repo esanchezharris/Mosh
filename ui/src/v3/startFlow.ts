@@ -1,6 +1,6 @@
 import type { LoopState, Plugin, Snapshot, Track } from "../types";
 import type { MicrophonePermissionStatus } from "../bridge";
-import { pickLeadTrack } from "./BoothView";
+import { isLeadCandidate, pickLeadTrack } from "./BoothView";
 
 // The Start page's step machine, React-free so every gate is unit-tested on its own.
 //
@@ -37,6 +37,12 @@ export interface BeatLocal {
   /** The singer pressed "Use N BPM" (or continue mode found a beat already in place). */
   confirmed: boolean;
   skipped: boolean;
+  /** The tempo "Use N BPM" set. While it is known, the beat is only done if the session is
+   *  still at it: ⌘Z of the tempo must bring the Use button back, not leave a stale ✓. */
+  confirmedBpm?: number | null;
+  /** A beat that was already on Backing when the singer pressed Continue: done as found,
+   *  without requiring this page's loop range. */
+  adopted?: boolean;
 }
 
 export interface PhoneLocal {
@@ -84,11 +90,38 @@ export function pickBackingTrack(tracks: readonly Track[], loop: LoopState | nul
     && t.id !== loop?.leadTrackId && t.id !== loop?.takesTrackId);
 }
 
-/** Which Lead continue mode sets up: the loop's own, else the Booth's choice. */
+const VOCAL_NAME = /\b(vocal|vocals|vox|voice|lead|rap|verse)\b/i;
+
+/** Which Lead continue mode sets up: the loop's own; else a vocal-named track; else an
+ *  armed or EMPTY candidate. Never the beat: not the Backing track, and not a track that
+ *  only holds clips with nothing marking it as a voice (a dropped beat is usually also the
+ *  SELECTED track, so the Booth's "selected first" rule would pick it). Undefined means
+ *  "make a Vocal track". */
 export function pickContinueLead(snapshot: Snapshot, selectedTrackId: string | null | undefined): Track | undefined {
   const loop = snapshot.loop;
-  return trackById(snapshot, loop?.engaged ? loop.leadTrackId : null)
-    ?? pickLeadTrack(snapshot.tracks, selectedTrackId, loop);
+  const engaged = trackById(snapshot, loop?.engaged ? loop.leadTrackId : null);
+  if (engaged) return engaged;
+  const backing = pickBackingTrack(snapshot.tracks, loop);
+  const candidates = snapshot.tracks.filter((t) => t.id !== backing?.id
+    && t.name.trim().toLowerCase() !== "backing" && isLeadCandidate(t, loop));
+  const vocal = candidates.find((t) => VOCAL_NAME.test(t.name));
+  if (vocal) return vocal;
+  const safe = candidates.filter((t) => t.armed || t.clips.length === 0);
+  return pickLeadTrack(safe, selectedTrackId, loop);
+}
+
+/** Which preset a broken chain should be repaired TO: Tuned only when the lane carries a
+ *  Tuned stage; a doubled Clean chain is repaired to Clean, never "upgraded". */
+export function repairTarget(track: Track | undefined): "clean" | "tuned" {
+  return (track?.plugins ?? []).some((p) => p.preset?.id === PRESET_IDS.tuned) ? "tuned" : "clean";
+}
+
+/** The beat's tempo is still what the singer confirmed (or no tempo was recorded). */
+export function tempoStillConfirmed(snapshot: Snapshot | null | undefined, beat: BeatLocal): boolean {
+  if (!beat.confirmed) return false;
+  if (beat.confirmedBpm == null) return true;
+  const tempo = snapshot?.session.tempo;
+  return typeof tempo === "number" && Math.abs(tempo - beat.confirmedBpm) < 0.05;
 }
 
 /** The beat clip the Beat step is about: the one this flow imported if it still exists,
@@ -119,7 +152,8 @@ export function beatDone(snapshot: Snapshot | null | undefined, ids: StartIds, b
   if (beat.skipped) return true;
   if (snapshot?.tracks.some((t) => t.type === "drum" && t.clips.length > 0)) return true;
   const clip = beatClipOf(snapshot, ids, beat);
-  return !!clip && beat.confirmed && loopCoversClip(snapshot, clip);
+  if (!clip || !tempoStillConfirmed(snapshot, beat)) return false;
+  return beat.adopted === true || loopCoversClip(snapshot, clip);
 }
 
 export type MicState = MicrophonePermissionStatus | "unknown";

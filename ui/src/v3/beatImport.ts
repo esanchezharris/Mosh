@@ -81,8 +81,11 @@ export interface ImportedBeat {
   error: string | null;
 }
 
-/** Put a beat on the Backing track at bar 1. If this flow already put a beat there, it is
- *  removed first, so a second drop REPLACES the first instead of stacking on top of it.
+/** Put a beat on the Backing track at bar 1, REPLACING the beat this flow put there before.
+ *
+ *  Order matters: the new file is imported and checked FIRST, and only then is the previous
+ *  beat removed. A corrupt or unsupported file (refused by the engine after the extension
+ *  check passed) therefore leaves the singer's old beat exactly where it was.
  *
  *  The engine falls back to the first audio track when a trackId does not resolve, with no
  *  error (MoshOps.Clips.cpp importWaveFileToTrack). The result names the track it used, so
@@ -90,12 +93,6 @@ export interface ImportedBeat {
  *  vocal. */
 export async function importBeat(exec: Exec, source: BeatSource, backingTrackId: string,
   previousClipId: string | null): Promise<ImportedBeat> {
-  if (previousClipId) {
-    const removed = await exec("remove_clip", { clipId: previousClipId });
-    if (!removed?.ok && removed?.error !== "no clip") {
-      return { ok: false, clipId: null, error: removed?.error ?? "Couldn't replace the previous beat" };
-    }
-  }
   const result = source.kind === "path"
     ? await exec("import_clip", { file: source.file, trackId: backingTrackId, startSeconds: 0 })
     : await exec("import_clip_data", { name: source.name, dataBase64: source.dataBase64, trackId: backingTrackId, start: 0 });
@@ -107,7 +104,14 @@ export async function importBeat(exec: Exec, source: BeatSource, backingTrackId:
     await exec("undo", {});
     return { ok: false, clipId: null, error: "The Backing track went missing, so the beat wasn't added. Start the song again." };
   }
-  return { ok: !!clipId, clipId, error: clipId ? null : "The engine didn't name the new clip" };
+  if (!clipId) return { ok: false, clipId: null, error: "The engine didn't name the new clip" };
+  if (previousClipId && previousClipId !== clipId) {
+    const removed = await exec("remove_clip", { clipId: previousClipId });
+    if (!removed?.ok && removed?.error !== "no clip") {
+      return { ok: true, clipId, error: `The new beat is in, but the old one is still there: ${removed?.error ?? "remove_clip failed"}` };
+    }
+  }
+  return { ok: true, clipId, error: null };
 }
 
 /** detect_clip_bpm, read-only. Null when the engine can't hear a pulse. */

@@ -246,9 +246,13 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
                   data-testid={pad.testId} disabled={!loopAvailable(pad.action, context)}
                   onClick={() => {
                     const target = loopActionTarget(pad.action, context);
+                    // Keep on a take that is ALREADY kept (transport stopped) only resumes
+                    // recording (cmdLoopKeep): not a reward. Decide from the snapshot first.
+                    const keepsSomething = pad.action === "keep"
+                      && (recording || !loop?.contributions.find((part) => part.id === target)?.keeper);
                     void run(pad.command, target ? { targetId: target } : {}).then((result) => {
                       // Tier 1: a landed Keep is the reward moment -- the splat laughs once.
-                      if (pad.action === "keep" && result?.ok) useStore.getState().bumpCelebrate();
+                      if (keepsSomething && result?.ok) useStore.getState().bumpCelebrate();
                     });
                   }}>
                   {pad.action === "hear"
