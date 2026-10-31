@@ -284,6 +284,7 @@ if (MOSH_BUILD_APP)
         src/app/selftest/MultiplayerAudioRefSelfTest.cpp
         src/app/selftest/VocalPresetSelfTest.cpp
         src/app/selftest/TunedLeadPresetSelfTest.cpp
+        src/app/selftest/StartFlowSelfTest.cpp
         src/app/selftest/PluginPanelsSelfTest.cpp
         src/multiplayer/AudioRefValidation.cpp
         src/webview/WebBridge.cpp

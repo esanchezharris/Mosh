@@ -1,5 +1,6 @@
 #include "SelfTest.h"
 #include "selftest/MultiplayerAudioRefSelfTest.h"
+#include "selftest/StartFlowSelfTest.h"
 #include "selftest/TunedLeadPresetSelfTest.h"
 #include "selftest/VocalPresetSelfTest.h"
 #include "plugins/hosting/SidechainBuses.h"
@@ -19213,6 +19214,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // "Mosh Tuned Lead v0": Mosh AutoTune as a preset stage. Straight after, in the same
     // clean project, so it is equally unable to shift ids earlier sections assert on.
     runTunedLeadPresetSelfTest (
+        eng, ops, { [] (const String& name) { section (name); },
+                    [] (bool condition, const String& message) { check (condition, message); },
+                    [&eng] (const String& leaf) { return selftestTempPath (eng, leaf); } });
+
+    // The V3 Start page's recipe (StartPage.tsx / vocalSetup.ts) and a cold relaunch of its
+    // Tuned Lead project. Opens its own vocal-template project, so it runs here, after the
+    // preset sections, equally unable to shift ids earlier sections assert on.
+    runStartFlowSelfTest (
         eng, ops, { [] (const String& name) { section (name); },
                     [] (bool condition, const String& message) { check (condition, message); },
                     [&eng] (const String& leaf) { return selftestTempPath (eng, leaf); } });
