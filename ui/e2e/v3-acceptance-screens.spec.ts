@@ -18,7 +18,7 @@ async function bootColorway(page: Page, colorway: string): Promise<void> {
   await page.addInitScript((cw) => {
     window.localStorage.clear();
     window.localStorage.setItem("mosh.settings", JSON.stringify({
-      version: 2, template: null, values: { colorway: cw }, keyOverrides: {},
+      version: 2, template: null, values: { colorway: cw, startOnLaunch: false }, keyOverrides: {},
     }));
   }, colorway);
   await page.goto("/?shell=v3");

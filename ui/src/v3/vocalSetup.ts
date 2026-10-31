@@ -119,3 +119,89 @@ export async function setInputMonitor(
   }
   return { ok: !!result?.ok, deferred: false, reason: result?.ok ? null : (result?.error ?? "set_input_monitor failed") };
 }
+
+// ── Switching the voice: Clean Lead ↔ Tuned Lead (the Start page's one-tap choice) ──────
+
+/** The preset ids the bundled chains tag their stages with. */
+export const VOCAL_PRESET_IDS = ["mosh.clean-lead", "mosh.tuned-lead"] as const;
+
+/** Indices of every stage a bundled vocal preset put on `track`, highest first, so
+ *  removing them one by one never shifts an index still to be removed. */
+export function vocalPresetStageIndices(track: Track | undefined): number[] {
+  return (track?.plugins ?? [])
+    .filter((p) => !!p.preset && (VOCAL_PRESET_IDS as readonly string[]).includes(p.preset.id))
+    .map((p) => p.index)
+    .sort((a, b) => b - a);
+}
+
+export interface VoiceKey {
+  /** An AutoTune Key label ("C", "C#/Db", …). */
+  keyLabel: string;
+  /** "Chromatic" keeps it loose: no key written anywhere. */
+  scale: "Chromatic" | "Major" | "Minor";
+}
+
+const AUTOTUNE_KEY_LABELS = ["C", "C#/Db", "D", "D#/Eb", "E", "F", "F#/Gb", "G", "G#/Ab", "A", "A#/Bb", "B"];
+const AUTOTUNE_SCALE_LABELS = ["Chromatic", "Major", "Minor"];
+
+const norm = (index: number, count: number) => (count < 2 ? 0 : Math.min(count - 1, Math.max(0, index)) / (count - 1));
+
+/** Replace whatever bundled vocal chain Lead and Takes carry with `to`, as ONE undo step:
+ *  inside batch_begin/batch_end, every bundled-preset stage on each lane is removed
+ *  (highest index first: this also clears a stacked or half-lost chain), the chosen preset
+ *  is applied, and for Tuned Lead the AutoTune Key and Scale are set.
+ *
+ *  Failure rule: an ok:false inside the batch ends it and undoes it ONLY when something in
+ *  it actually landed. A legacy batch is a lazy transaction, so undoing an empty one would
+ *  revert the singer's PREVIOUS edit instead (the rule beats.ts dropChords follows).
+ *
+ *  `io.run` must refresh the snapshot after each ok command: the AutoTune stage's index is
+ *  read back after it is applied. */
+export async function switchVocalPreset(io: VocalSetupIO, opts: {
+  leadId: string;
+  takesId: string;
+  to: "clean" | "tuned";
+  key?: VoiceKey;
+}): Promise<{ ok: boolean; error: string | null }> {
+  const stem = opts.to === "tuned" ? TUNED_VOCAL_CHAIN : DEFAULT_VOCAL_CHAIN;
+  const file = await findPresetFile(io, stem);
+  if (!file) return { ok: false, error: `This build doesn't include ${trackPresetLabel(stem)}.` };
+
+  const begun = await io.run("batch_begin", { name: opts.to === "tuned" ? "Tuned Lead" : "Clean Lead" });
+  if (!begun?.ok) return { ok: false, error: "Moshi is in the middle of something. Try again in a moment." };
+
+  let landed = false;
+  const fail = async (error: string) => {
+    await io.run("batch_end", {});
+    if (landed) await io.run("undo", {});
+    return { ok: false, error };
+  };
+
+  for (const laneId of [opts.leadId, opts.takesId]) {
+    const lane = io.snapshot()?.tracks.find((t) => t.id === laneId);
+    if (!lane) return fail("The vocal track went missing. Start the song again.");
+    for (const index of vocalPresetStageIndices(lane)) {
+      const removed = await io.run("remove_plugin", { trackId: laneId, index });
+      if (!removed?.ok) return fail(removed?.error ?? "Couldn't remove the old vocal chain");
+      landed = true;
+    }
+    const applied = await io.run("apply_track_preset", { trackId: laneId, file });
+    if (!applied?.ok) return fail(applied?.error ?? "Couldn't add the vocal chain");
+    landed = true;
+
+    if (opts.to === "tuned" && opts.key && opts.key.scale !== "Chromatic") {
+      const tuner = io.snapshot()?.tracks.find((t) => t.id === laneId)?.plugins?.find((p) => p.type === "moshAutoTune");
+      if (!tuner) return fail("The tuner didn't load. Try again.");
+      const keyIdx = AUTOTUNE_KEY_LABELS.indexOf(opts.key.keyLabel);
+      const scaleIdx = AUTOTUNE_SCALE_LABELS.indexOf(opts.key.scale);
+      for (const [paramIndex, value] of [[0, norm(keyIdx, 12)], [1, norm(scaleIdx, 3)]] as const) {
+        const set = await io.run("set_plugin_param", { trackId: laneId, index: tuner.index, paramIndex, value });
+        if (!set?.ok) return fail(set?.error ?? "Couldn't set the key");
+      }
+    }
+  }
+
+  const ended = await io.run("batch_end", {});
+  if (!ended?.ok) return { ok: false, error: ended?.error ?? "Couldn't finish switching the voice" };
+  return { ok: true, error: null };
+}

@@ -88,6 +88,11 @@ export function FileMenu({ title }: { title: string }) {
               <span>Full Studio</span>
               {posture === "studio" ? <span className="check">✓</span> : null}
             </button>
+            <button type="button" className="mi" role="menuitem" data-testid="v3-template-start"
+              onClick={() => { useStore.getState().setView("arrange"); setPosture("start"); close(); }}>
+              <span>Start page</span>
+              {posture === "start" ? <span className="check">✓</span> : null}
+            </button>
             <div className="mi muted"><span>Mix Focus</span><span className="soon">soon</span></div>
           </div>
         </div>

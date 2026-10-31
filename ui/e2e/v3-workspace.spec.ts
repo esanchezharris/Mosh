@@ -6,7 +6,7 @@ for (const width of [900, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.addInitScript(() => {
       window.localStorage.setItem("mosh.settings", JSON.stringify({
-        version: 2, template: null, values: { theme: "light", colorway: "lime" }, keyOverrides: {},
+        version: 2, template: null, values: { theme: "light", colorway: "lime", startOnLaunch: false }, keyOverrides: {},
       }));
     });
     await page.goto("/?shell=v3");

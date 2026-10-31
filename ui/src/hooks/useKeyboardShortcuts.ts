@@ -105,6 +105,12 @@ function forwardNativeEditAction(action: ActionId): boolean {
   return true;
 }
 
+/** Clip and selection edits, inert while the V3 Start page covers the arrangement. */
+const START_PAGE_BLOCKED = new Set<string>([
+  EA.DELETE, EA.COPY, EA.CUT, EA.PASTE, EA.DUPLICATE, EA.GROUP, EA.NUDGE_LEFT, EA.NUDGE_RIGHT,
+  EA.TOOL_MOVE, EA.TOOL_SPLIT, EA.TOOL_RANGE, EA.SPLIT, EA.GRID_NARROW, EA.GRID_WIDEN,
+]);
+
 export function useKeyboardShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -135,6 +141,10 @@ export function useKeyboardShortcuts() {
       // handler, so arrangement-level keyboard behavior is unchanged.
       if (nativeButtonActivation(e.target, e) || nativeButtonActivation(keyboardOwner, e)) return;
       if (nativeMenuPresent() && NATIVE_MENU_ACTIONS.has(action)) return;
+
+      // The V3 Start page hides the arrangement: a stray Delete or ⌘D there would edit
+      // clips the singer cannot see. Transport, undo, save and record keep working.
+      if (shell === "v3" && useV3.getState().posture === "start" && START_PAGE_BLOCKED.has(action)) return;
 
       const s = useStore.getState();
       const prevent = () => e.preventDefault();

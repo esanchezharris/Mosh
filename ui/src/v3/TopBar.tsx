@@ -20,6 +20,8 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const trainingOpen = useV3((s) => s.trainingOpen);
   const setTrainingOpen = useV3((s) => s.setTrainingOpen);
   const phonePaired = useStore((s) => !!s.remoteStatus?.pairing);
+  const posture = useV3((s) => s.posture);
+  const setPosture = useV3((s) => s.setPosture);
   const mpActive = useStore((s) => s.mp.active);
   const bbs = secondsToBBSMap(tempoMapFrom(snapshot.session), t.position);
   const name = projectLabel(snapshot.session.editFile) || "untitled";
@@ -60,6 +62,9 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
         {/* Snap, grid division and zoom live in the timeline corner (Arrangement.tsx) now. */}
       </div>
       <div className="spacer" />
+      <button type="button" className={`btn ghost${posture === "start" ? " on" : ""}`} data-testid="v3-start-trigger"
+        aria-pressed={posture === "start"} title="Set up a song: beat, voice, phone, record"
+        onClick={() => { useStore.getState().setView("arrange"); setPosture("start"); }}>Start</button>
       <button type="button" className={`btn ghost${mpActive ? " on" : ""}`} data-testid="v3-mp-trigger"
         aria-haspopup="dialog" aria-expanded={mpOpen} title={mpActive ? "Session is shared — room code and roster" : "Start or join a multiplayer session"}
         onClick={() => setMpOpen(!mpOpen)}>{mpActive ? "Shared" : "Invite"}</button>

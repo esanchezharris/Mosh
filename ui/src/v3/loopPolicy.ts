@@ -85,3 +85,12 @@ export function loopActionTarget(action: LoopAction, context: LoopContext): stri
     return loopTarget(context.loop, context.selected);
   return null;
 }
+
+/** The Booth's take counter: "No takes yet", "Take 1", "Take 3 · 1 kept". A pass in flight
+ *  counts as the take it is. */
+export function takeCountLabel(loop: LoopState | null | undefined): string {
+  const parts = loop?.contributions ?? [];
+  const kept = parts.filter((p) => p.keeper).length;
+  if (parts.length === 0) return loopRecording(loop) ? "Take 1" : "No takes yet";
+  return kept > 0 ? `Take ${parts.length} · ${kept} kept` : `Take ${parts.length}`;
+}

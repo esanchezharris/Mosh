@@ -19,7 +19,7 @@ import { scalePitchClasses } from "./ui/tuner";
 import { ottGainDb } from "./v3/panels/ott";
 import { xfMaxCuts, xfThreshold } from "./v3/panels/xfeedback";
 import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingSource, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine, PluginMeterReading } from "./types";
-import type { RemoteResult, RemoteStatus } from "./bridge";
+import type { MicrophonePermissionResult, MicrophonePermissionStatus, RemoteResult, RemoteStatus } from "./bridge";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
 import { TRACK_ICONS, isTrackIconName } from "./trackIconNames";
@@ -34,6 +34,7 @@ import {
 } from "./mock/sampler";
 import { fixturePeaksForClip } from "./mock/fixturePeaks";
 import { portfolioSeed } from "./mock/portfolioSeed";
+import { freshSeed } from "./mock/freshSeed";
 
 export const MOCK_ENABLED: boolean =
   typeof import.meta !== "undefined" &&
@@ -205,13 +206,52 @@ function bassLine(bars: number): MidiNote[] {
 const MOCK_NO_INPUT = new URLSearchParams(window.location.search).get("mockNoInput");
 // ?mockSeed=<name> selects a seeded session other than the 3-track default (see seedSnapshot).
 const MOCK_SEED = new URLSearchParams(window.location.search).get("mockSeed");
+const MOCK_FRESH = MOCK_SEED === "fresh";
+
+// ?mockFault=<comma list> — dev/e2e fault knobs for the Start page's failure paths. Read
+// once at module load, like the knobs above. Each one models what the ENGINE does in that
+// situation (same strings, same result shapes), never a UI-only shortcut:
+//
+//   mic-denied | mic-restricted | mic-timeout
+//       The macOS microphone permission reads denied / restricted / timed-out (the
+//       bridge's microphonePermissionStatus / requestMicrophonePermission route here),
+//       and arm_track {armed:true} on any track answers ok:false with the engine's own
+//       string (src/app/MacMicrophonePermission.h). loop_setup and new_project's vocal
+//       template arm through the same rule, so they leave the lane unarmed.
+//       With no mic fault the permission reads "granted", except under ?mockSeed=fresh,
+//       where it reads "not-determined" until requested (then "granted").
+//   speakers
+//       The output device stays "MacBook Pro Speakers" even under ?mockSeed=fresh.
+//   bpm-fail
+//       detect_clip_bpm answers the engine's "cannot estimate BPM (unreadable or no pulse)".
+//   bpm-half
+//       detect_clip_bpm answers HALF the clip's true tempo, with confidence 0.2.
+//   pairing-fail
+//       Starting phone pairing fails like native when the port is taken
+//       (RemoteCompanionServer.cpp): ok:false, and store.startRemotePairing puts the error
+//       into lastError.
+//   pairing-short
+//       A minted pairing token expires 3 s after it is minted (native: 5 min).
+//   phone-connect
+//       2 s after a pairing is minted, snapshot.loop.phoneConnected turns true (and stays
+//       true), with a snapshot_invalidated + loop event so the UI notices.
+//   lost-autotune
+//       apply_track_preset of the TUNED preset drops its moshAutoTune stage, as a project
+//       saved before #794 came back from a relaunch.
+const MOCK_FAULTS: ReadonlySet<string> = new Set(
+  (new URLSearchParams(window.location.search).get("mockFault") ?? "")
+    .split(",").map((f) => f.trim().toLowerCase()).filter(Boolean));
+const mockFault = (name: string): boolean => MOCK_FAULTS.has(name);
 
 function seedSnapshot(): Snapshot {
   const base = defaultSeed();
   // ?mockSeed=portfolio — the Song A showcase session (mock/portfolioSeed.ts): a real
   // song's stems drawn from their fixture peaks, a full arrangement, buses and chains.
+  // ?mockSeed=fresh — a first launch on a fresh install (mock/freshSeed.ts).
   // Dev/e2e only, exactly like the other URL fixtures above.
-  return MOCK_SEED === "portfolio" ? portfolioSeed(base) : base;
+  if (MOCK_SEED === "portfolio") return portfolioSeed(base);
+  if (MOCK_FRESH) return freshSeed(base);
+  return base;
 }
 
 function defaultSeed(): Snapshot {
@@ -323,7 +363,10 @@ function emptySession(): Snapshot {
 // Stashing snapshots by path means reopening a project actually restores its content,
 // which is what makes "Start empty, then go back" provable.
 const mockProjects = new Map<string, Snapshot>();
-let recentPaths: string[] = ["/mock/session.mosh", "/mock/late-night.mosh", "/mock/demo-2.mosh"];
+// A fresh install (?mockSeed=fresh) has nothing in Recent yet.
+const seedRecentPaths = (): string[] =>
+  MOCK_FRESH ? [] : ["/mock/session.mosh", "/mock/late-night.mosh", "/mock/demo-2.mosh"];
+let recentPaths: string[] = seedRecentPaths();
 const projectName = (p: string): string => (p.split("/").pop() ?? p).replace(/\.[^.]+$/, "");
 function syncRecents(): void {
   snapshot.session.recentProjects = recentPaths.map((path) => ({ path, name: projectName(path) }));
@@ -396,7 +439,56 @@ function agentMemoryItemValid(item: unknown): boolean {
 // G3 — mock audio routing. The current device selection (so set_audio_device shows
 // up in the next list_audio_devices) and the enumerated wave inputs (so the
 // per-track input picker has real choices and set_track_input can stick).
-const mockAudioSel = { type: "CoreAudio", outputDevice: "MacBook Pro Speakers", inputDevice: "MacBook Pro Microphone" };
+// A fresh install (?mockSeed=fresh) boots on headphones, so the Start page's speaker
+// warning is opt-in through ?mockFault=speakers; every other seed keeps the speakers
+// default existing specs rely on.
+const mockAudioSel = {
+  type: "CoreAudio",
+  outputDevice: MOCK_FRESH && !mockFault("speakers") ? "External Headphones" : "MacBook Pro Speakers",
+  inputDevice: "MacBook Pro Microphone",
+};
+
+// ── the macOS microphone permission (dev/e2e) ─────────────────────────────────
+// The bridge's microphonePermissionStatus / requestMicrophonePermission land here outside
+// the WebView. Error strings are src/app/MacMicrophonePermission.h's, verbatim: the same
+// string the engine's arm_track refusal carries, which is what the UI matches on.
+const MIC_ERRORS: Partial<Record<MicrophonePermissionStatus, string>> = {
+  denied: "Microphone access is off for Mosh. Enable it in System Settings > Privacy & Security > Microphone, then arm the track again.",
+  restricted: "Microphone access is not available on this Mac.",
+  "timed-out": "The microphone permission request did not finish. Playback remains available; arm the track again to retry.",
+};
+/** The permission's state at boot: a mic fault wins; a fresh install has not been asked. */
+function seedMicPermission(): MicrophonePermissionStatus {
+  if (mockFault("mic-denied")) return "denied";
+  if (mockFault("mic-restricted")) return "restricted";
+  if (mockFault("mic-timeout")) return "timed-out";
+  return MOCK_FRESH ? "not-determined" : "granted";
+}
+let mockMicPermission: MicrophonePermissionStatus = seedMicPermission();
+const micResult = (): MicrophonePermissionResult => {
+  const error = MIC_ERRORS[mockMicPermission];
+  return error ? { status: mockMicPermission, error } : { status: mockMicPermission };
+};
+export function mockMicrophonePermissionStatus(): MicrophonePermissionResult {
+  return micResult();
+}
+/** macOS asks once: an undecided permission becomes granted (the singer chose OK); a
+ *  decided one answers as it is. A timed-out request stays timed out under the fault. */
+export function mockRequestMicrophonePermission(): MicrophonePermissionResult {
+  if (mockMicPermission === "not-determined") mockMicPermission = "granted";
+  return micResult();
+}
+/** The arming rule arm_track, loop_setup and the vocal template share (MoshEngine::
+ *  activateAudioInput): a refused permission is an error with the engine's string; no
+ *  input device is ok-but-not-applied ("no input device"); otherwise the arm sticks. An
+ *  undecided permission is asked for by the arm itself, and the mock's singer says OK. */
+function mockArmOutcome(): { error: string } | { applied: false; reason: string } | { applied: true } {
+  if (mockMicPermission === "not-determined") mockMicPermission = "granted";
+  const error = MIC_ERRORS[mockMicPermission];
+  if (error) return { error };
+  if (MOCK_NO_INPUT) return { applied: false, reason: "no input device" };
+  return { applied: true };
+}
 const MOCK_WAVE_INPUTS = [
   { deviceID: "in-1-2", name: "Input 1-2", enabled: true, isStereoPair: true },
   { deviceID: "in-3-4", name: "Input 3-4", enabled: true, isStereoPair: true },
@@ -655,7 +747,7 @@ function applyMockLoopArgs(next: Transport, args: Record<string, unknown>): void
   }
 }
 
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "jump_to_history", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "get_rhymes", "render_lora_take", "promote_lora_checkpoint",
+const NON_UNDOABLE = new Set(["set_transport", "set_key", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "jump_to_history", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "get_rhymes", "render_lora_take", "promote_lora_checkpoint",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
   "agent_memory_write", "agent_memory_delete", "agent_memory_clear",
@@ -1247,30 +1339,51 @@ function findTrack(trackId: string): Track | null {
   return snapshot.tracks.find((t) => t.id === trackId) ?? null;
 }
 
-// The one bundled track-chain preset, as the mock knows it. The values and display
-// strings are what the pinned engine reports for resources/presets/track-chain/
-// mosh-clean-lead-v0.json (normalized = position inside the parameter's native range).
-const MOCK_TRACK_PRESET = {
+// The bundled track-chain presets, as the mock knows them. The values and display
+// strings are what the pinned engine reports for resources/presets/track-chain/*.json
+// (normalized = position inside the parameter's native range).
+type MockTrackPreset = {
+  id: string; name: string; revision: number; fileName: string; file: string;
+  /** Accepted by apply_track_preset as the same preset (an e2e-friendly alias). */
+  aliases: readonly string[];
+};
+const MOCK_CLEAN_PRESET: MockTrackPreset = {
   id: "mosh.clean-lead",
   name: "Mosh Clean Lead v0",
   revision: 0,
   fileName: "mosh-clean-lead-v0",
   file: "/presets/track-chain/mosh-clean-lead-v0.json",
-} as const;
+  aliases: [],
+};
+// Mosh AutoTune ahead of the clean chain (resources/presets/track-chain/mosh-tuned-lead-v0.json).
+const MOCK_TUNED_PRESET: MockTrackPreset = {
+  id: "mosh.tuned-lead",
+  name: "Mosh Tuned Lead v0",
+  revision: 0,
+  fileName: "mosh-tuned-lead-v0",
+  file: "/presets/track-chain/mosh-tuned-lead-v0.json",
+  aliases: ["/mock/presets/track-chain/mosh-tuned-lead-v0.json"],
+};
+const MOCK_TRACK_PRESETS: readonly MockTrackPreset[] = [MOCK_CLEAN_PRESET, MOCK_TUNED_PRESET];
+const mockTrackPresetByFile = (file: string): MockTrackPreset | undefined =>
+  MOCK_TRACK_PRESETS.find((p) => p.file === file || p.aliases.includes(file));
 
-function mockTrackPresetRows(): Plugin[] {
+/** The rows apply_track_preset inserts for `preset`, tagged plugin.preset = {id, name,
+ *  revision, stage}. Clean = [high-pass, compressor]; tuned = [Mosh AutoTune, high-pass,
+ *  compressor] with the clean chain's values unchanged. */
+function mockTrackPresetRows(preset: MockTrackPreset = MOCK_CLEAN_PRESET): Plugin[] {
   const tag = (stage: number) => ({
-    id: MOCK_TRACK_PRESET.id, name: MOCK_TRACK_PRESET.name, revision: MOCK_TRACK_PRESET.revision, stage,
+    id: preset.id, name: preset.name, revision: preset.revision, stage,
   });
-  return [
+  const clean: Plugin[] = [
     {
       index: 0, name: "High-Pass", type: "highpass", enabled: true, external: false, builtin: true,
-      category: "Filter", isInstrument: false, preset: tag(0), itemId: nextMockItemId(), state: mkBuiltinState("highpass"),
+      category: "Filter", isInstrument: false, itemId: nextMockItemId(), state: mkBuiltinState("highpass"),
       params: [{ index: 0, name: "Frequency", value: (80 - 10) / (22000 - 10), display: "80 Hz", min: 10, max: 22000 }],
     },
     {
       index: 1, name: "Compressor", type: "compressor", enabled: true, external: false, builtin: true,
-      category: "Dynamics", isInstrument: false, preset: tag(1), itemId: nextMockItemId(),
+      category: "Dynamics", isInstrument: false, itemId: nextMockItemId(),
       params: [
         { index: 0, name: "Threshold", value: (0.0630957 - 0.01) / 0.99, display: "-24.00 dB" },
         { index: 1, name: "Ratio", value: 0.4 / 0.95, display: "2.50 : 1" },
@@ -1281,7 +1394,67 @@ function mockTrackPresetRows(): Plugin[] {
       ],
     },
   ];
+  const rows: Plugin[] = [];
+  if (preset.id === MOCK_TUNED_PRESET.id) {
+    // Key C, Chromatic (a preset cannot know the song's key), retune 40 ms, look-ahead 0;
+    // everything else is the plugin's own default. Key (0) and Scale (1) are named choices.
+    const tuner = mkBuiltinPlugin(BUILTINS.find((b) => b.type === "moshAutoTune")!, 0);
+    const retune = tuner.params.find((q) => q.index === 2);
+    if (retune) {
+      retune.value = (40 - 5) / (250 - 5);
+      retune.display = builtinParamDisplay("moshAutoTune", 2, retune.value) ?? retune.display;
+    }
+    rows.push(tuner);
+  }
+  rows.push(...clean);
+  rows.forEach((p, i) => { p.index = i; p.preset = tag(i); });
+  return rows;
 }
+// ── imported audio (import_clip / import_clip_data) ──────────────────────────────
+// The Start page's fixture beat: pick_files titled "...beat..." answers this path (see
+// mockPickFiles), and importing anything under MOCK_BEAT_DIR lands a clip of the beat's
+// real length, 8 bars at 88 BPM. Its name carries NO tempo on purpose, so the tempo can
+// only come from detect_clip_bpm, which reads it from mockClipTempo below.
+export const MOCK_BEAT_DIR = "/mock/beats/";
+export const MOCK_BEAT_FILE = `${MOCK_BEAT_DIR}night-drive.wav`;
+export const MOCK_BEAT_BPM = 88;
+const MOCK_BEAT_BARS = 8;
+/** The tempo each imported clip's audio really has (what detect_clip_bpm hears), keyed by
+ *  clip id so it survives undo/redo snapshots. Never in the snapshot: native only carries
+ *  sourceBpm while warp is on. */
+const mockClipTempo = new Map<string, number>();
+
+/** importWaveFileToTrack (MoshOps.Clips.cpp): the named track when it resolves, else the
+ *  FIRST audio track, else a new one, all in one undo step; data {clipId, trackId, file}. */
+function mockImportWave(command: string, file: string, name: string, trackId: string,
+  startSeconds: number, tempo: number | undefined): CommandResult {
+  let t = trackId ? findTrack(trackId) : null;
+  if (!t) t = snapshot.tracks.find((x) => !x.isGroup && x.type !== "group") ?? null;
+  pushUndo();
+  if (!t) {
+    const wasInBatch = inBatch;
+    inBatch = true;                 // the auto-created track belongs to THIS undo step
+    const created = dispatch("create_track", { type: "audio" });
+    inBatch = wasInBatch;
+    t = findTrack((created.data as { trackId?: string } | undefined)?.trackId ?? "");
+    if (!t) return err(command, "no track");
+  }
+  const length = tempo ? (MOCK_BEAT_BARS * 4 * 60) / tempo : 4;
+  const c = waveClip(name.replace(/\.[^.]+$/, ""), Math.max(0, startSeconds), length);
+  if (tempo) mockClipTempo.set(c.id, tempo);
+  t.clips.push(c);
+  invalidate();
+  return ok(command, { clipId: c.id, trackId: t.id, file });
+}
+
+/** The native file picker, outside the WebView: "Open project" answers a fixture project;
+ *  a title mentioning a beat answers the fixture beat. Anything else is a cancel. */
+export function mockPickFiles(opts?: { multiple?: boolean; filters?: string; title?: string }): { ok: boolean; files: string[] } {
+  if (opts?.title === "Open project") return { ok: true, files: ["/mock/sessions/protools-tonight.mosh"] };
+  if (/beat/i.test(opts?.title ?? "")) return { ok: true, files: [MOCK_BEAT_FILE] };
+  return { ok: false, files: [] };
+}
+
 function trackGroupSupports(group: TrackGroup, axis: "edit" | "mix"): boolean {
   return group.kind === axis || group.kind === "edit_mix";
 }
@@ -1940,11 +2113,12 @@ function mockLoopState(): LoopState {
     contributions,
     // No phone ever polls the mock, so the presence verdict stays false and the stamp
     // stays 0: the Booth's "Phone connected" line is honestly unreachable in dev rather
-    // than faked into looking live. `phoneConnected` is the ENGINE's answer (the desktop
-    // never derives presence from the stamp, which is boot-relative, not epoch ms) — the
-    // mock mirrors the field so a shape drift here fails the same way it would natively.
-    phoneConnected: false,
-    phoneSeenMs: 0,
+    // than faked into looking live — unless ?mockFault=phone-connect stages a phone
+    // arriving 2 s after a pairing is minted. `phoneConnected` is the ENGINE's answer (the
+    // desktop never derives presence from the stamp, which is boot-relative, not epoch
+    // ms) — the mock mirrors the field so a shape drift here fails the same way natively.
+    phoneConnected: mockPhoneConnected,
+    phoneSeenMs: mockPhoneSeenMs,
     blockReason: snapshot.session.audioEnabled === false
       ? "No audio device — recording is unavailable on this Mac" : "",
   };
@@ -2032,24 +2206,62 @@ function loopWriteCursor(qn: number): void {
 // a LAN IPv4 host, and a padUrl whose token rides in the fragment.
 const MOCK_REMOTE_HOST = "192.168.1.80";
 const MOCK_REMOTE_PORT = 47873;
-const MOCK_REMOTE_TOKEN = "0123456789abcdef".repeat(4);   // 64 hex, like the real token
-const MOCK_REMOTE_TTL_MS = 15 * 60 * 1000;
+// RemoteCompanionProtocol::pairingTtlMs() — a minted token is good for five minutes.
+const MOCK_REMOTE_TTL_MS = 5 * 60 * 1000;
+// ?mockFault=pairing-short — a token that expires while e2e watches.
+const MOCK_REMOTE_SHORT_TTL_MS = 3000;
+// ?mockFault=phone-connect — how long after a mint the phone "arrives".
+const MOCK_PHONE_CONNECT_MS = 2000;
 let mockRemote: RemoteStatus = { running: false, port: 0 };
+let mockRemoteMints = 0;
+let mockPhoneConnected = false;
+let mockPhoneSeenMs = 0;
+let mockPhoneTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Every mint is a FRESH token (native mints a random one per pairing): 64 hex digits
+ *  derived from a counter, so tests can tell one pairing from the next. */
+const mockRemoteToken = (n: number): string => n.toString(16).padStart(16, "0").repeat(4);
+
+function mockRemoteReset(): void {
+  if (mockPhoneTimer !== null) clearTimeout(mockPhoneTimer);
+  mockPhoneTimer = null;
+  mockRemote = { running: false, port: 0 };
+  mockRemoteMints = 0;
+  mockPhoneConnected = false;
+  mockPhoneSeenMs = 0;
+}
 
 export function mockRemoteStartPairing(): RemoteResult<RemoteStatus> {
+  // ?mockFault=pairing-fail — the companion server cannot bind its port, worded as
+  // RemoteCompanionServer.cpp words it; store.startRemotePairing puts it in lastError.
+  if (mockFault("pairing-fail"))
+    return { ok: false, error: `could not start remote companion server (port ${MOCK_REMOTE_PORT} already in use)` };
+  const token = mockRemoteToken(++mockRemoteMints);
   mockRemote = {
     running: true,
     port: MOCK_REMOTE_PORT,
     pairing: {
       host: MOCK_REMOTE_HOST,
       port: MOCK_REMOTE_PORT,
-      token: MOCK_REMOTE_TOKEN,
-      expiresAtMs: Date.now() + MOCK_REMOTE_TTL_MS,
-      pairingUrl: "mosh://pair?payload=MOCK",
-      webUrl: `http://${MOCK_REMOTE_HOST}:${MOCK_REMOTE_PORT}/web?payload=MOCK`,
-      padUrl: `http://${MOCK_REMOTE_HOST}:${MOCK_REMOTE_PORT}/pad#token=${MOCK_REMOTE_TOKEN}`,
+      token,
+      expiresAtMs: Date.now() + (mockFault("pairing-short") ? MOCK_REMOTE_SHORT_TTL_MS : MOCK_REMOTE_TTL_MS),
+      pairingUrl: `mosh://pair?payload=MOCK-${mockRemoteMints}`,
+      webUrl: `http://${MOCK_REMOTE_HOST}:${MOCK_REMOTE_PORT}/web?payload=MOCK-${mockRemoteMints}`,
+      padUrl: `http://${MOCK_REMOTE_HOST}:${MOCK_REMOTE_PORT}/pad#token=${token}`,
     },
   };
+  // ?mockFault=phone-connect — a phone opens the pad shortly after the QR appears, and
+  // the ENGINE's presence verdict (snapshot.loop.phoneConnected) turns true for good.
+  if (mockFault("phone-connect") && !mockPhoneConnected && mockPhoneTimer === null) {
+    mockPhoneTimer = setTimeout(() => {
+      mockPhoneTimer = null;
+      mockPhoneConnected = true;
+      mockPhoneSeenMs = Date.now();
+      syncLoopSnapshot();
+      invalidate();
+      emit("loop", snapshot.loop);
+    }, MOCK_PHONE_CONNECT_MS);
+  }
   return { ok: true, data: mockRemote };
 }
 
@@ -3055,16 +3267,31 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       t.clips.push(c); invalidate(); return ok(command, { clipId: c.id });
     }
     case "import_clip": {
-      const t = findTrack(str(args.trackId)) ?? snapshot.tracks[0];
-      if (!t) return err(command, "no track");
-      pushUndo();
-      const name = str(args.name) || (str(args.file).split("/").pop() ?? "clip");
+      const file = str(args.file);
+      const name = str(args.name) || (file.split("/").pop() ?? "clip");
       // Honor startSeconds (the real cmdImportClip contract); fall back to `start`.
       // The real engine imports the whole file at its own duration and models no
       // trim, so use a fixed placeholder length here rather than an args.length the
-      // engine would ignore (matching cmdImportClip, not faking a trimmed clip).
-      const c = waveClip(name.replace(/\.[^.]+$/, ""), num(args.startSeconds, num(args.start, 0)), 4);
-      t.clips.push(c); invalidate(); return ok(command, { clipId: c.id });
+      // engine would ignore (matching cmdImportClip, not faking a trimmed clip). The
+      // fixture beats under /mock/beats/ have a real duration and tempo (see MOCK_BEATS).
+      const beatBpm = file.startsWith(MOCK_BEAT_DIR) ? MOCK_BEAT_BPM : undefined;
+      return mockImportWave(command, file, name, str(args.trackId),
+        num(args.startSeconds, num(args.start, 0)), beatBpm);
+    }
+    // Bytes over the bridge (a drop). Native writes the bytes into the session's imports
+    // and runs the SAME importWaveFileToTrack as import_clip. Without bytes it keeps its old
+    // graceful no-op (AL-017's allowlisted passthrough, bridgeMockFailClosed.test.ts).
+    case "import_clip_data": {
+      const name = str(args.name);
+      const data = str(args.dataBase64);
+      if (!data) return ok(command);
+      if (!name) return err(command, "missing 'name'");
+      // No audio to analyse in the mock: a tempo in the file name stands in for what the
+      // engine would hear in a real "88bpm" loop; otherwise detect falls back to its stub.
+      const named = /(\d{2,3})\s?bpm/i.exec(name);
+      const nameBpm = named && Number(named[1]) >= 40 && Number(named[1]) <= 240 ? Number(named[1]) : undefined;
+      return mockImportWave(command, `/mock/imports/${name}`, name, str(args.trackId),
+        num(args.startSeconds, num(args.start, 0)), nameBpm);
     }
     case "move_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
@@ -3226,7 +3453,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate(); return ok(command, { clipId: right.id });
     }
     case "remove_clip": {
-      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "no clip");   // native's string
       pushUndo(); f.track.clips = f.track.clips.filter((c) => c.id !== f.clip.id); invalidate(); return ok(command);
     }
     case "bounce_track": {
@@ -3722,7 +3949,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "detect_clip_bpm": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "no wave clip: " + str(args.clipId));
       if (f.clip.type !== "wave") return err(command, "no wave clip: " + str(args.clipId));
-      return ok(command, { clipId: f.clip.id, bpm: num(f.clip.sourceBpm, 120) || 120, confidence: 0.8 });
+      // ?mockFault=bpm-fail / bpm-half — the engine's no-pulse refusal, and the octave
+      // error a real estimator makes (half the tempo, low confidence).
+      if (mockFault("bpm-fail")) return err(command, "cannot estimate BPM (unreadable or no pulse)");
+      const bpm = mockClipTempo.get(f.clip.id) ?? (num(f.clip.sourceBpm, 120) || 120);
+      if (mockFault("bpm-half")) return ok(command, { clipId: f.clip.id, bpm: bpm / 2, confidence: 0.2 });
+      return ok(command, { clipId: f.clip.id, bpm, confidence: 0.8 });
     }
 
     // ── recording transport + take lanes (comp tree) ─────────────────────────
@@ -3734,10 +3966,15 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // non-undoable recording lifecycle; later comp selection remains undoable.
     case "arm_track": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
-      // REC-NO-INPUT fixture: degrade EXACTLY like the engine with no input
-      // instances (ok, applied:false, reason "no input device"; the arm doesn't stick)
-      if (MOCK_NO_INPUT && args.armed)
-        return ok(command, { trackId: t.id, armed: true, applied: false, reason: "no input device" });
+      if (args.armed) {
+        // ?mockFault=mic-*: the engine refuses with the permission's own string.
+        // REC-NO-INPUT fixture: degrade EXACTLY like the engine with no input
+        // instances (ok, applied:false, reason "no input device"; the arm doesn't stick)
+        const outcome = mockArmOutcome();
+        if ("error" in outcome) return err(command, outcome.error);
+        if (!outcome.applied)
+          return ok(command, { trackId: t.id, armed: true, applied: false, reason: outcome.reason });
+      }
       t.armed = Boolean(args.armed); invalidate();
       return ok(command, { trackId: t.id, armed: t.armed, applied: true });
     }
@@ -3934,13 +4171,17 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate();
       return ok(command, { count: map.length });
     }
-    case "set_key": { pushUndo(); snapshot.session.key = { tonic: str(args.tonic, snapshot.session.key?.tonic ?? "A"), mode: str(args.mode, snapshot.session.key?.mode ?? "minor") }; invalidate(); return ok(command); }
+    // A preference, NOT undoable (native set_key logs undoable:false and opens no
+    // transaction), so no pushUndo here.
+    case "set_key": { snapshot.session.key = { tonic: str(args.tonic, snapshot.session.key?.tonic ?? "A"), mode: str(args.mode, snapshot.session.key?.mode ?? "minor") }; invalidate(); return ok(command); }
     case "set_count_in": {
       const bars = num(args.bars, snapshot.session.countInBars ?? 0);
       if (![0, 1, 2].includes(bars)) return err(command, "bars must be 0 (off), 1 (one bar), or 2 (two bars)");
       // Preference — NOT undoable (mirrors native's logLine(..., false); see cmdSetCountIn
       // in MoshOps.cpp). No pushUndo() here, unlike the mutation commands above.
-      snapshot.session.countInBars = bars; invalidate(); return ok(command);
+      snapshot.session.countInBars = bars;
+      if (snapshot.session.project) snapshot.session.project.countInBars = bars;
+      invalidate(); return ok(command);
     }
     // REC-001 — the same partial-patch shape as native: each field independent, an
     // out-of-domain value refused WITHOUT writing any of the others. Preference, so no
@@ -4025,13 +4266,19 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "set_master_volume": { pushUndo(); if (snapshot.master) snapshot.master.volumeDb = num(args.db); invalidate(); return ok(command); }
 
+    // The project key is a non-undoable preference (native set_key writes it outside the
+    // UndoManager), so a whole-snapshot restore carries the CURRENT key across.
     case "undo": {
       if (!history.length) return ok(command, { undone: false });
-      future.push(clone(snapshot)); snapshot = history.pop()!; stopPlayback(); invalidate(); return ok(command, { undone: true });
+      const key = snapshot.session.key;
+      future.push(clone(snapshot)); snapshot = history.pop()!; snapshot.session.key = key;
+      stopPlayback(); invalidate(); return ok(command, { undone: true });
     }
     case "redo": {
       if (!future.length) return ok(command, { redone: false });
-      history.push(clone(snapshot)); snapshot = future.pop()!; stopPlayback(); invalidate(); return ok(command, { redone: true });
+      const key = snapshot.session.key;
+      history.push(clone(snapshot)); snapshot = future.pop()!; snapshot.session.key = key;
+      stopPlayback(); invalidate(); return ok(command, { redone: true });
     }
     // CAP-PRJ-005 — jump to a point in undo history. Same contract as MoshOps: the
     // argument is a history STAMP, resolved against the live timeline here rather than a
@@ -4055,8 +4302,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         return err(command, "that point is no longer in the undo history (it was undone past and overwritten by a later edit, or dropped as the history filled)");
       const from = history.length;
       let undone = 0, redone = 0;
+      const key = snapshot.session.key;   // a non-undoable preference, as in undo/redo
       while (history.length > destination) { future.push(clone(snapshot)); snapshot = history.pop()!; undone++; }
       while (history.length < destination && future.length) { history.push(clone(snapshot)); snapshot = future.pop()!; redone++; }
+      snapshot.session.key = key;
       if (undone > 0 || redone > 0) stopPlayback();
       invalidate();
       return ok(command, { txn: mockHistoryTxn(), undone, redone, from, depth: history.length });
@@ -4164,24 +4413,37 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!lead) return err(command, "no track to use as Lead — select or arm the one you sing on");
       if (lead.id === mockLoop.takesTrackId)
         return err(command, "that is the Takes track — pick the track you sing on");
-      if (mockLoop.leadTrackId === lead.id && loopTakesTrack() !== null)
+      // Arm TAKES, un-arm LEAD, through arm_track's own rule (MoshOps.Loop.cpp runs
+      // cmdArmTrack for both): a refused mic or no input device leaves Takes unarmed, and
+      // data.armed says so (native: the arm's `applied`).
+      const armLoop = (takesTrack: Track): boolean => {
+        const armed = dispatch("arm_track", { trackId: takesTrack.id, armed: true });
+        dispatch("arm_track", { trackId: lead!.id, armed: false });
+        return armed.ok && (armed.data as { applied?: boolean } | undefined)?.applied === true;
+      };
+      if (mockLoop.leadTrackId === lead.id && loopTakesTrack() !== null) {
+        const armed = armLoop(loopTakesTrack()!);
         return loopResult(command, args, `${lead.name} is already the Lead`,
-          { created: false, leadTrackId: lead.id, takesTrackId: mockLoop.takesTrackId });
+          { created: false, leadTrackId: lead.id, takesTrackId: mockLoop.takesTrackId, armed });
+      }
 
       pushUndo();
       const takes: Track = {
         id: nextTrackId(), index: snapshot.tracks.indexOf(lead) + 1, name: `${lead.name} · Takes`,
-        type: "audio", volumeDb: 0, pan: 0, mute: false, solo: false, armed: true, clips: [], plugins: [],
+        type: "audio", volumeDb: 0, pan: 0, mute: false, solo: false, armed: false, clips: [], plugins: [],
       };
       // Directly under the Lead, like the engine's move-into-the-same-transaction insert.
       snapshot.tracks.splice(takes.index, 0, takes);
       snapshot.tracks.forEach((t, i) => { t.index = i; });
-      lead.armed = false;                       // the Takes lane is what the mic feeds now
+      // Re-pointing the loop leaves the OLD takes lane behind, disarmed (native does the same).
+      const previousTakes = loopTakesTrack();
+      if (previousTakes && previousTakes !== takes) previousTakes.armed = false;
       mockLoop.leadTrackId = lead.id;
       mockLoop.takesTrackId = takes.id;
+      const armed = armLoop(takes);              // the Takes lane is what the mic feeds now
       invalidate();
       return loopResult(command, args, `Recording into ${takes.name}`,
-        { created: true, trackId: takes.id, leadTrackId: lead.id, takesTrackId: takes.id });
+        { created: true, trackId: takes.id, leadTrackId: lead.id, takesTrackId: takes.id, armed });
     }
     case "loop_record": {
       if (!loopEngaged()) {
@@ -4769,7 +5031,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       // TPL-001 — mirror the native recipe with the mock's own commands (synchronous
       // dispatch, exactly as native composes through execute()) so the UI sees the same
       // shape: two audio tracks, Vocal armed, count-in 1, overdub, a four-bar loop.
-      if (str(args.template) === "vocal") {
+      const template = str(args.template).trim().toLowerCase();
+      if (template === "vocal") {
         const t1 = dispatch("create_track", { name: "Backing", type: "audio" });
         const t2 = dispatch("create_track", { name: "Vocal", type: "audio" });
         const vocalId = (t2.data as { trackId?: string } | undefined)?.trackId ?? "";
@@ -4789,7 +5052,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
           vocalTrackId: vocalId, loopEnd,
         });
       }
-      if (str(args.template)) {
+      if (template) {
         invalidate();
         return ok(command, { editFile: snapshot.session.editFile, template: "", templateError: `unknown template: ${str(args.template)} (known: vocal)` });
       }
@@ -5732,9 +5995,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         { plugin: "4osc", name: "mosh-pad", file: "/presets/4osc/mosh-pad.json", source: "bundled" },
         { plugin: "4osc", name: "mosh-pluck", file: "/presets/4osc/mosh-pluck.json", source: "bundled" },
         { plugin: "vital", name: "user-patch", file: "/presets/vital/user-patch.vital", source: "user" },
-        // the bundled track-chain preset (resources/presets/track-chain/*.json) — applied
+        // the bundled track-chain presets (resources/presets/track-chain/*.json) — applied
         // with apply_track_preset, never load_preset
-        { plugin: "track-chain", name: MOCK_TRACK_PRESET.fileName, file: MOCK_TRACK_PRESET.file, source: "bundled" },
+        ...MOCK_TRACK_PRESETS.map((p) => ({ plugin: "track-chain", name: p.fileName, file: p.file, source: "bundled" })),
       ];
       const filter = str(args.plugin, "").toLowerCase();
       return ok(command, { presets: filter ? lib.filter((p) => p.plugin === filter) : lib });
@@ -5776,12 +6039,22 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (t.isReturn) return err(command, "this is a return track; apply the preset to the vocal track that feeds it");
       if (snapshot.transport.recording) return err(command, "cannot apply a preset while recording -- stop recording first");
       const file = str(args.file, "");
-      if (file !== MOCK_TRACK_PRESET.file) return err(command, "preset file not found: " + file);
+      const preset = mockTrackPresetByFile(file);
+      if (!preset) return err(command, "preset file not found: " + file);
 
+      // Native ownership rule (MoshOps.Plugins.cpp): re-applying the SAME preset id
+      // replaces that preset's own group on the track (never stacks); a different id is
+      // added alongside (the caller removes the other group first, as the Start page does).
       const rack = t.plugins ?? [];
-      const owned = rack.filter((p) => p.preset?.id === MOCK_TRACK_PRESET.id);
-      const fresh = mockTrackPresetRows();
-      const sameAsPreset = owned.length === fresh.length && owned.every((p, i) =>
+      const owned = rack.filter((p) => p.preset?.id === preset.id);
+      const fresh = mockTrackPresetRows(preset);
+      // ?mockFault=lost-autotune — a pre-#794 relaunch dropped the tuned chain's AutoTune.
+      const lostTuner = preset.id === MOCK_TUNED_PRESET.id && mockFault("lost-autotune");
+      if (lostTuner) {
+        const at = fresh.findIndex((p) => p.type === "moshAutoTune");
+        if (at >= 0) fresh.splice(at, 1);
+      }
+      const sameAsPreset = !lostTuner && owned.length === fresh.length && owned.every((p, i) =>
         p.preset?.stage === i && p.type === fresh[i]!.type && p.enabled
         && p.params.length === fresh[i]!.params.length
         && p.params.every((q, k) => Math.abs(q.value - fresh[i]!.params[k]!.value) < 1e-9)
@@ -5790,16 +6063,16 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         && Object.entries(fresh[i]!.state ?? {}).every(([key, v]) => (p.state?.[key]?.value ?? v.value) === v.value)
         && (i === 0 || p.index === owned[i - 1]!.index + 1));
       const result = (changed: boolean, replaced: boolean) => ok(command, {
-        trackId, presetId: MOCK_TRACK_PRESET.id, revision: MOCK_TRACK_PRESET.revision,
-        name: MOCK_TRACK_PRESET.name, changed, replaced,
-        stages: (t.plugins ?? []).filter((p) => p.preset?.id === MOCK_TRACK_PRESET.id)
+        trackId, presetId: preset.id, revision: preset.revision,
+        name: preset.name, changed, replaced,
+        stages: (t.plugins ?? []).filter((p) => p.preset?.id === preset.id)
           .map((p) => ({ index: p.index, processor: p.type === "highpass" ? "lowpass" : p.type, enabled: p.enabled })),
       });
       if (sameAsPreset) return result(false, false);   // native opens no transaction here either
 
       pushUndo();
       const at = owned.length > 0 ? rack.indexOf(owned[0]!) : rack.length;
-      const kept = rack.filter((p) => p.preset?.id !== MOCK_TRACK_PRESET.id);
+      const kept = rack.filter((p) => p.preset?.id !== preset.id);
       const insertAt = Math.min(at, kept.length);
       t.plugins = [...kept.slice(0, insertAt), ...fresh, ...kept.slice(insertAt)];
       t.plugins.forEach((p, i) => { p.index = i; });
@@ -6447,7 +6720,7 @@ export function __resetMockForTests(): void {
   trackGroupSeq = 0;
   snapshot = seedSnapshot();
   mockProjects.clear();
-  recentPaths = ["/mock/session.mosh", "/mock/late-night.mosh", "/mock/demo-2.mosh"];
+  recentPaths = seedRecentPaths();
   syncRecents();
   landedLayers.clear();
   mockCorpusLines = 0;
@@ -6471,7 +6744,9 @@ export function __resetMockForTests(): void {
   mockLoop = freshLoopModel();
   mockLoopActionSeq = 0;
   mockPendingMonitor.clear();   // 2026-09-24 finding c — stale against a session now gone
-  mockRemote = { running: false, port: 0 };
+  mockRemoteReset();
+  mockClipTempo.clear();
+  mockMicPermission = seedMicPermission();
 }
 
 // Test-only: inject a synthetic "mosh_event" of the given type/payload straight

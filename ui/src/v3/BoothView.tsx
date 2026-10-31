@@ -4,12 +4,13 @@ import type { CommandResult, LoopState, Snapshot, Track } from "../types";
 import { useV3 } from "./shellState";
 import { SilhouetteWave } from "./waves/SilhouetteWave";
 import {
-  contributionLabel, loopActionTarget, loopAvailable, loopRecording, loopTarget, loopTargetLabel,
+  contributionLabel, loopActionTarget, loopAvailable, loopRecording, loopTarget, loopTargetLabel, takeCountLabel,
   type LoopAction,
 } from "./loopPolicy";
 import { phoneStatusLine } from "./phoneStatus";
 import { setupVocalLoop, type VocalSetupIO } from "./vocalSetup";
 import { speakerMutedNote, useSpeakerGuard } from "./useSpeakerGuard";
+import { InputMeter } from "./InputMeter";
 
 // The Booth is the DESKTOP phone pad: the same eleven commands, the same availability
 // model (loopPolicy.ts, a port of ui/src/phonepad/src/policy.ts), so a producer who
@@ -237,6 +238,7 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
           </div>
         ) : (
           <>
+            <div className="take-count" data-testid="v3-booth-take-count" aria-live="polite">{takeCountLabel(loop)}</div>
             <div className="booth-pads" data-testid="v3-booth-pads">
               {PADS.map((pad) => (
                 <button key={pad.testId} type="button"
@@ -244,7 +246,10 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
                   data-testid={pad.testId} disabled={!loopAvailable(pad.action, context)}
                   onClick={() => {
                     const target = loopActionTarget(pad.action, context);
-                    void run(pad.command, target ? { targetId: target } : {});
+                    void run(pad.command, target ? { targetId: target } : {}).then((result) => {
+                      // Tier 1: a landed Keep is the reward moment -- the splat laughs once.
+                      if (pad.action === "keep" && result?.ok) useStore.getState().bumpCelebrate();
+                    });
                   }}>
                   {pad.action === "hear"
                     ? (recording ? "Review Current Recording" : "Review Selected Take")
@@ -263,6 +268,7 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
                 Hear myself: {hearingMyself ? "On" : "Off"}
                 {pendingMonitor !== null ? ` (pending ${pendingMonitor === "off" ? "Off" : "On"})` : ""}
               </button>
+              <InputMeter trackId={takesTrack?.id} monitoring={hearingMyself} />
             </div>
 
             {/* Engineering readouts stay one click away: useful to a producer steering
@@ -305,6 +311,8 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
         )}
 
         <div className="row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button type="button" className="btn ghost" data-testid="v3-booth-start"
+            onClick={() => setPosture("start")}>← Start</button>
           <button type="button" className="btn ghost" data-testid="v3-booth-studio"
             onClick={() => setPosture("studio")}>← Studio</button>
           {/* Only once a phone is paired or attached — until then the TopBar's Phone pairs one. */}

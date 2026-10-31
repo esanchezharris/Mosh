@@ -11,6 +11,7 @@ import { getNativeFunction } from "./juce/index.js";
 import {
   MOCK_ENABLED, mockExecute, mockSnapshot, mockOnEvent,
   mockRemoteStartPairing, mockRemoteStop, mockRemoteStatus,
+  mockMicrophonePermissionStatus, mockRequestMicrophonePermission, mockPickFiles,
 } from "./bridge.mock";
 
 type InitData = {
@@ -293,10 +294,9 @@ export async function pickFiles(opts?: {
   title?: string;
 }): Promise<{ ok: boolean; files: string[] }> {
   if (!realNative()) {
-    if (MOCK_ENABLED && opts?.title === "Open project") {
-      return { ok: true, files: ["/mock/sessions/protools-tonight.mosh"] };
-    }
-    return { ok: false, files: [] };
+    // The mock answers the dialogs it models ("Open project", the Start page's "Choose a
+    // beat"); anything else is a cancelled picker, as before.
+    return MOCK_ENABLED ? mockPickFiles(opts) : { ok: false, files: [] };
   }
   return (await native("pick_files")(opts ?? {})) as { ok: boolean; files: string[] };
 }
@@ -345,12 +345,12 @@ function parseMicrophonePermissionResult(value: unknown): MicrophonePermissionRe
 }
 
 export async function microphonePermissionStatus(): Promise<MicrophonePermissionResult> {
-  if (!realNative()) return { status: "not-determined" };
+  if (!realNative()) return MOCK_ENABLED ? mockMicrophonePermissionStatus() : { status: "not-determined" };
   return parseMicrophonePermissionResult(await native("microphone_permission_status")());
 }
 
 export async function requestMicrophonePermission(): Promise<MicrophonePermissionResult> {
-  if (!realNative()) return { status: "not-determined" };
+  if (!realNative()) return MOCK_ENABLED ? mockRequestMicrophonePermission() : { status: "not-determined" };
   return parseMicrophonePermissionResult(await native("request_microphone_permission")());
 }
 

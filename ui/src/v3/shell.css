@@ -1029,3 +1029,89 @@
 .v3-shell .lab :is(.lab-prompt, .lab-seed input, .lab-source select, .lab-keep-name input):focus-visible {
   outline: 2px solid var(--accent); outline-offset: 1px;
 }
+
+/* ── Start page (StartPage.tsx; DESIGN.md §10) ─────────────────────────────────────────
+   A posture that replaces the workspace. Tokens only; no animation beyond the existing
+   --ease-out transitions. */
+.v3-shell .body.start-body { display: flex; flex: 1; min-height: 0; overflow-y: auto; }
+.v3-shell .start-stage { flex: 1; display: flex; justify-content: center; padding: 24px 16px 32px; }
+.v3-shell .start-col { width: 100%; max-width: 640px; display: flex; flex-direction: column; gap: 14px; }
+.v3-shell .start-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.v3-shell .start-rail { list-style: none; margin: 0; padding: 0; display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+.v3-shell .start-rail .pip {
+  display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--fog-line); color: var(--fog-label); font-size: 11px;
+  transition: color .2s var(--ease-out), border-color .2s var(--ease-out);
+}
+.v3-shell .start-rail .pip .dot {
+  width: 14px; height: 14px; border-radius: 50%; border: 1px solid currentColor;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 9px; line-height: 1;
+}
+.v3-shell .start-rail .pip.current { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.v3-shell .start-rail .pip.current .dot { background: var(--accent); border-color: var(--accent); }
+.v3-shell .start-rail .pip.done { color: var(--text); border-color: var(--line); }
+.v3-shell .start-rail .pip.done .dot { color: var(--accent); }
+.v3-shell .start-card {
+  display: flex; flex-direction: column; gap: 10px; padding: 18px; border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--fog-line); color: var(--text);
+}
+.v3-shell .start-card .set-hint { font-size: 12px; line-height: 1.4; }
+.v3-shell .start-title { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+.v3-shell .start-lead { margin: 0; font-size: 13px; line-height: 1.4; }
+.v3-shell .start-lead b { color: var(--accent); font-variant-numeric: tabular-nums; }
+.v3-shell .start-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.v3-shell .start-drop {
+  display: flex; align-items: center; justify-content: center; min-height: 96px; padding: 12px;
+  border: 1.5px dashed var(--line); border-radius: 12px; color: var(--muted); font-size: 12px; text-align: center;
+  transition: border-color .2s var(--ease-out), background-color .2s var(--ease-out);
+}
+.v3-shell .start-drop.armed { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--text); }
+.v3-shell .start-beat-wave { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.v3-shell .start-beat-wave .cwave { width: 100%; height: 56px; }
+.v3-shell .start-tempo { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; border-top: 1px solid var(--fog-line); }
+.v3-shell .start-bpm { display: flex; align-items: center; gap: 6px; }
+.v3-shell .start-bpm input.field { width: 72px; font-variant-numeric: tabular-nums; }
+.v3-shell .start-presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.v3-shell .start-preset {
+  display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 12px; border-radius: 10px;
+  background: var(--surface2); border: 1px solid var(--fog-line); color: var(--text); cursor: pointer;
+  transition: border-color .2s var(--ease-out);
+}
+.v3-shell .start-preset.sel { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
+.v3-shell .start-preset:disabled { opacity: .45; cursor: default; }
+.v3-shell .start-key { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.v3-shell .start-key label { display: flex; gap: 6px; align-items: center; }
+.v3-shell .start-room { display: flex; flex-direction: column; gap: 8px; padding-top: 6px; border-top: 1px solid var(--fog-line); }
+.v3-shell .start-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.v3-shell .start-row > b { min-width: 92px; font-size: 12px; font-weight: 600; }
+.v3-shell .start-row > .set-hint { flex: 1; min-width: 160px; }
+.v3-shell .start-row.warn > b, .v3-shell .start-row.warn > .set-hint, .v3-shell .set-hint.warn { color: var(--warn); }
+.v3-shell .start-warn {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 8px; font-size: 12px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+.v3-shell .start-ready { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.v3-shell .start-qr { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.v3-shell .start-qr.expired .phone-qr { opacity: .3; }
+.v3-shell .start-qr-side { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 6px; }
+.v3-shell .start-qr-side .phone-url { overflow-wrap: anywhere; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.v3-shell .start-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
+.v3-shell .start-on-launch { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+
+/* Tier 1 input meter (InputMeter.tsx): a plain bar; the width follows the 30 Hz rail. */
+.v3-shell .input-meter-row { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 180px; }
+.v3-shell .input-meter { position: relative; flex: 0 0 120px; height: 8px; border-radius: 4px; background: var(--surface2); overflow: hidden; border: 1px solid var(--fog-line); }
+.v3-shell .input-meter .fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
+.v3-shell .input-meter.off { opacity: .45; }
+
+/* The Booth's take counter (Tier 0). */
+.v3-shell .take-count { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text); }
+.v3-shell .take-count b { color: var(--accent); }
+
+/* A file drag over the Studio/Booth: the one place it lands is announced. */
+.v3-shell .drop-veil {
+  position: absolute; inset: 0; z-index: 40; pointer-events: none; display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--bg) 55%, transparent); border: 2px dashed var(--accent);
+}
+.v3-shell .drop-veil span { padding: 8px 14px; border-radius: 999px; background: var(--glass); border: 1px solid var(--glass-border); color: var(--text); font-size: 12px; }
