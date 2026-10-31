@@ -229,7 +229,9 @@ export const SETTINGS: SettingDef[] = [
     // "Show this when Mosh opens" checkbox (hidden from every Settings surface).
     id: "startOnLaunch",
     type: "bool",
-    default: false,
+    // ON for fresh settings (2026-10-30 owner decision): a first launch opens on the Start
+    // page. Existing installs pick the default up too until the page's checkbox is cleared.
+    default: true,
     scope: "app",
     category: "Layout",
     label: "Start page at launch",

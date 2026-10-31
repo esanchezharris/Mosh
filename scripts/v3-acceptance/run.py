@@ -706,7 +706,7 @@ def row_feel(ctx) -> Row:
             f"the whole V3 suite is green ({expected} passed, {unexpected} failed)", {"rc": proc.returncode, "stats": stats})
     pngs = sorted(screens.glob("*.png"))
     row.artifacts += [str(p) for p in pngs]
-    row.chk(len(pngs) >= 32, "eight surfaces × four colorways screenshotted", {"count": len(pngs), "first": [p.name for p in pngs[:4]]})
+    row.chk(len(pngs) >= 52, "eight workspace surfaces + five Start page steps × four colorways screenshotted", {"count": len(pngs), "first": [p.name for p in pngs[:4]]})
     return row
 
 

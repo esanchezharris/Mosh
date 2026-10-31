@@ -596,7 +596,7 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
                 <button type="button" className="btn ghost" data-testid="v3-start-drum-beat" disabled={disabledAll}
                   onClick={() => void useDrumBeat()}>No beat? Use a drum beat</button>
               )}
-              {!beatDone(snapshot, ids, beat) && (
+              {!beatClip && !beatDone(snapshot, ids, beat) && (
                 <button type="button" className="btn ghost" data-testid="v3-start-skip-beat" disabled={disabledAll}
                   onClick={() => { patchBeat({ skipped: true }); void leaveBeat("voice"); }}>Skip for now</button>
               )}

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { bootV3Start } from "./helpers";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -97,6 +98,36 @@ test.describe("V3-feel: every surface in every colorway", () => {
       await page.getByTestId("v3-open-settings").click();
       await expect(page.getByTestId("v3-settings")).toBeVisible();
       await shot("08-settings");
+    });
+  }
+
+  // The Start page (DESIGN.md §10): its five steps, in every colorway, on a fresh install.
+  for (const colorway of COLORWAYS) {
+    test(`colorway ${colorway}: Start page welcome, beat, voice, ready, phone`, async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await bootV3Start(page, { seed: "fresh", colorway });
+      await expect(page.getByTestId("v3-shell")).toHaveAttribute("data-colorway", colorway);
+      const shot = (name: string) => page.screenshot({ path: join(OUT, `${colorway}-${name}.png`), fullPage: false });
+      const step = page.getByTestId("v3-start");
+
+      await shot("09-start-welcome");
+      await page.getByTestId("v3-start-new").click();
+      await expect(step).toHaveAttribute("data-step", "beat");
+      await page.getByTestId("v3-start-choose").click();
+      await expect(page.getByTestId("v3-start-tempo-line")).toContainText("88");
+      await shot("10-start-beat");
+      await page.getByTestId("v3-start-bpm-confirm").click();
+      await page.getByTestId("v3-start-beat-next").click();
+      await expect(step).toHaveAttribute("data-step", "voice");
+      await expect(page.getByTestId("v3-start-ready")).toBeEnabled();
+      await shot("11-start-voice");
+      await page.getByTestId("v3-start-ready").click();
+      await expect(page.getByTestId("v3-start-ready-card")).toBeVisible();
+      await shot("12-start-ready");
+      await page.getByTestId("v3-start-add-phone").click();
+      await page.getByTestId("v3-start-show-code").click();
+      await expect(page.getByTestId("v3-start-qr")).toBeVisible();
+      await shot("13-start-phone");
     });
   }
 
