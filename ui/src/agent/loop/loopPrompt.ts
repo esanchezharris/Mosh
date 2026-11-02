@@ -4,6 +4,7 @@
 // master/key blind spot that cost master-trim 0/10 single-shot).
 
 import { commandCatalogPrompt } from "../commands";
+import { unavailableAgentCommands } from "../../aiTools";
 import { retrieveCards, knowledgePromptSection } from "../knowledge";
 import { INTENTS } from "../brainCore";
 import { MUSICAL_TIME_RULE } from "../musicalTime";
@@ -69,7 +70,7 @@ export function buildLoopSystemPrompt(snap: Snapshot | null, query?: string, mem
   const knowledge = query ? knowledgePromptSection(retrieveCards(query)) : "";
   const keyGuidance = inKeyTaskGuidance(snap, query);
   const melodyGuidance = melodyTaskGuidance(snap, query);
-  const parts = [LOOP_PREAMBLE, commandCatalogPrompt()];
+  const parts = [LOOP_PREAMBLE, commandCatalogPrompt(unavailableAgentCommands(snap))];
   if (knowledge) parts.push(knowledge);
   if (memory) parts.push(memory);
   if (keyGuidance) parts.push(keyGuidance);

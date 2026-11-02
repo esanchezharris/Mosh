@@ -212,7 +212,16 @@ bool GenerativeJobManager::ensureServiceRunning()
     // until the first finishes warmup, then its isHealthy() check returns true immediately.
     const juce::ScopedLock sl (spawnLock);
     adoptPortFromHandshake();
-    if (isHealthy()) return true;
+    if (isHealthy()) { refusedNoTools = false; return true; }
+
+    // Optional AI tools: with no usable Python, spawning would run the macOS python3 stub
+    // and pop the "install developer tools" dialog. Refuse before any process starts.
+    if (! aiToolsProbe().python)
+    {
+        refusedNoTools = true;
+        return false;
+    }
+    refusedNoTools = false;
 
     // A recent attempt already failed to bring the service up (dead python3, broken venv,
     // missing script...). isHealthy() above is already cheap on a closed/refused port, but

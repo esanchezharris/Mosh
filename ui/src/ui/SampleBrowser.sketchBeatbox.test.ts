@@ -11,7 +11,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SampleBrowser } from "./SampleBrowser";
 import { useStore } from "../store";
-import type { CommandResult, DirListing } from "../types";
+import type { CommandResult, DirListing, Snapshot } from "../types";
 
 const LISTING: DirListing = {
   path: "/Users/you", parent: "/Users", exists: true, error: null,
@@ -59,6 +59,19 @@ describe("SampleBrowser — sketch_beatbox entry point", () => {
     expect(fileRow.querySelector('[data-testid="sample-sketch-beatbox"]')).not.toBeNull();
     const folderRow = [...host.querySelectorAll(".plugin-row")].find((r) => r.textContent?.includes("Loops"))!;
     expect(folderRow.querySelector('[data-testid="sample-sketch-beatbox"]')).toBeNull();
+  });
+
+  it("is not offered when AI tools aren't installed (the row itself still is)", async () => {
+    const base = { schemaVersion: 1, tracks: [] } as unknown as Snapshot;
+    useStore.setState({ snapshot: { ...base, aiTools: { state: "off", pack: { python: "missing", sketch: "missing", transcribe: "missing" }, sa3: false } } });
+    await render();
+    const fileRow = [...host.querySelectorAll('[data-testid="sample-row"]')].find((r) => r.textContent?.includes("boombap.wav"));
+    expect(fileRow).toBeDefined();
+    expect(host.querySelector('[data-testid="sample-sketch-beatbox"]')).toBeNull();
+    // Control: installed tools bring the button back on the same row.
+    act(() => useStore.setState({ snapshot: { ...base, aiTools: { state: "on", pack: { python: "ok", sketch: "ok", transcribe: "missing" }, sa3: false } } }));
+    expect(host.querySelector('[data-testid="sample-sketch-beatbox"]')).not.toBeNull();
+    useStore.setState({ snapshot: null });
   });
 
   it("clicking it opens the dialog scoped to THAT row's real absolute path — never a folder, " +

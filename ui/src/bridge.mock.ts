@@ -18,7 +18,7 @@ import { DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES, TRACK_GROUP_MIX_ATTRIBUTES } from "
 import { scalePitchClasses } from "./ui/tuner";
 import { ottGainDb } from "./v3/panels/ott";
 import { xfMaxCuts, xfThreshold } from "./v3/panels/xfeedback";
-import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingSource, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine, PluginMeterReading } from "./types";
+import type { AiToolsSnapshot, Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingSource, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine, PluginMeterReading } from "./types";
 import type { MicrophonePermissionResult, MicrophonePermissionStatus, RemoteResult, RemoteStatus } from "./bridge";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
@@ -2124,10 +2124,29 @@ function mockLoopState(): LoopState {
   };
 }
 
+// ?mockAiTools=off — a friend's Mac with no AI tools (docs/AI-TOOLS-OPTIONAL-BRIEF-2026-11-02.md):
+// no usable Python, no Beatbox venv, no Stable Audio 3. Default: everything installed, as
+// on the owner's Mac, so every existing generative spec keeps its surfaces.
+const MOCK_AI_TOOLS_OFF = new URLSearchParams(window.location.search).get("mockAiTools") === "off";
+const MOCK_AI_TOOLS: AiToolsSnapshot = MOCK_AI_TOOLS_OFF
+  ? { state: "off", pack: { python: "missing", sketch: "missing", transcribe: "missing" }, sa3: false, pythonSource: "" }
+  : { state: "on", pack: { python: "ok", sketch: "ok", transcribe: "ok" }, sa3: true, pythonSource: "sa3" };
+// Commands that start the generative or training service natively, so native refuses
+// them before any spawn when no usable Python exists (ensureServiceRunning).
+const MOCK_SERVICE_COMMANDS = new Set([
+  "list_colors", "list_loras", "list_transform_targets", "render_layer", "render_ahead_arm",
+  "render_lora_take", "promote_lora_checkpoint", "import_lora_adapter", "submit_training_job",
+  "sketch_beatbox", "generate_beat_recipe", "transcribe_clip", "build_skeleton_from_clip",
+  "compile_render", "get_rhymes", "complete_lyrics", "fill_lyric_gap", "suggest_next_line",
+  "regenerate_lyric", "analyze_lyrics",
+]);
+const AI_TOOLS_MISSING_ERROR = "AI tools aren't installed on this Mac. Recording and mixing work without them.";
+
 /** Rebuild snapshot.loop from the model. Called on every snapshot read and after every
  *  loop command, exactly as the native side embeds loopStateVar() in snapshot(). */
 function syncLoopSnapshot(): void {
   snapshot.loop = mockLoopState();
+  snapshot.aiTools = MOCK_AI_TOOLS;
   // snapshot.audio, as native publishes it (MoshOps.cpp: root "audio" =
   // currentAudioSelection()). The Start page, setupVocalLoop and the speaker guard all read
   // the output device from here; without it ?mockFault=speakers was inert.
@@ -2302,6 +2321,13 @@ function mockTakePeaks(clipId: string, takeIndex: number): [number, number][] {
 }
 
 function dispatch(command: string, args: Record<string, unknown>): CommandResult {
+  // Optional AI tools: with none installed, native refuses every service command before
+  // a spawn (src/generative/AiTools.h). Checked first, as native checks before the body.
+  if (MOCK_AI_TOOLS_OFF && MOCK_SERVICE_COMMANDS.has(command)) {
+    return err(command, command === "sketch_beatbox"
+      ? "Beatbox → beat needs AI tools, which aren't installed on this Mac."
+      : AI_TOOLS_MISSING_ERROR);
+  }
   // FREEZE GUARD — mirrors the engine's central lock in executeImpl (checked
   // BEFORE the command body, exactly like the native seam).
   if (MOCK_FROZEN_LOCKED.has(command)) {

@@ -7,6 +7,7 @@ import { commandCatalogPrompt, AGENT_COMMAND_MAP } from "./commands";
 import { retrieveCards, knowledgePromptSection } from "./knowledge";
 import { MUSICAL_TIME_RULE } from "./musicalTime";
 import { renderSession } from "./sessionRender";
+import { unavailableAgentCommands } from "../aiTools";
 import type { Snapshot } from "../types";
 import type { AgentCommandCall } from "./executor";
 
@@ -73,7 +74,9 @@ export function buildSystemPrompt(
  *  this function's prior (pre-M2) behavior. */
 export function systemPrompt(snap: Snapshot | null, query?: string, memory?: string): string {
   const knowledge = query ? knowledgePromptSection(retrieveCards(query)) : "";
-  return buildSystemPrompt(DEFAULT_RULES, snap, undefined, knowledge, memory);
+  const missing = unavailableAgentCommands(snap);
+  const catalog = missing.size > 0 ? commandCatalogPrompt(missing) : undefined;
+  return buildSystemPrompt(DEFAULT_RULES, snap, catalog, knowledge, memory);
 }
 
 // Coerce a string token ("17", 132, true) to the type an arg expects.

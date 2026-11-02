@@ -5,6 +5,7 @@
 // as failures and never sent.
 
 import { useStore, type State } from "../store";
+import { aiToolsRefusal } from "../aiTools";
 import { validateCommand, describeCommand } from "./commands";
 import { screenByCommand, MAX_DESTRUCTIVE_PER_BATCH, DESTRUCTIVE_BLOCK_REASON } from "./destructiveScreen";
 import { MEMORY_COMMANDS, handleRememberPreference } from "./memory/rememberPreference";
@@ -157,6 +158,22 @@ export async function runAgentBatch(
       summary: describeCommand(call.command, call.args ?? {}),
       ok: false,
       error: HISTORY_CONTROL_BATCH_REASON,
+    })));
+  }
+
+  // Optional AI tools: a plan that needs a tool this Mac lacks is refused WHOLE, before
+  // anything runs — half a re-imagine (a layer with no render) is worse than none.
+  const snap = useStore.getState().snapshot;
+  const refusals = calls.map((call) => aiToolsRefusal(snap, call.command));
+  const refusal = refusals.find((r): r is string => r !== null);
+  if (refusal) {
+    await logAgentTurn(label, meta);
+    return changeSet(label, calls.map((call, index) => ({
+      index,
+      command: call.command,
+      summary: describeCommand(call.command, call.args ?? {}),
+      ok: false,
+      error: refusals[index] ?? refusal,
     })));
   }
 

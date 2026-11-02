@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
+import { aiToolsRefusal } from "../aiTools";
 import { runAgentBatch, logAgentTurn, undoAgentBatch } from "../agent/executor";
 import { matchFastPath } from "../agent/fastPath";
 import { handleFast } from "../agent/performer";
@@ -199,6 +200,12 @@ export function MoshiDock() {
 
       const rework = resolveSectionRework(text, st.snapshot);
       if (rework) {
+        const missing = rework.kind === "empty" ? null : aiToolsRefusal(st.snapshot, "render_layer");
+        if (missing) {
+          await logAgentTurn(missing, { utterance: text, source: "section_scope" });
+          setSay(missing); pushAgentUtter("HUH", missing);
+          return;
+        }
         if (rework.kind === "empty") {
           await logAgentTurn(rework.reason, { utterance: text, source: "section_scope" });
           setSay(rework.reason); pushAgentUtter("HUH", rework.reason);
@@ -219,6 +226,14 @@ export function MoshiDock() {
           id: t.id, name: t.name, mute: t.mute, solo: t.solo, clipCount: t.clips?.length ?? 0,
         })),
       });
+      const fastMissing = fast?.kind === "commands"
+        ? fast.commands.map((c) => aiToolsRefusal(st.snapshot, c.command)).find((r) => r !== null) ?? null
+        : null;
+      if (fastMissing) {
+        await logAgentTurn(fastMissing, { utterance: text, source: "fastpath" });
+        setSay(fastMissing); pushAgentUtter("HUH", fastMissing);
+        return;
+      }
       if (fast) {
         await handleFast(fast, {
           runBatch: async (label, cmds) => { setAgentChangeSet(await runAgentBatch(label, cmds, { utterance: text, source: "fastpath" })); },

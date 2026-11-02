@@ -14,7 +14,7 @@ std::function<var (const var&)> MoshOps::generativeReadHandler()
     {
         const auto name = command.getProperty ("command", {}).toString();
         if (name != "list_colors" && name != "list_loras") return errResult (name, "Not a generative read command.");
-        if (! manager->ensureServiceRunning()) return errResult (name, "Local generative service unavailable.");
+        if (! manager->ensureServiceRunning()) return errResult (name, manager->unavailableReason ("Local generative service unavailable."));
         auto data = name == "list_colors" ? manager->listColors() : manager->listLoras();
         if (! (bool) data.getProperty ("ok", false)) return errResult (name, "Local service capability could not be read.");
         if (name == "list_colors" && fixtureEnabled()) data.getDynamicObject()->setProperty ("testFixture", true);

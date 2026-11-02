@@ -1,4 +1,5 @@
 import { useStore } from "../store";
+import { aiToolsOf } from "../aiTools";
 import { pickFiles, pickSaveFile } from "../bridge";
 import { tempoMapFrom, secondsToBBSMap } from "../time";
 import { projectLabel } from "../projectFile";
@@ -72,10 +73,11 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
         aria-haspopup="dialog" aria-expanded={phoneOpen}
         title={phonePaired ? "The phone pad is running — show the QR" : "Pair an iPhone as a recording pad"}
         onClick={() => setPhoneOpen(!phoneOpen)}>Phone</button>
-      <button type="button" className="btn ghost" id={TRAINING_TRIGGER_ID} data-testid="v3-training-trigger"
+      {/* LoRA training runs on the Stable Audio 3 stack, which Mosh never installs. */}
+      {aiToolsOf(snapshot).sa3 && <button type="button" className="btn ghost" id={TRAINING_TRIGGER_ID} data-testid="v3-training-trigger"
         aria-haspopup="dialog" aria-expanded={trainingOpen}
         title="Train a LoRA on your own music, audition it in the LoRA Lab, keep the take you like"
-        onClick={() => setTrainingOpen(!trainingOpen)}>LoRA</button>
+        onClick={() => setTrainingOpen(!trainingOpen)}>LoRA</button>}
       <button type="button" className="btn ghost" data-testid="v3-history"
         aria-expanded={historyOpen} onClick={() => setHistoryOpen(!historyOpen)}>History</button>
     </div>

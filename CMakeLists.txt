@@ -380,6 +380,7 @@ if (MOSH_BUILD_APP)
         src/plugins/transform/RaveInsertPlugin.cpp
         # Stage 5 — Tier-B generative layer (05)
         src/generative/GenerativeJobManager.cpp
+        src/generative/AiTools.cpp
         # Stage 7 — rights-cleared type-beat LoRA training
         src/training/TrainerRegistry.cpp
         src/training/TrainingJobManager.cpp

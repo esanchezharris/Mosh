@@ -11,6 +11,7 @@ import type { DirListing } from "../types";
 import { filterEntries, loadRecents, addRecentSample, importedFilePath, SAMPLE_DND_MIME } from "./sampleBrowserUtil";
 import { IconArrowUp, IconDrum, IconFolder, IconWaveform } from "./icons";
 import { SketchBeatboxDialog } from "./SketchBeatboxDialog";
+import { aiToolsOf } from "../aiTools";
 import { AddSampleFolderButton, SamplePlaces } from "./SampleBrowserPlaces";
 import { SampleThumb } from "./SampleThumb";
 
@@ -26,6 +27,8 @@ export function SampleBrowser({ hidePaths = false }: SampleBrowserProps) {
   const refresh = useStore((s) => s.refresh);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const sketching = useStore((s) => s.sketchingBeatbox);
+  // Beatbox → beat needs the optional AI tools; without them the button is not offered.
+  const canSketch = useStore((s) => aiToolsOf(s.snapshot).on);
   const [listing, setListing] = useState<DirListing | null>(null);
   const [query, setQuery] = useState("");
   const [recents, setRecents] = useState<string[]>(() => loadRecents());
@@ -100,7 +103,7 @@ export function SampleBrowser({ hidePaths = false }: SampleBrowserProps) {
   // opening the dialog is all that is left to do. While a transduction for THIS path is in
   // flight, swap the button for a status pill so a second click can't double-dispatch.
   const sketchBtn = (path: string) =>
-    sketching[path] ? (
+    !canSketch ? null : sketching[path] ? (
       <span className="sb-row-status" role="status" aria-live="polite" data-testid="sample-sketching">
         sketching…
       </span>

@@ -733,6 +733,13 @@ export type Transport = {
 };
 
 // Current audio-device selection summary (snapshot.audio) — the settings edit form.
+export type AiToolsSnapshot = {
+  state: "on" | "off";
+  pack: { python: "ok" | "missing"; sketch: "ok" | "missing"; transcribe: "ok" | "missing" };
+  sa3: boolean;
+  pythonSource?: string;
+};
+
 export type AudioSelection = {
   type: string;
   outputDevice: string;
@@ -1188,6 +1195,9 @@ export type Snapshot = {
   /** Temporarily bypasses every Track Group without deleting its membership. */
   trackGroupsSuspended?: boolean;
   audio?: AudioSelection;
+  /** Optional AI tools present on this Mac (src/generative/AiTools.h), machine state.
+   *  Absent on a backend that predates the gate: treat everything as available. */
+  aiTools?: AiToolsSnapshot;
   training?: TrainingState;
   /** MOSHI-LOOP — the recording loop, additive. Absent on a backend that predates it. */
   loop?: LoopState;
