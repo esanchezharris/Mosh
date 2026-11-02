@@ -72,7 +72,7 @@ void DirectRenderJob::run (const std::shared_ptr<GenerativeJobManager>& manager)
     sourceHash = juce::SHA256 (input).toHexString();
     params.getDynamicObject()->setProperty ("source_sha256", sourceHash);
     if (cancelled) { publish ("cancelled"); return; }
-    if (! manager->ensureServiceRunning()) { fail ("Local SA3 service unavailable. Check the existing local service and model setup."); return; }
+    if (! manager->ensureServiceRunning()) { fail (manager->unavailableReason ("Local SA3 service unavailable. Check the existing local service and model setup.")); return; }
     const auto capabilities = manager->listColors();
     if (! (bool) capabilities.getProperty ("explicitRenderDecision", false)
         || (! fixture && ! (bool) capabilities.getProperty ("sa3", false)))

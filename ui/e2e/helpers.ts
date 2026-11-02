@@ -83,7 +83,7 @@ export async function bootLive(page: Page, opts: { values?: Record<string, unkno
 }
 
 /** Boot the additive v3 agentic DAW shell via `?shell=v3`. */
-export async function bootV3(page: Page): Promise<void> {
+export async function bootV3(page: Page, query = ""): Promise<void> {
   await page.addInitScript(() => {
     window.localStorage.clear();
     window.localStorage.setItem("mosh.settings", JSON.stringify({
@@ -91,7 +91,7 @@ export async function bootV3(page: Page): Promise<void> {
       version: 2, template: null, values: { colorway: "lime", startOnLaunch: false }, keyOverrides: {},
     }));
   });
-  await page.goto("/?shell=v3");
+  await page.goto(`/?shell=v3${query ? `&${query}` : ""}`);
   await expect(page.getByTestId("v3-shell")).toBeVisible();
   await expect(page.getByTestId("v3-arrangement")).toBeVisible();
 }

@@ -39,6 +39,17 @@ describe("V3 direct Re-Imagine targeting", () => {
   });
   afterEach(() => { act(() => root.unmount()); host.remove(); useStore.setState(original); });
 
+  it("is not offered on a Mac without the Stable Audio 3 setup, and nothing is loaded", () => {
+    const noSa3: Snapshot = { ...snapshot, aiTools: { state: "on", pack: { python: "ok", sketch: "ok", transcribe: "ok" }, sa3: false } };
+    render(noSa3);
+    expect(host.querySelector('[data-testid="v3-reimagine-open"]')).toBeNull();
+    expect(host.textContent).toBe("");
+    // Control: the same section with SA3 present is there.
+    render({ ...noSa3, aiTools: { ...noSa3.aiTools!, sa3: true } });
+    expect(host.querySelector('[data-testid="v3-reimagine-open"]')).not.toBeNull();
+    expect(exec).not.toHaveBeenCalled();
+  });
+
   it("requires one explicitly selected audio clip and sends direct commands", async () => {
     render();
     expect(host.querySelector<HTMLButtonElement>('[data-testid="v3-reimagine-open"]')?.disabled).toBe(true);

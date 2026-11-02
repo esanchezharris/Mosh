@@ -1,6 +1,9 @@
 #pragma once
 
 #include <juce_core/juce_core.h>
+#include "generative/AiTools.h"
+#include <atomic>
+#include <functional>
 
 namespace mosh
 {
@@ -12,6 +15,13 @@ public:
 
     bool ensureServiceRunning();
     bool isHealthy();
+
+    /** Same refusal as GenerativeJobManager: no usable Python, no spawn (AiTools.h). */
+    juce::String unavailableReason (const juce::String& fallback) const
+    {
+        return refusedNoTools.load() ? juce::String (kAiToolsMissingError) : fallback;
+    }
+    void setAiToolsProbeForTesting (std::function<AiToolsStatus()> probe) { aiToolsProbe = std::move (probe); }
 
     juce::String submitJob (const juce::String& corpusBundle,
                             const juce::var& config,
@@ -30,6 +40,8 @@ private:
     juce::String baseUrl;
     juce::ChildProcess serviceProcess;
     bool spawnedByUs = false;
+    std::function<AiToolsStatus()> aiToolsProbe = [] { return probeAiTools(); };
+    std::atomic<bool> refusedNoTools { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TrainingJobManager)
 };

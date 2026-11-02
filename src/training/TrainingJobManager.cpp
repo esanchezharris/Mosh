@@ -70,7 +70,10 @@ bool TrainingJobManager::isHealthy()
 
 bool TrainingJobManager::ensureServiceRunning()
 {
-    if (isHealthy()) return true;
+    if (isHealthy()) { refusedNoTools = false; return true; }
+    refusedNoTools = ! aiToolsProbe().python;
+    if (refusedNoTools)
+        return false;
 
     auto script = locateServiceScript();
     if (! script.existsAsFile())

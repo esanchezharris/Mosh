@@ -101,6 +101,8 @@ inline const juce::StringArray& volatilePaths()
         "controller",
         // Live audio-device selection — machine state, not the song.
         "audio",
+        // Optional AI tools present on this Mac (file probe) — machine state.
+        "aiTools",
         // The LoRA rights registry and training jobs: machine-local, non-undoable
         // registry state, not the song. Training commands never open a transaction,
         // so a job-status poll or a source approval must not move the fingerprint.

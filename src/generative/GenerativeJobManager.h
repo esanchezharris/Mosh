@@ -1,6 +1,9 @@
 #pragma once
 
 #include <juce_core/juce_core.h>
+#include "AiTools.h"
+#include <atomic>
+#include <functional>
 
 namespace mosh
 {
@@ -29,6 +32,20 @@ public:
         guard delays a slow-but-alive startup — only a confirmed-dead child or a very recent
         failure short-circuits early. */
     bool ensureServiceRunning();
+
+    /** True when the last ensureServiceRunning() refused to spawn because this Mac has no
+        usable Python (AiTools.h). No process was started, so no macOS developer-tools
+        dialog appeared. A healthy service that is already running is always adopted. */
+    bool refusedForMissingAiTools() const noexcept { return refusedNoTools.load(); }
+    /** The error a caller reports when ensureServiceRunning() failed: the AI-tools copy
+        when the spawn was refused for missing tools, else `fallback`. */
+    juce::String unavailableReason (const juce::String& fallback) const
+    {
+        return refusedForMissingAiTools() ? juce::String (kAiToolsMissingError) : fallback;
+    }
+    /** Tests replace the machine probe so the refusal can be exercised on any Mac. */
+    void setAiToolsProbeForTesting (std::function<AiToolsStatus()> probe) { aiToolsProbe = std::move (probe); }
+
     /** Probe GET /health. connectMs bounds the worst-case block on the CALLING thread when
         the service is reachable-but-wedged (a dead service refuses immediately); pass a short
         value on non-critical, message-thread paths (e.g. the corpus-stats readout). */
@@ -223,6 +240,9 @@ private:
     // most recent failed ensureServiceRunning() attempt, or 0 if the last attempt succeeded /
     // none has run yet. See ensureServiceRunning()'s doc comment.
     juce::uint32 lastFailedSpawnMs = 0;
+
+    std::function<AiToolsStatus()> aiToolsProbe = [] { return probeAiTools(); };   // guarded by spawnLock
+    std::atomic<bool> refusedNoTools { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GenerativeJobManager)
 };

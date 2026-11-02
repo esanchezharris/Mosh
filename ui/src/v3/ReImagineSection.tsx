@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useStore } from "../store";
 import type { Snapshot } from "../types";
 import { GenDrawer } from "../ui/GenDrawer";
+import { aiToolsOf } from "../aiTools";
 
 function audioTarget(snapshot: Snapshot, clipId: string | undefined) {
   for (const track of snapshot.tracks) {
@@ -18,6 +19,9 @@ export function ReImagineSection({ snapshot }: { readonly snapshot: Snapshot }) 
   const [opened, setOpened] = useState<{ readonly clipId: string; readonly epoch: number } | null>(null);
   const selected = transitioning ? null : audioTarget(snapshot, selection.size === 1 ? selection.values().next().value : undefined);
   const target = !transitioning && opened?.epoch === epoch ? audioTarget(snapshot, opened.clipId) : null;
+  // Re-Imagine renders with Stable Audio 3, which Mosh never installs: without that setup
+  // on this Mac the section is not offered at all (opening it would start the service).
+  if (!aiToolsOf(snapshot).sa3) return null;
 
   return <section className="grp v3-reimagine" aria-label="Re-Imagine">
     <div className="grphd v3-reimagine-heading">

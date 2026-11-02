@@ -2311,6 +2311,12 @@ juce::var MoshOps::cmdSketchBeatbox (const juce::var& args)
     if (bpm < 20.0 || bpm > 300.0)
         return errResult ("sketch_beatbox", juce::String (juce::CharPointer_UTF8 ("bpm must be 20-300 (the tempo is known \xe2\x80\x94 box to a click)")));
 
+    // Optional AI tools: Beatbox → beat needs the sketch venv. Say so before any spawn
+    // rather than starting the service only to have /sketch answer 503.
+    if (! probeAiTools().sketch)
+        return errResult ("sketch_beatbox", juce::String (juce::CharPointer_UTF8 (
+            "Beatbox \xe2\x86\x92 beat needs AI tools, which aren't installed on this Mac.")));
+
     const auto srcName = wav.getFileNameWithoutExtension();
 
     // Land transduced hits ({step,role,velocity}) as drum MoshOps. ALWAYS on the message
@@ -2321,7 +2327,7 @@ juce::var MoshOps::cmdSketchBeatbox (const juce::var& args)
     {
         if (! ok || ! hitsVar.isArray())
         {
-            const auto msg = err.isNotEmpty() ? err : juce::String ("beatbox transduction unavailable");
+            const auto msg = err.isNotEmpty() ? err : jobManager.unavailableReason ("beatbox transduction unavailable");
             emit ("sketch_status", [&] { auto* o = new juce::DynamicObject();
                 o->setProperty ("file", file); o->setProperty ("state", "error");
                 o->setProperty ("error", msg); return juce::var (o); }());
@@ -2487,9 +2493,10 @@ juce::var MoshOps::cmdGenerateBeatRecipe (const juce::var& args)
                          : fetchBeatRecipeProgram (args);
     if (! generated.isObject() || ! (bool) generated.getProperty ("ok", false))
     {
+        const auto unavailable = jobManager.unavailableReason ("recipe generation service unavailable");
         const auto msg = generated.isObject()
-            ? generated.getProperty ("error", var ("recipe generation service unavailable")).toString()
-            : juce::String ("recipe generation service unavailable");
+            ? generated.getProperty ("error", var (unavailable)).toString()
+            : unavailable;
         logLine ("generate_beat_recipe", args, false, msg, false);
         return errResult ("generate_beat_recipe", msg);
     }
@@ -3831,6 +3838,11 @@ juce::var MoshOps::snapshot()
     // Lightweight current audio-device selection summary for the settings edit form
     // (duplicates session.sampleRate intentionally). Full lists stay on-demand.
     root->setProperty ("audio", currentAudioSelection());
+
+    // Optional AI tools — machine state, never the song. File checks only (AiTools.h):
+    // reading this never runs python, so a fresh Mac can't be shown the developer-tools
+    // dialog by a snapshot. The UI hides generative surfaces until state is "on".
+    root->setProperty ("aiTools", probeAiTools().toVar());
 
     // Aux buses (Wave 8) — one entry per AuxReturn-carrying track.
     Array<var> buses;

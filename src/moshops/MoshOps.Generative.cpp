@@ -819,7 +819,7 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     // Ensure the service first so its build/version is part of EVERY fingerprint
     // (else the first render hashes an empty build and the cache never hits).
     if (! jobManager.ensureServiceRunning())
-        return errResult ("render_layer", "generative service unavailable");
+        return errResult ("render_layer", jobManager.unavailableReason ("generative service unavailable"));
 
     // Resolve the LoRA rack to its content identity (sha12 + trigger via /loras) —
     // an unknown adapter name fails HERE, before any submit or cache probe.
@@ -1567,7 +1567,7 @@ juce::var MoshOps::cmdRenderAheadArm (const juce::var& args)
 
     // Bring the generative service up ONCE at arm time (submitJob/stitchWindows don't self-spawn).
     if (! jobManager.ensureServiceRunning())
-        return errResult ("render_ahead_arm", "generative service unavailable");
+        return errResult ("render_ahead_arm", jobManager.unavailableReason ("generative service unavailable"));
 
     // If another clip was armed, disarm it first (one Live clip at a time — the MLX worker is serial).
     if (renderAhead_.active && renderAhead_.clipId != clipId)
@@ -1864,7 +1864,7 @@ juce::var MoshOps::cmdListColors (const juce::var&)
 {
     // The SA3 colour rack (name + ASTD ceiling per color) for the generative UI.
     if (! jobManager.ensureServiceRunning())
-        return errResult ("list_colors", "generative service unavailable");
+        return errResult ("list_colors", jobManager.unavailableReason ("generative service unavailable"));
     auto r = jobManager.listColors();
     if (! (bool) r.getProperty ("ok", false))
         return okResult ("list_colors", [] { auto* o = new DynamicObject(); o->setProperty ("colors", Array<var>{}); return var (o); }());
@@ -1875,7 +1875,7 @@ juce::var MoshOps::cmdListLoras (const juce::var&)
 {
     // The LoRA rack library (drop-in adapters + cards) for the generative UI.
     if (! jobManager.ensureServiceRunning())
-        return errResult ("list_loras", "generative service unavailable");
+        return errResult ("list_loras", jobManager.unavailableReason ("generative service unavailable"));
     auto r = jobManager.listLoras();
     if (! (bool) r.getProperty ("ok", false))
         return okResult ("list_loras", [] { auto* o = new DynamicObject(); o->setProperty ("loras", Array<var>{}); return var (o); }());
@@ -1976,7 +1976,7 @@ juce::var MoshOps::cmdRenderLoraTake (const juce::var& args)
     }
 
     if (! jobManager.ensureServiceRunning())
-        return errResult ("render_lora_take", "generative service unavailable");
+        return errResult ("render_lora_take", jobManager.unavailableReason ("generative service unavailable"));
 
     // Identity: the same stack + prompt + seed + source must reuse its wav, and a
     // RETRAINED adapter of the same name must not. Names alone cannot tell those
@@ -2136,7 +2136,7 @@ juce::var MoshOps::cmdPromoteLoraCheckpoint (const juce::var& args)
     }
 
     if (! jobManager.ensureServiceRunning())
-        return errResult ("promote_lora_checkpoint", "generative service unavailable");
+        return errResult ("promote_lora_checkpoint", jobManager.unavailableReason ("generative service unavailable"));
 
     auto* body = new DynamicObject();
     body->setProperty ("source", source);
@@ -2169,7 +2169,7 @@ juce::var MoshOps::cmdListTransformTargets (const juce::var&)
 {
     // Route B: the transform target list (instruments / models) for the generative UI.
     if (! jobManager.ensureServiceRunning())
-        return errResult ("list_transform_targets", "generative service unavailable");
+        return errResult ("list_transform_targets", jobManager.unavailableReason ("generative service unavailable"));
     auto r = jobManager.listTransformTargets();
     if (! (bool) r.getProperty ("ok", false))
         return okResult ("list_transform_targets", [] { auto* o = new DynamicObject();

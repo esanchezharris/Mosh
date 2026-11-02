@@ -497,7 +497,7 @@ juce::var MoshOps::cmdBuildTrainingCorpus (const juce::var& args)
 juce::var MoshOps::cmdSubmitTrainingJob (const juce::var& args)
 {
     if (! trainingJobManager.ensureServiceRunning())
-        return errResult ("submit_training_job", "training service unavailable");
+        return errResult ("submit_training_job", trainingJobManager.unavailableReason ("training service unavailable"));
 
     const auto bundlePath = args.getProperty ("corpusBundle", var()).toString();
     if (bundlePath.isEmpty())
@@ -627,7 +627,7 @@ juce::var MoshOps::cmdImportLoraAdapter (const juce::var& args)
         return errResult ("import_lora_adapter", "missing 'name' for the imported adapter");
 
     if (! jobManager.ensureServiceRunning())
-        return errResult ("import_lora_adapter", "generative service unavailable");
+        return errResult ("import_lora_adapter", jobManager.unavailableReason ("generative service unavailable"));
 
     auto* body = new DynamicObject();
     body->setProperty ("path", artifactPath);

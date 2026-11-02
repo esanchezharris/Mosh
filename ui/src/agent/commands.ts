@@ -331,9 +331,10 @@ export function validateCommand(command: string, args: Record<string, unknown>):
   return null;
 }
 
-/** The catalog rendered for the LLM system prompt. */
-export function commandCatalogPrompt(): string {
-  return AGENT_COMMANDS.map((c) => {
+/** The catalog rendered for the LLM system prompt. `exclude` drops commands this Mac
+ *  can't run (aiTools.ts unavailableAgentCommands); omitted ⇒ the full catalog. */
+export function commandCatalogPrompt(exclude?: ReadonlySet<string>): string {
+  return AGENT_COMMANDS.filter((c) => !exclude?.has(c.command)).map((c) => {
     const a = c.args.map((x) => `${x.name}${x.required ? "" : "?"}`).join(", ");
     return `- ${c.command}(${a}) — ${c.desc}`;
   }).join("\n");

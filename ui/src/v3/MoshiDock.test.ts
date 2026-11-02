@@ -11,6 +11,7 @@ import { useProducerRack } from "../agent/loop/producerRack";
 import type { ChangeSet } from "../agent/executor";
 import { __resetMockForTests } from "../bridge.mock";
 import { noteUndoHeadMove, undoHeadMark } from "../agent/undoHead";
+import { AI_TOOLS_NEEDED } from "../aiTools";
 
 vi.mock("../vendor/moshi.js", () => ({}));
 vi.mock("../bridge", async () => {
@@ -526,6 +527,25 @@ describe("v3 Moshi dock", () => {
     const recipe = sent.find(([c]) => c === "generate_beat_recipe");
     expect(recipe?.[1]).toEqual({ mood: "lofi", tempo: 93, key: "D minor" });
     expect(useStore.getState().snapshot?.session.tempo).toBe(93);
+  });
+
+  it("AI tools: on a Mac without them a beat ask gets a plain answer and never reaches the service", async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    const sent: string[] = [];
+    useStore.setState({
+      snapshot: { ...useStore.getState().snapshot!, aiTools: { state: "off", pack: { python: "missing", sketch: "missing", transcribe: "missing" }, sa3: false } },
+      refresh: vi.fn(async () => {}),
+      exec: async (command, args, transaction, origin) => {
+        sent.push(command);
+        return originalExec(command, args, transaction, origin);
+      },
+    });
+    await mount();
+    await ask(host, "build me a lofi sketch");
+    expect(sent).not.toContain("generate_beat_recipe");
+    expect(useStore.getState().pushAgentUtter).toHaveBeenCalledWith("HUH", AI_TOOLS_NEEDED);
+    expect(host.textContent).toContain(AI_TOOLS_NEEDED);
   });
 
   it("U3: setAgentChangeSet refuses a change set stamped before the latest undo-head move; unstamped ones pass", () => {
