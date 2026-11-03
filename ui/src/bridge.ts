@@ -12,7 +12,9 @@ import {
   MOCK_ENABLED, mockExecute, mockSnapshot, mockOnEvent,
   mockRemoteStartPairing, mockRemoteStop, mockRemoteStatus,
   mockMicrophonePermissionStatus, mockRequestMicrophonePermission, mockPickFiles,
+  mockAiToolsStatus, mockAiToolsInstall, mockAiToolsCancel, mockAiToolsRemove,
 } from "./bridge.mock";
+import type { AiToolsInstallState, AiToolsInstallStatus, AiToolsStepId, AiToolsStepStatus } from "./types";
 
 type InitData = {
   __juce__functions?: string[];
@@ -353,6 +355,51 @@ export async function requestMicrophonePermission(): Promise<MicrophonePermissio
   if (!realNative()) return MOCK_ENABLED ? mockRequestMicrophonePermission() : { status: "not-determined" };
   return parseMicrophonePermissionResult(await native("request_microphone_permission")());
 }
+
+// ── "Add AI tools" (docs/AI-TOOLS-OPTIONAL-BRIEF-2026-11-02.md) ─────────────────
+// Machine state like the microphone permission: bridge calls, never MoshOps commands,
+// never undoable. Each answers with the installer status; progress arrives as the
+// ai_tools event, and the store re-reads snapshot.aiTools when a job ends.
+const AI_TOOLS_STATES: readonly AiToolsInstallState[] = [
+  "idle", "installing", "done", "failed", "cancelling", "cancelled", "removing", "removed", "unavailable",
+];
+const AI_TOOLS_STEPS: readonly AiToolsStepId[] = ["python", "sketch", "transcribe"];
+const AI_TOOLS_STEP_STATUSES: readonly AiToolsStepStatus[] = ["pending", "running", "done", "failed", "cancelled"];
+
+/** An older or absent backend answers with nothing; that reads as "can't add them here"
+ *  rather than as an Install button that cannot work. */
+export function parseAiToolsInstallStatus(value: unknown): AiToolsInstallStatus {
+  const v = (value ?? {}) as Record<string, unknown>;
+  const state = AI_TOOLS_STATES.find((s) => s === v.state) ?? "unavailable";
+  const stepsIn = Array.isArray(v.steps) ? v.steps as Record<string, unknown>[] : [];
+  const steps = AI_TOOLS_STEPS.map((id) => {
+    const raw = stepsIn.find((s) => s && s.id === id)?.status;
+    return { id, status: AI_TOOLS_STEP_STATUSES.find((s) => s === raw) ?? "pending" };
+  });
+  const step = AI_TOOLS_STEPS.find((s) => s === v.step) ?? "";
+  return {
+    available: v.available === true && state !== "unavailable",
+    state,
+    step,
+    steps,
+    error: typeof v.error === "string" ? v.error : "",
+    detail: typeof v.detail === "string" ? v.detail : "",
+    sizeEstimateMb: typeof v.sizeEstimateMb === "number" ? v.sizeEstimateMb : 0,
+  };
+}
+
+const AI_TOOLS_WEB_ONLY = parseAiToolsInstallStatus({
+  available: false, state: "unavailable", error: "Adding AI tools works in the Mosh app.",
+});
+
+async function aiToolsCall(name: string, mock: () => unknown): Promise<AiToolsInstallStatus> {
+  if (!realNative()) return MOCK_ENABLED ? parseAiToolsInstallStatus(mock()) : AI_TOOLS_WEB_ONLY;
+  return parseAiToolsInstallStatus(await native(name)());
+}
+export const aiToolsStatus = () => aiToolsCall("ai_tools_status", mockAiToolsStatus);
+export const aiToolsInstall = () => aiToolsCall("ai_tools_install", mockAiToolsInstall);
+export const aiToolsCancel = () => aiToolsCall("ai_tools_cancel", mockAiToolsCancel);
+export const aiToolsRemove = () => aiToolsCall("ai_tools_remove", mockAiToolsRemove);
 
 export type AddSampleFolderResult = {
   ok: boolean;

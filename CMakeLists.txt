@@ -381,6 +381,7 @@ if (MOSH_BUILD_APP)
         # Stage 5 — Tier-B generative layer (05)
         src/generative/GenerativeJobManager.cpp
         src/generative/AiTools.cpp
+        src/generative/AiToolsInstaller.cpp
         # Stage 7 — rights-cleared type-beat LoRA training
         src/training/TrainerRegistry.cpp
         src/training/TrainingJobManager.cpp
@@ -679,6 +680,29 @@ if (MOSH_BUILD_APP)
         else()
             message(STATUS "LoRA trainer not staged (resources/trainer/pmetal absent) — "
                            "local training will report a blocker until service/training/setup-trainer.sh runs")
+        endif()
+
+        # Optional AI tools (docs/AI-TOOLS-OPTIONAL-BRIEF-2026-11-02.md): the pinned uv
+        # binary that downloads a managed Python, so "Add AI tools" never needs the
+        # developer tools. Populated by scripts/fetch-uv.sh (version + sha256 pinned
+        # there), not committed (~28MB). Like the trainer it is a nested Mach-O, so it
+        # lives in Contents/Helpers and must be signed inside-out before the bundle.
+        # Staged only when present; without it the install says this build can't add
+        # AI tools (src/generative/AiToolsInstaller.cpp).
+        if(EXISTS "${CMAKE_SOURCE_DIR}/resources/uv/uv")
+            # The binary only: a non-code file in Contents/Helpers (resources/uv/VERSION)
+            # fails the bundle's code signature ("code object is not signed at all").
+            add_custom_command(TARGET Mosh POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                        "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Helpers/uv"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${CMAKE_SOURCE_DIR}/resources/uv/uv"
+                        "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Helpers/uv/uv"
+                COMMENT "Staging uv into Mosh.app/Contents/Helpers/uv"
+                VERBATIM)
+        else()
+            message(STATUS "uv not staged (resources/uv/uv absent) — "
+                           "Add AI tools will be unavailable until scripts/fetch-uv.sh runs")
         endif()
     endif()
 

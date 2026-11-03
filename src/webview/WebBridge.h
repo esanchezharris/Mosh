@@ -53,6 +53,19 @@ public:
     void setBrainRuntimeStartHandler (RuntimeStatusProvider p) { brainRuntimeStartHandler = std::move (p); }
     void setBrainRuntimeStopHandler  (RuntimeStatusProvider p) { brainRuntimeStopHandler  = std::move (p); }
 
+    /** "Add AI tools" (src/generative/AiToolsInstaller.h): machine state like the
+        microphone permission, so bridge calls rather than MoshOps commands. Each
+        returns the installer status; install/cancel/remove only start work on the
+        installer's own thread. Progress also arrives as the ai_tools event. */
+    void setAiToolsHandlers (RuntimeStatusProvider status, RuntimeStatusProvider install,
+                             RuntimeStatusProvider cancel, RuntimeStatusProvider remove)
+    {
+        aiToolsStatusProvider = std::move (status);
+        aiToolsInstallHandler = std::move (install);
+        aiToolsCancelHandler  = std::move (cancel);
+        aiToolsRemoveHandler  = std::move (remove);
+    }
+
     /** WP-11 best-of-n relays: UI → generative service, via native (the WebView
         cannot reach the service port itself). Same layering as brain_chat — brain
         traffic is UI-domain, NOT a MoshOps command. Both run on a launched thread
@@ -102,6 +115,10 @@ private:
     RuntimeStatusProvider brainRuntimeStatusProvider;
     RuntimeStatusProvider brainRuntimeStartHandler;
     RuntimeStatusProvider brainRuntimeStopHandler;
+    RuntimeStatusProvider aiToolsStatusProvider;
+    RuntimeStatusProvider aiToolsInstallHandler;
+    RuntimeStatusProvider aiToolsCancelHandler;
+    RuntimeStatusProvider aiToolsRemoveHandler;
     ServiceRelay      escalateHandler;
     ServiceRelay      archivePairHandler;
     juce::WebBrowserComponent* webView = nullptr;

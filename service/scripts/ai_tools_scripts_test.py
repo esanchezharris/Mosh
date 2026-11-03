@@ -254,6 +254,45 @@ def run_sh(env_dir_entries, intree=None, explicit_service_python=False, default_
     return proc.returncode, values, proc.stdout + proc.stderr + log, stub
 
 
+def run_sh_managed(sa3_venv):
+    """run.sh with only the installer's service.env (MOSH_MANAGED_PYTHON) in the env dir."""
+    tmp = tempfile.mkdtemp(prefix="aitools-runsh-managed-")
+    svc = os.path.join(tmp, "service")
+    os.makedirs(svc)
+    shutil.copy2(os.path.join(SERVICE, "run.sh"), svc)
+    env_dir = os.path.join(tmp, "ai-tools")
+    os.makedirs(env_dir)
+    dump = os.path.join(tmp, "dump.txt")
+    managed = os.path.join(tmp, "managed-python")
+    write_exec(managed, f'#!/bin/sh\necho "PY=$0" > "{dump}"\n')
+    with open(os.path.join(env_dir, "service.env"), "w") as f:
+        f.write(f'export MOSH_MANAGED_PYTHON="{managed}"\n')
+    sa3 = os.path.join(tmp, "sa3")
+    if sa3_venv:
+        os.makedirs(os.path.join(sa3, ".venv", "bin"))
+        write_exec(os.path.join(sa3, ".venv", "bin", "python"), f'#!/bin/sh\necho "PY=sa3-python" > "{dump}"\n')
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": tmp,
+        "MOSH_SERVICE_LOG": os.path.join(tmp, "service.log"),
+        "MOSH_AI_TOOLS_ENV_DIR": env_dir,
+        "SA3_MLX_DIR": sa3,
+        # .sa3.env absent + this dir present would run setup-sa3.sh; mark setup done.
+        "MOSH_ENABLE_SA3": "1",
+    }
+    if sa3_venv:
+        with open(os.path.join(svc, ".sa3.env"), "w") as f:
+            f.write("")
+    proc = subprocess.run(["bash", os.path.join(svc, "run.sh")], env=env, capture_output=True, text=True, timeout=60)
+    log = read(env["MOSH_SERVICE_LOG"]) if os.path.exists(env["MOSH_SERVICE_LOG"]) else ""
+    values = {}
+    if os.path.exists(dump):
+        for line in read(dump).splitlines():
+            k, _, val = line.partition("=")
+            values[k] = val
+    return proc.returncode, values, proc.stdout + proc.stderr + log, managed
+
+
 def run_sh_checks():
     print("— run.sh —")
     rc, v, out, _ = run_sh({"sketch.env": 'export SKETCH_PY="/managed/sketch/bin/python"\n'})
@@ -286,6 +325,13 @@ def run_sh_checks():
 
     rc, v, out, stub = run_sh({})
     check(rc == 0 and v.get("PY") == stub, "the env dir can supply the service interpreter", out)
+
+    # The installer's own service.env: the managed interpreter is the fallback ...
+    rc, v, out, _ = run_sh_managed(sa3_venv=False)
+    check(rc == 0 and v.get("PY", "").endswith("managed-python"), "MOSH_MANAGED_PYTHON is used when nothing else applies", out)
+    # ... and never displaces the SA3 venv on a Mac that has it.
+    rc, v, out, _ = run_sh_managed(sa3_venv=True)
+    check(rc == 0 and v.get("PY", "").endswith("sa3-python"), "the SA3 venv still beats MOSH_MANAGED_PYTHON", out)
 
 
 def main():

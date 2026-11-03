@@ -44,6 +44,16 @@ namespace
     }
 }
 
+File managedAiToolsPython (const File& envDir)
+{
+    const auto manifest = JSON::parse (envDir.getChildFile ("installed.json").loadFileAsString());
+    const auto path = manifest.getProperty ("python", {}).toString();
+    if (File::isAbsolutePath (path))
+        if (File py (path); py.existsAsFile())
+            return py;
+    return {};
+}
+
 var AiToolsStatus::toVar() const
 {
     auto* pack = new DynamicObject();
@@ -64,6 +74,8 @@ AiToolsProbeInputs AiToolsProbeInputs::forThisMachine()
     AiToolsProbeInputs in;
     in.home = File::getSpecialLocation (File::userHomeDirectory);
     in.env = [] (const char* key) { return SystemStats::getEnvironmentVariable (key, {}); };
+    if (auto dir = in.env ("MOSH_AI_TOOLS_ENV_DIR").trim(); File::isAbsolutePath (dir))
+        in.aiToolsEnvDir = File (dir);
    #if ! JUCE_MAC
     in.macStubPython = false;
    #endif
@@ -86,6 +98,10 @@ AiToolsStatus probeAiTools (const AiToolsProbeInputs& in)
         s.pythonSource = "explicit";
     else if (s.sa3)
         s.pythonSource = "sa3";
+    else if (managedAiToolsPython (in.aiToolsEnvDir != File()
+                                       ? in.aiToolsEnvDir
+                                       : in.home.getChildFile ("Library/Application Support/Mosh/ai-tools")) != File())
+        s.pythonSource = "managed";
     else if (! in.macStubPython)
         s.pythonSource = "system";
     else

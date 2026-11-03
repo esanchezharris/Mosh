@@ -73,8 +73,13 @@ The native side reports `aiTools` without spawning anything:
 
 The status comes from checking files on disk only: the managed Python exists, each venv's
 python exists, and the env pointers exist. It never runs `python3` and never calls `/health`.
-It arrives in the snapshot as a machine field (not a session field, not undoable) and as an
-`ai_tools` event while an install runs.
+It arrives in the snapshot as a machine field (not a session field, not undoable).
+
+*As built (slice 3):* the snapshot carries only what is on disk (`on`/`off`, the pack, `sa3`,
+`pythonSource`). What the installer is doing (`installing`, `failed`, `cancelled` and so on,
+per-step status, error, log tail, size) is the installer's own status: it is returned by
+the `ai_tools_*` bridge calls and pushed as the `ai_tools` event. When a job ends, the UI
+re-reads the snapshot.
 
 **`state` is `on` when** `python` and `sketch` are `ok`. Transcription only feeds the agent, so
 a missing `transcribe` makes the tools partial, not off.
@@ -124,9 +129,11 @@ Together these catch stale UI, the agent and scripts.
     only proof that a tool installed.
   - **Errors:** shown verbatim under friend copy, e.g. "Couldn't download the beatbox tool. Check
     your internet and try again."
-- **Size, stated before the click:** Python plus beatbox plus transcription is about 0.8 GB
-  (sketch ≈ 0.3 GB, transcribe ≈ 0.45 GB, Python ≈ 0.05 GB). Measure this on a clean account in
-  slice 3 and put the real number in the copy.
+- **Size, stated before the click:** about **850 MB**. Measured 2026-11-03 with uv 0.13.1 into an
+  empty home on the owner's Mac: Python 76 MB, beatbox 308 MB, transcription 466 MB, after the
+  cache is deleted. The install peaks around 1.3 GB, because uv's cache adds 436 MB until the
+  end, so the installer refuses to start below 1.5 GB free. It took about 80 seconds on the
+  owner's connection.
 - **Remove:** "Remove AI tools" deletes the managed Python, the two venvs and the env dir, then
   flips the state to `off`. It is never automatic. It never touches the owner's other venvs
   (`teardown`, `tunejury` and the rest).
@@ -165,19 +172,48 @@ Together these catch stale UI, the agent and scripts.
      - Unknown arguments now fail instead of being ignored.
    - **`run.sh`** sources every `*.env` in `~/Library/Application Support/Mosh/ai-tools`
      (`MOSH_AI_TOOLS_ENV_DIR` overrides it), after the in-tree files.
-     - Slice 3's runner can write `service.env` there, exporting `MOSH_SERVICE_PYTHON` as
-       the managed interpreter.
+     - Slice 3's installer writes `service.env` there, exporting `MOSH_MANAGED_PYTHON`. That
+       is run.sh's last fallback, after an explicit interpreter and the SA3 venv.
      - A caller's explicit `MOSH_SERVICE_PYTHON` still wins.
    - **Tests.** `service/scripts/ai_tools_scripts_test.py` makes 27 hermetic checks: 18 fail
      against main's scripts, and the rest are controls.
    - **Owner check.** Both scripts re-run with no flags on the owner's Mac: the venvs
      validated, nothing installed, and the pointers matched the canonical checkout's.
-3. **Slice 3 — bundled uv and the install runner.**
-   - Bundle `uv` and add the `install_ai_tools` / `cancel_ai_tools` / `remove_ai_tools` bridge
-     calls (machine state, `undoable:false`).
-   - Measure the real size on a fresh macOS user account.
-   - Tests: a fake-network runner test (a script stub that fails at each step proves cleanup).
-     A real install on a clean user account is an owner row.
+3. **Slice 3 — bundled uv and the install runner.** *Built on `claude/ai-tools-install`.*
+   - **uv:** `scripts/fetch-uv.sh` stages uv **0.13.1** (sha256 pinned per arch) into
+     `resources/uv/`. CMake copies it to `Contents/Helpers/uv` when present, and
+     `run-mosh.sh build_app` runs the fetch. BOM row and `docs/licenses/uv.txt` (MIT).
+     A build without it reports "This build of Mosh can't add AI tools."
+   - **Installer** (`src/generative/AiToolsInstaller`):
+     - Steps: `uv python install 3.11 --install-dir ~/Library/Mosh/python --no-bin`, then
+       both setup scripts with `--python` and `--env-dir`.
+     - Each step runs in its own process group, with only the uv folder and the base system
+       on PATH. Cancel signals the whole group.
+     - A failed or cancelled step deletes the folder it created. `installed.json` lists what
+       the installer created, and remove deletes only those folders, and only at their
+       expected paths.
+     - The uv cache is deleted when a job ends.
+     - The installer refuses to start below 1.5 GB free.
+   - **Probe and run.sh:** `pythonSource: "managed"` when `installed.json`'s interpreter
+     exists. `run.sh` uses `MOSH_MANAGED_PYTHON` after an explicit interpreter and the SA3
+     venv.
+   - **Bridge:** `ai_tools_status`, `ai_tools_install`, `ai_tools_cancel` and
+     `ai_tools_remove`, plus the `ai_tools` event. In `ui/src/bridge.ts`, a mock installer
+     walks the same steps and supports `?mockFault=ai-install-fail`.
+   - **Tests:**
+     - `tests/test_ai_tools_installer.cpp` drives the real setup scripts against a fake uv:
+       - success;
+       - failure at each step;
+       - retry without a second download;
+       - cancel in two steps, killing a grandchild;
+       - remove keeps an owner's venv and ignores a tampered manifest;
+       - the free-space refusal.
+     - The process-group kill and the remove guard were each broken on purpose and caught.
+     - A hidden `[.ai-tools-real]` case ran the real uv once (72 s, then removed).
+     - `ui/src/aiTools.install.test.ts` covers parsing, the mock installer and the store
+       refresh.
+   - **Not covered:** a fresh macOS user without the Command Line Tools. That is the
+     `AITOOLS-fresh` and `AITOOLS-install` owner rows.
 4. **Slice 4 — the Start page card and Settings row.** Tests: StartPage component tests (the
    card never blocks Go to the Booth); e2e with `?mockFault=ai-install-fail`.
 5. **Slice 5 — docs.** This brief's status, `docs/VERIFICATION.md` rows, and the tester

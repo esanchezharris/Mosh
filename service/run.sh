@@ -81,7 +81,9 @@ export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 # AI tools added from the app (docs/AI-TOOLS-OPTIONAL-BRIEF-2026-11-02.md): the setup
 # scripts run with --env-dir write their pointers here, outside the signed bundle.
 # Sourced after the in-tree files so the app-managed install wins; the explicit
-# MOSH_SERVICE_PYTHON restore below still beats anything written here.
+# MOSH_SERVICE_PYTHON restore below still beats anything written here. The installer's
+# service.env exports MOSH_MANAGED_PYTHON, the interpreter it downloaded, used below
+# only when nothing more specific (an explicit interpreter, the SA3 venv) applies.
 AI_TOOLS_ENV_DIR="${MOSH_AI_TOOLS_ENV_DIR:-$HOME/Library/Application Support/Mosh/ai-tools}"
 for f in "$AI_TOOLS_ENV_DIR"/*.env; do
   [[ -f "$f" ]] && source "$f"
@@ -122,9 +124,11 @@ export COLORRACK_DATA="${COLORRACK_DATA:-$(pwd)/colors/COLORRACK_DATA}"
 export MOSH_LORA_DIR="${MOSH_LORA_DIR:-$HOME/Library/Mosh/loras}"
 
 # SA3 is on by default; the carve runs under the MLX venv when present, else this
-# silently falls back to system python3 (FakeAdapter only). Set MOSH_ENABLE_SA3=0
-# to force FakeAdapter even when the venv exists.
-PY="${MOSH_SERVICE_PYTHON:-python3}"
+# falls back to the AI tools' managed Python, else system python3 (FakeAdapter only).
+# Set MOSH_ENABLE_SA3=0 to force FakeAdapter even when the venv exists. On a Mac
+# without the developer tools that last python3 is the stub that opens the install
+# dialog; native refuses to spawn before reaching it (src/generative/AiTools.h).
+PY="${MOSH_SERVICE_PYTHON:-${MOSH_MANAGED_PYTHON:-python3}}"
 if [[ -z "${MOSH_SERVICE_PYTHON:-}" && "${MOSH_ENABLE_SA3:-1}" == "1" && -x "$SA3_MLX_DIR/.venv/bin/python" ]]; then
   PY="$SA3_MLX_DIR/.venv/bin/python"
 fi
