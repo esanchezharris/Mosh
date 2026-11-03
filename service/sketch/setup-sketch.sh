@@ -19,7 +19,16 @@
 #
 # Idempotent + cheap to re-run: a healthy venv just re-validates (no installer runs);
 # pass --reinstall to force the full install/top-up path.
+#
+# The app's "Add AI tools" install (docs/AI-TOOLS-OPTIONAL-BRIEF-2026-11-02.md) runs this
+# from inside the signed bundle on a Mac that may have no developer tools:
+#   --python <path>  build the venv from this interpreter; never search PATH for python3
+#                    (on such a Mac /usr/bin/python3 is the stub that opens the "install
+#                    developer tools" dialog).
+#   --env-dir <dir>  write sketch.env there instead of .sketch.env next to this script, which in an
+#                    installed app is inside Mosh.app. run.sh sources that directory.
 set -euo pipefail
+CALLER_PWD="$(pwd)"
 cd "$(dirname "$0")"          # service/sketch/
 HERE="$(pwd)"
 
@@ -29,7 +38,20 @@ fail() { printf '\n✗ %s\n' "$*" >&2; exit 1; }
 printf '— Mosh Sketch setup (librosa beatbox transduction) —\n'
 
 REINSTALL=0
-[[ "${1:-}" == "--reinstall" ]] && REINSTALL=1
+PY_FLAG=""
+ENV_DIR=""
+abspath() { [[ "$1" == /* ]] && printf '%s' "$1" || printf '%s/%s' "$CALLER_PWD" "$1"; }
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --reinstall) REINSTALL=1 ;;
+    --python)  [[ $# -ge 2 ]] || fail "--python needs a path"; PY_FLAG="$(abspath "$2")"; shift ;;
+    --env-dir) [[ $# -ge 2 ]] || fail "--env-dir needs a directory"; ENV_DIR="$(abspath "$2")"; shift ;;
+    *) fail "unknown argument: $1 (expected --reinstall, --python <path>, --env-dir <dir>)" ;;
+  esac
+  shift
+done
+# Checked up front, not only on the install path, so a bad flag never passes silently.
+[[ -z "$PY_FLAG" || -x "$PY_FLAG" ]] || fail "--python $PY_FLAG is not an executable file"
 
 # Venv location (outside iCloud — see the header note).
 VENVS_ROOT="${MOSH_VENVS_DIR:-$HOME/Library/Mosh/venvs}"
@@ -55,10 +77,12 @@ if [[ "$REINSTALL" == "0" ]] && venv_ok >/dev/null 2>&1; then
   say "venv ✓ (validated at $VENV — install skipped; --reinstall forces a top-up)"
 else
   # 1. Pick a Python. Prefer 3.11 (best numba/librosa wheel coverage), then fall back.
-  PY=""
-  for cand in python3.11 python3.12 python3; do
-    if command -v "$cand" >/dev/null 2>&1; then PY="$cand"; break; fi
-  done
+  PY="$PY_FLAG"
+  if [[ -z "$PY" ]]; then
+    for cand in python3.11 python3.12 python3; do
+      if command -v "$cand" >/dev/null 2>&1; then PY="$cand"; break; fi
+    done
+  fi
   [[ -n "$PY" ]] || fail "no python3 found on PATH"
   say "python = $PY ($($PY --version 2>&1))"
 
@@ -97,7 +121,12 @@ else
 fi
 
 # 5. Persist the resolved interpreter so run.sh / the service find it with no exports.
-ENVFILE="$HERE/.sketch.env"
+if [[ -n "$ENV_DIR" ]]; then
+  mkdir -p "$ENV_DIR"
+  ENVFILE="$ENV_DIR/sketch.env"
+else
+  ENVFILE="$HERE/.sketch.env"
+fi
 cat > "$ENVFILE" <<EOF
 # Written by service/sketch/setup-sketch.sh — sourced by run.sh. Safe to delete (the
 # service falls back to /sketch -> 503 sketch_unavailable).

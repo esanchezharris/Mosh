@@ -78,6 +78,14 @@ export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 # (written by transform/setup-transform.sh) exports TRANSFORM_PY + RAVE_MODEL_DIR.
 # Absent → the `transform` adapter falls back to the deterministic fake (Route B).
 [[ -f transform/.transform.env ]] && source ./transform/.transform.env
+# AI tools added from the app (docs/AI-TOOLS-OPTIONAL-BRIEF-2026-11-02.md): the setup
+# scripts run with --env-dir write their pointers here, outside the signed bundle.
+# Sourced after the in-tree files so the app-managed install wins; the explicit
+# MOSH_SERVICE_PYTHON restore below still beats anything written here.
+AI_TOOLS_ENV_DIR="${MOSH_AI_TOOLS_ENV_DIR:-$HOME/Library/Application Support/Mosh/ai-tools}"
+for f in "$AI_TOOLS_ENV_DIR"/*.env; do
+  [[ -f "$f" ]] && source "$f"
+done
 [[ -f .recipe.env ]] && source ./.recipe.env
 [[ -n "$REQUESTED_MOSH_SERVICE_PYTHON" ]] && export MOSH_SERVICE_PYTHON="$REQUESTED_MOSH_SERVICE_PYTHON"
 [[ -n "$REQUESTED_MOSH_RECIPE_LIBRARY" ]] && export MOSH_RECIPE_LIBRARY="$REQUESTED_MOSH_RECIPE_LIBRARY"

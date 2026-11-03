@@ -155,12 +155,23 @@ Together these catch stale UI, the agent and scripts.
      where no venvs exist. vitest for the gating. An e2e with the mock reporting `off` and `on`.
    - Gates: cheap + native.
    - This slice alone fixes the friend hazard; the remaining slices add the opt-in.
-2. **Slice 2 — scripts made relocatable.** This slice is smaller than first thought.
+2. **Slice 2 — scripts made relocatable.** *Built on `claude/ai-tools-scripts`.*
    `service/server.py` already falls back to `~/Library/Mosh/venvs/<feature>/bin/python`
-   when no `.env` pointer exists, so only the `--python` flag is required, and only so the
-   setup scripts can use the managed Python. `--python` / `--env-dir` flags on the sketch and
-   transcribe setup scripts, and `run.sh` sourcing the env dir. The owner's existing setup must
-   keep working; test that by re-running both scripts with no flags.
+   when no `.env` pointer exists, so this slice is small:
+   - **Setup scripts.** `setup-sketch.sh` and `setup-transcribe.sh` take two flags:
+     - `--python <path>` builds the venv from that interpreter and never searches PATH. A
+       missing interpreter fails before anything runs.
+     - `--env-dir <dir>` writes `<name>.env` there instead of next to the script.
+     - Unknown arguments now fail instead of being ignored.
+   - **`run.sh`** sources every `*.env` in `~/Library/Application Support/Mosh/ai-tools`
+     (`MOSH_AI_TOOLS_ENV_DIR` overrides it), after the in-tree files.
+     - Slice 3's runner can write `service.env` there, exporting `MOSH_SERVICE_PYTHON` as
+       the managed interpreter.
+     - A caller's explicit `MOSH_SERVICE_PYTHON` still wins.
+   - **Tests.** `service/scripts/ai_tools_scripts_test.py` makes 27 hermetic checks: 18 fail
+     against main's scripts, and the rest are controls.
+   - **Owner check.** Both scripts re-run with no flags on the owner's Mac: the venvs
+     validated, nothing installed, and the pointers matched the canonical checkout's.
 3. **Slice 3 — bundled uv and the install runner.**
    - Bundle `uv` and add the `install_ai_tools` / `cancel_ai_tools` / `remove_ai_tools` bridge
      calls (machine state, `undoable:false`).
