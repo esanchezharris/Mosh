@@ -163,6 +163,8 @@ service/teardown/probe/.assets/
 
 # LoRA trainer binary staged by service/training/setup-trainer.sh (~29MB, fetched not committed)
 resources/trainer/
+# Pinned uv for the optional AI tools install (scripts/fetch-uv.sh, ~40MB)
+resources/uv/
 
 # Gate + build outputs that must never dirty the tree.
 #

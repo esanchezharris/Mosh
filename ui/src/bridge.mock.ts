@@ -18,7 +18,7 @@ import { DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES, TRACK_GROUP_MIX_ATTRIBUTES } from "
 import { scalePitchClasses } from "./ui/tuner";
 import { ottGainDb } from "./v3/panels/ott";
 import { xfMaxCuts, xfThreshold } from "./v3/panels/xfeedback";
-import type { AiToolsSnapshot, Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingSource, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine, PluginMeterReading } from "./types";
+import type { AiToolsInstallStatus, AiToolsSnapshot, AiToolsStepId, Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingSource, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine, PluginMeterReading } from "./types";
 import type { MicrophonePermissionResult, MicrophonePermissionStatus, RemoteResult, RemoteStatus } from "./bridge";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
@@ -2128,9 +2128,116 @@ function mockLoopState(): LoopState {
 // no usable Python, no Beatbox venv, no Stable Audio 3. Default: everything installed, as
 // on the owner's Mac, so every existing generative spec keeps its surfaces.
 const MOCK_AI_TOOLS_OFF = new URLSearchParams(window.location.search).get("mockAiTools") === "off";
-const MOCK_AI_TOOLS: AiToolsSnapshot = MOCK_AI_TOOLS_OFF
-  ? { state: "off", pack: { python: "missing", sketch: "missing", transcribe: "missing" }, sa3: false, pythonSource: "" }
+const AI_TOOLS_OFF: AiToolsSnapshot =
+  { state: "off", pack: { python: "missing", sketch: "missing", transcribe: "missing" }, sa3: false, pythonSource: "" };
+let MOCK_AI_TOOLS: AiToolsSnapshot = MOCK_AI_TOOLS_OFF
+  ? AI_TOOLS_OFF
   : { state: "on", pack: { python: "ok", sketch: "ok", transcribe: "ok" }, sa3: true, pythonSource: "sa3" };
+
+// The "Add AI tools" installer (native AiToolsInstaller), stepped on timers so a dev page
+// and the e2e see the same states and ai_tools events native sends. ?mockFault=ai-install-fail
+// fails the beatbox step with native's friend copy; a retry then succeeds. Installing never
+// grants Stable Audio 3: the friend pack is the small tools only.
+const AI_TOOLS_STEP_IDS: AiToolsStepId[] = ["python", "sketch", "transcribe"];
+const AI_TOOLS_STEP_MS = 250;
+let mockAiInstall: AiToolsInstallStatus = {
+  available: true, state: "idle", step: "",
+  steps: AI_TOOLS_STEP_IDS.map((id) => ({ id, status: "pending" })),
+  error: "", detail: "", sizeEstimateMb: 850,
+};
+let mockAiTimer: ReturnType<typeof setTimeout> | null = null;
+let mockAiFailNext = mockFault("ai-install-fail");
+const aiToolsSnapshotOf = (install: AiToolsInstallStatus): AiToolsSnapshot => {
+  const done = (id: AiToolsStepId) => install.steps.find((s) => s.id === id)?.status === "done";
+  const python = done("python"), sketch = done("sketch"), transcribe = done("transcribe");
+  return {
+    state: python && sketch ? "on" : "off",
+    pack: { python: python ? "ok" : "missing", sketch: sketch ? "ok" : "missing", transcribe: transcribe ? "ok" : "missing" },
+    sa3: false,
+    pythonSource: python ? "managed" : "",
+  };
+};
+function publishAiInstall(next: Partial<AiToolsInstallStatus>): void {
+  mockAiInstall = { ...mockAiInstall, ...next, steps: (next.steps ?? mockAiInstall.steps).map((s) => ({ ...s })) };
+  const ls = listeners.get("ai_tools");
+  if (ls) for (const fn of ls) fn(structuredClone(mockAiInstall));
+}
+const withStep = (id: AiToolsStepId, status: AiToolsInstallStatus["steps"][number]["status"]) =>
+  mockAiInstall.steps.map((s) => (s.id === id ? { ...s, status } : s));
+function runMockAiStep(index: number): void {
+  const id = AI_TOOLS_STEP_IDS[index];
+  if (!id) {
+    mockAiTimer = null;
+    MOCK_AI_TOOLS = aiToolsSnapshotOf(mockAiInstall);
+    publishAiInstall({ state: "done", step: "" });
+    return;
+  }
+  if (mockAiInstall.steps[index].status === "done") { runMockAiStep(index + 1); return; }
+  publishAiInstall({ state: "installing", step: id, steps: withStep(id, "running") });
+  mockAiTimer = setTimeout(() => {
+    if (id === "sketch" && mockAiFailNext) {
+      mockAiFailNext = false;
+      mockAiTimer = null;
+      MOCK_AI_TOOLS = aiToolsSnapshotOf({ ...mockAiInstall, steps: withStep(id, "failed") });
+      publishAiInstall({
+        state: "failed", step: id, steps: withStep(id, "failed"),
+        error: "Couldn't install the beatbox tool. Check your internet and try again.",
+        detail: "error: Failed to download `librosa==0.11.0`\n  Caused by: client error (Connect)",
+      });
+      return;
+    }
+    publishAiInstall({ steps: withStep(id, "done") });
+    runMockAiStep(index + 1);
+  }, AI_TOOLS_STEP_MS);
+}
+function resetMockAiTools(): void {
+  if (mockAiTimer !== null) clearTimeout(mockAiTimer);
+  mockAiTimer = null;
+  mockAiFailNext = mockFault("ai-install-fail");
+  MOCK_AI_TOOLS = MOCK_AI_TOOLS_OFF
+    ? AI_TOOLS_OFF
+    : { state: "on", pack: { python: "ok", sketch: "ok", transcribe: "ok" }, sa3: true, pythonSource: "sa3" };
+  mockAiInstall = {
+    available: true, state: "idle", step: "",
+    steps: AI_TOOLS_STEP_IDS.map((id) => ({ id, status: "pending" })),
+    error: "", detail: "", sizeEstimateMb: 850,
+  };
+}
+/** TEST-ONLY: start from a friend's Mac (no AI tools) regardless of the URL. */
+export function __mockAiToolsOffForTests(): void {
+  MOCK_AI_TOOLS = AI_TOOLS_OFF;
+}
+export function mockAiToolsStatus(): AiToolsInstallStatus {
+  return structuredClone(mockAiInstall);
+}
+export function mockAiToolsInstall(): AiToolsInstallStatus {
+  if (mockAiTimer === null && mockAiInstall.state !== "removing") {
+    publishAiInstall({ state: "installing", error: "", detail: "" });
+    runMockAiStep(0);
+  }
+  return mockAiToolsStatus();
+}
+export function mockAiToolsCancel(): AiToolsInstallStatus {
+  if (mockAiTimer !== null) {
+    clearTimeout(mockAiTimer);
+    mockAiTimer = null;
+    const running = mockAiInstall.steps.find((s) => s.status === "running");
+    // Like native: the half-made step is removed, finished steps stay.
+    publishAiInstall({ state: "cancelled", step: "", steps: running ? withStep(running.id, "cancelled") : mockAiInstall.steps });
+    MOCK_AI_TOOLS = aiToolsSnapshotOf(mockAiInstall);
+  }
+  return mockAiToolsStatus();
+}
+export function mockAiToolsRemove(): AiToolsInstallStatus {
+  if (mockAiTimer === null) {
+    MOCK_AI_TOOLS = AI_TOOLS_OFF;
+    publishAiInstall({
+      state: "removed", step: "", error: "", detail: "",
+      steps: AI_TOOLS_STEP_IDS.map((id) => ({ id, status: "pending" })),
+    });
+  }
+  return mockAiToolsStatus();
+}
 // Commands that start the generative or training service natively, so native refuses
 // them before any spawn when no usable Python exists (ensureServiceRunning).
 const MOCK_SERVICE_COMMANDS = new Set([
@@ -6745,6 +6852,7 @@ export function mockSnapshot<T = unknown>(): Promise<T> {
 // This module is dev-mock only — a production `vite build` strips it entirely.
 export function __resetMockForTests(): void {
   stopPlayback();
+  resetMockAiTools();
   resetMockMeters();
   resetImportedPaths();
   // Reset the id counters too, so a fresh test session is fully deterministic —

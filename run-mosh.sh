@@ -72,6 +72,9 @@ resolve_app() {
 build_app() {
   local cfg="${1:-macos-arm64-debug}" bld="${2:-macos-arm64-app}"
   echo "building Mosh ($cfg → $bld)…"
+  # The pinned uv for "Add AI tools" (no-op once staged). Offline is not fatal: the
+  # build still works, and the app then says it can't add AI tools.
+  "$ROOT/scripts/fetch-uv.sh" || echo "  warning: uv not staged — this build can't add AI tools" >&2
   cmake --preset "$cfg"
   cmake --build --preset "$bld"
 }

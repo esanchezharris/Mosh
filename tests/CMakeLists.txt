@@ -94,6 +94,7 @@ target_sources(MoshTests PRIVATE
     test_generative_jobmanager.cpp
     # Optional AI tools: the file-only probe and the pre-spawn refusal.
     test_ai_tools.cpp
+    test_ai_tools_installer.cpp
     test_reimagine_core.cpp
     test_reimagine_session.cpp
     test_rave_engine.cpp
@@ -117,6 +118,7 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/brain/OwnerRuntime.cpp
     ${CMAKE_SOURCE_DIR}/src/generative/GenerativeJobManager.cpp
     ${CMAKE_SOURCE_DIR}/src/generative/AiTools.cpp
+    ${CMAKE_SOURCE_DIR}/src/generative/AiToolsInstaller.cpp
     ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineCore.cpp
     ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineService.cpp
     ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineSession.cpp

@@ -740,6 +740,26 @@ export type AiToolsSnapshot = {
   pythonSource?: string;
 };
 
+/** "Add AI tools" installer status (native AiToolsInstaller; the ai_tools event carries the
+ *  same shape). snapshot.aiTools says whether the tools are present; this says what the
+ *  installer is doing. */
+export type AiToolsInstallState =
+  | "idle" | "installing" | "done" | "failed" | "cancelling" | "cancelled"
+  | "removing" | "removed" | "unavailable";
+export type AiToolsStepId = "python" | "sketch" | "transcribe";
+export type AiToolsStepStatus = "pending" | "running" | "done" | "failed" | "cancelled";
+export type AiToolsInstallStatus = {
+  available: boolean;
+  state: AiToolsInstallState;
+  step: AiToolsStepId | "";
+  steps: { id: AiToolsStepId; status: AiToolsStepStatus }[];
+  /** Friend copy for a failure, or why this build can't add AI tools. */
+  error: string;
+  /** The last lines of the install log, shown verbatim under the error. */
+  detail: string;
+  sizeEstimateMb: number;
+};
+
 export type AudioSelection = {
   type: string;
   outputDevice: string;

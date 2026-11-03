@@ -17,6 +17,7 @@
 #include "remote/RemoteCompanionServer.h"
 #include "brain/BrainProxy.h"
 #include "brain/OwnerRuntime.h"
+#include "generative/AiToolsInstaller.h"
 #include "telemetry/CrashHandler.h"
 #include "util/Env.h"
 #include <exception>
@@ -190,6 +191,11 @@ public:
             // spawns when owner-runtime.json sets autoStart.
             ownerRuntime->launchAutoStart();
         }
+
+        // "Add AI tools" (docs/AI-TOOLS-OPTIONAL-BRIEF-2026-11-02.md). Idle until the
+        // person asks; GUI only, so headless runs never install anything.
+        if (! headless && ! liveAudio && ! scanDeep && ! runScript)
+            aiTools = std::make_unique<mosh::AiToolsInstaller> (mosh::AiToolsInstaller::Paths::forThisApp());
 
         // SCAN GUARD (tier wall): a deep scan must NEVER warm the generative service.
         // Force MOSH_ENABLE_SA3=0 for THIS process BEFORE MoshOps (and thus jobManager)
@@ -679,6 +685,24 @@ public:
                 if (mainWindow != nullptr)
                     mainWindow->shell().bridge().emitEvent (juce::Identifier ("brain_runtime"), status);
             });
+        if (aiTools != nullptr)
+        {
+            auto* installer = aiTools.get();
+            bridge.setAiToolsHandlers ([installer] { return installer->status(); },
+                                       [installer] { return installer->install(); },
+                                       [installer] { return installer->cancel(); },
+                                       [installer] { return installer->remove(); });
+            // The installer reports from its worker thread; events go out on the
+            // message thread. The UI re-reads snapshot.aiTools when a job ends.
+            installer->setStatusCallback ([this] (juce::var status)
+            {
+                juce::MessageManager::callAsync ([this, status]
+                {
+                    if (mainWindow != nullptr)
+                        mainWindow->shell().bridge().emitEvent (juce::Identifier ("ai_tools"), status);
+                });
+            });
+        }
         // WP-11 best-of-n relays (brain traffic is UI-domain — same layering as
         // brain_chat, NOT MoshOps commands; the bridge runs these off-thread).
         bridge.setEscalateHandler ([this] (const juce::var& p) { return moshOps->escalateCandidates (p); });
@@ -783,6 +807,7 @@ public:
         menuController.reset();   // tears down the macOS main menu before the window
         if (ownerRuntime != nullptr) ownerRuntime->setStatusCallback ({});
         ownerRuntime.reset();
+        aiTools.reset();   // cancels a running install and waits for its step to stop
         mainWindow.reset();
         remoteServer.reset();
         moshOps.reset();
@@ -839,6 +864,7 @@ private:
     std::unique_ptr<MoshOps>    moshOps;
     std::unique_ptr<RemoteCompanionServer> remoteServer;
     std::unique_ptr<LocalBrainManager> ownerRuntime;
+    std::unique_ptr<mosh::AiToolsInstaller> aiTools;
     std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<MenuController> menuController;
     // N1: the menu bar is rebuilt only when File > Open Recent changed (message thread).

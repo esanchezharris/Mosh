@@ -580,6 +580,13 @@ export const useStore = create<State>((set, get, api) => ({
     // motion). The order + conditions here are load-bearing and must not change:
     // transport / levels / spectrum are the 30 Hz telemetry rails that deliberately
     // bypass the snapshot.
+    // "Add AI tools": when an install or remove ends, snapshot.aiTools has changed on
+    // disk, so re-read it (the installer's progress itself is for the setup card).
+    onEvent("ai_tools", (raw) => {
+      const state = (raw as { state?: unknown } | null)?.state;
+      if (state === "done" || state === "failed" || state === "cancelled" || state === "removed")
+        void get().refresh();
+    });
     onEvent("mosh_event", (raw) => {
       const ev = raw as MoshEvent;
       if (ev.type === "snapshot_invalidated") {

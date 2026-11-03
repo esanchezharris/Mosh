@@ -399,6 +399,36 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
             {
                 completion (brainRuntimeStopHandler ? brainRuntimeStopHandler() : juce::var());
             })
+        // "Add AI tools": each call only reads status or starts work on the installer's
+        // own thread, so they are cheap on the message thread.
+        .withNativeFunction (
+            juce::Identifier ("ai_tools_status"),
+            [this] (const juce::Array<juce::var>&,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                completion (aiToolsStatusProvider ? aiToolsStatusProvider() : juce::var());
+            })
+        .withNativeFunction (
+            juce::Identifier ("ai_tools_install"),
+            [this] (const juce::Array<juce::var>&,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                completion (aiToolsInstallHandler ? aiToolsInstallHandler() : juce::var());
+            })
+        .withNativeFunction (
+            juce::Identifier ("ai_tools_cancel"),
+            [this] (const juce::Array<juce::var>&,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                completion (aiToolsCancelHandler ? aiToolsCancelHandler() : juce::var());
+            })
+        .withNativeFunction (
+            juce::Identifier ("ai_tools_remove"),
+            [this] (const juce::Array<juce::var>&,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                completion (aiToolsRemoveHandler ? aiToolsRemoveHandler() : juce::var());
+            })
         // WP-11 best-of-n relays (UI → generative service via native — the WebView
         // cannot reach the service port). Threaded like brain_chat: the escalation
         // blocks up to ~60s in GenerativeJobManager, so it must never run on the

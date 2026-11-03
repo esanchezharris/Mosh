@@ -15,8 +15,9 @@ namespace mosh
 
     The probe mirrors how service/run.sh and service/server.py pick their
     interpreters, so "ok" here means the spawn would find a real Python:
-      python     — MOSH_SERVICE_PYTHON, the SA3 MLX venv, or (macOS) a python3 that
-                   Xcode or the Command Line Tools actually provide. Elsewhere,
+      python     — MOSH_SERVICE_PYTHON, the SA3 MLX venv, the managed Python that
+                   "Add AI tools" installed (AiToolsInstaller), or (macOS) a python3
+                   that Xcode or the Command Line Tools actually provide. Elsewhere,
                    system python is assumed (no stub exists there).
       sketch     — SKETCH_PY, else <venvs>/sketch/bin/python (Beatbox → beat).
       transcribe — BASIC_PITCH_PY, else <venvs>/transcribe/bin/python.
@@ -29,7 +30,7 @@ struct AiToolsStatus
     bool sketch = false;
     bool transcribe = false;
     bool sa3 = false;
-    juce::String pythonSource;    // "explicit" | "sa3" | "xcode" | "clt" | "system" | ""
+    juce::String pythonSource;    // "explicit" | "sa3" | "managed" | "xcode" | "clt" | "system" | ""
 
     bool on() const noexcept { return python && sketch; }
     juce::var toVar() const;
@@ -39,6 +40,7 @@ struct AiToolsStatus
 struct AiToolsProbeInputs
 {
     juce::File home;
+    juce::File aiToolsEnvDir;     // empty → <home>/Library/Application Support/Mosh/ai-tools
     std::function<juce::String (const char*)> env;
     juce::File xcodeSelectLink { "/var/db/xcode_select_link" };
     juce::File commandLineToolsPython { "/Library/Developer/CommandLineTools/usr/bin/python3" };
@@ -51,6 +53,10 @@ AiToolsStatus probeAiTools (const AiToolsProbeInputs& in);
 
 /** probeAiTools (AiToolsProbeInputs::forThisMachine()). */
 AiToolsStatus probeAiTools();
+
+/** The interpreter "Add AI tools" recorded in <envDir>/installed.json, if it still
+    exists (service/run.sh reads the same one as MOSH_MANAGED_PYTHON). */
+juce::File managedAiToolsPython (const juce::File& envDir);
 
 /** The error a refused generative command carries when no usable Python exists. */
 inline constexpr const char* kAiToolsMissingError =
