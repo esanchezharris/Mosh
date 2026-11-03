@@ -690,10 +690,14 @@ if (MOSH_BUILD_APP)
         # Staged only when present; without it the install says this build can't add
         # AI tools (src/generative/AiToolsInstaller.cpp).
         if(EXISTS "${CMAKE_SOURCE_DIR}/resources/uv/uv")
+            # The binary only: a non-code file in Contents/Helpers (resources/uv/VERSION)
+            # fails the bundle's code signature ("code object is not signed at all").
             add_custom_command(TARGET Mosh POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_directory
-                        "${CMAKE_SOURCE_DIR}/resources/uv"
+                COMMAND ${CMAKE_COMMAND} -E make_directory
                         "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Helpers/uv"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${CMAKE_SOURCE_DIR}/resources/uv/uv"
+                        "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Helpers/uv/uv"
                 COMMENT "Staging uv into Mosh.app/Contents/Helpers/uv"
                 VERBATIM)
         else()
