@@ -23,6 +23,7 @@ import { TrainingLauncher } from "./TrainingLauncher";
 import { LoraLab } from "../ui/LoraLab";
 import { HistoryFlyout } from "./HistoryFlyout";
 import { SettingsModal } from "./SettingsModal";
+import { AiToolsLauncher } from "./AiToolsCard";
 import { BrowserPane } from "./BrowserPane";
 import { PluginsPane } from "./PluginsPane";
 import { BoothView } from "./BoothView";
@@ -117,6 +118,7 @@ export function AppV3() {
       <MultiplayerLauncher />
       <PhoneLauncher />
       <TrainingLauncher />
+      <AiToolsLauncher />
       {/* The LoRA Lab is a floating window over the workspace, as in v2: training runs
           for minutes and the producer keeps working (and listening) while it does. */}
       <LoraLab />

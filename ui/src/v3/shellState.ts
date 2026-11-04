@@ -30,6 +30,8 @@ interface V3ShellState {
   phoneOpen: boolean;
   /** LoRA training tools: sources, the way into the LoRA Lab, the library (TrainingLauncher). */
   trainingOpen: boolean;
+  /** The "Add AI tools" setup card as a dialog (AiToolsLauncher), opened from the dock. */
+  aiToolsOpen: boolean;
   context: V3ContextMenu | null;
   setPane: (pane: V3Pane) => void;
   togglePane: (pane: Exclude<V3Pane, "none">) => void;
@@ -41,6 +43,7 @@ interface V3ShellState {
   setMpOpen: (open: boolean) => void;
   setPhoneOpen: (open: boolean) => void;
   setTrainingOpen: (open: boolean) => void;
+  setAiToolsOpen: (open: boolean) => void;
   setContext: (ctx: V3ContextMenu | null) => void;
 }
 
@@ -54,6 +57,7 @@ export const useV3 = create<V3ShellState>((set, get) => ({
   mpOpen: false,
   phoneOpen: false,
   trainingOpen: false,
+  aiToolsOpen: false,
   context: null,
   setPane: (pane) => set({ pane }),
   togglePane: (pane) => set({ pane: get().pane === pane ? "none" : pane }),
@@ -66,5 +70,6 @@ export const useV3 = create<V3ShellState>((set, get) => ({
   setMpOpen: (mpOpen) => set({ mpOpen, fileOpen: false, historyOpen: false, settingsOpen: false, phoneOpen: false, trainingOpen: false, context: null }),
   setPhoneOpen: (phoneOpen) => set({ phoneOpen, fileOpen: false, historyOpen: false, settingsOpen: false, mpOpen: false, trainingOpen: false, context: null }),
   setTrainingOpen: (trainingOpen) => set({ trainingOpen, fileOpen: false, historyOpen: false, settingsOpen: false, mpOpen: false, phoneOpen: false, context: null }),
+  setAiToolsOpen: (aiToolsOpen) => set({ aiToolsOpen, fileOpen: false, historyOpen: false, settingsOpen: false, mpOpen: false, phoneOpen: false, trainingOpen: false, context: null }),
   setContext: (context) => set({ context, fileOpen: false, historyOpen: false }),
 }));

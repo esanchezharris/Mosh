@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
-import { aiToolsRefusal } from "../aiTools";
+import { AI_TOOLS_NEEDED, aiToolsRefusal } from "../aiTools";
+import { AiToolsOfferButton } from "./AiToolsCard";
 import { runAgentBatch, logAgentTurn, undoAgentBatch } from "../agent/executor";
 import { matchFastPath } from "../agent/fastPath";
 import { handleFast } from "../agent/performer";
@@ -323,7 +324,12 @@ export function MoshiDock() {
           </button>
         </div>
       )}
-      {!safe && say && !receipt && <div className="receipt" role="status">{say}</div>}
+      {!safe && say && !receipt && (
+        <div className="receipt" role="status">
+          <span>{say}</span>
+          {say === AI_TOOLS_NEEDED && <AiToolsOfferButton />}
+        </div>
+      )}
       {clarify && (
         <div className="clarify" data-testid="v3-clarify">
           {choices.map((c) => (

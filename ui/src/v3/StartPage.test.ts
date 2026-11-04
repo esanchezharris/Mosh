@@ -13,7 +13,8 @@ import { microphonePermissionStatus, pickFiles, requestMicrophonePermission } fr
 import { useFileDrop } from "../hooks/useFileDrop";
 import { useSettings } from "../settings/store";
 import { useStore } from "../store";
-import type { CommandResult, Plugin, Snapshot, Track } from "../types";
+import type { AiToolsSnapshot, CommandResult, Plugin, Snapshot, Track } from "../types";
+import { __resetMockForTests } from "../bridge.mock";
 import { MIC_COPY } from "./micCheck";
 import { useV3 } from "./shellState";
 import { StartPage, useStartMemory } from "./StartPage";
@@ -40,6 +41,8 @@ interface EngineOpts {
   output?: string;
   tracks?: Track[];
   blockReason?: string;
+  /** snapshot.aiTools, when the test needs a Mac with or without the optional tools. */
+  aiTools?: AiToolsSnapshot;
   /** Return an error string to refuse a call. */
   refuse?: (call: Call) => string | null;
   /** Return a promise to hold a call (logged at once) until the test settles it. */
@@ -229,6 +232,7 @@ function makeEngine(opts: EngineOpts = {}) {
       contributions: [], phoneConnected: false, phoneSeenMs: 0, blockReason: state.blockReason,
     },
     audio: { outputDevice: opts.output ?? "External Headphones", inputDevice: "MacBook Pro Microphone" },
+    ...(opts.aiTools ? { aiTools: opts.aiTools } : {}),
   }) as unknown as Snapshot;
 
   const exec = vi.fn(async (command: string, args: Record<string, unknown> = {}): Promise<CommandResult> => {
@@ -609,6 +613,55 @@ describe("v3 Start page (StartPage.tsx) against a fake engine", () => {
     expect(useV3.getState().posture).toBe("start");
     await click("v3-start-go-booth");
     expect(useV3.getState().posture).toBe("booth");
+  });
+
+  // "Add AI tools" (docs/AI-TOOLS-OPTIONAL-BRIEF-2026-11-02.md §5.4): an offer under Go to
+  // the Booth, never a gate. The installer here is the dev mock's (bridge.mock.ts).
+  describe("the AI tools offer on Ready", () => {
+    const OFF: AiToolsSnapshot = { state: "off", pack: { python: "missing", sketch: "missing", transcribe: "missing" }, sa3: false, pythonSource: "" };
+    const ON: AiToolsSnapshot = { state: "on", pack: { python: "ok", sketch: "ok", transcribe: "ok" }, sa3: true, pythonSource: "sa3" };
+    beforeEach(() => __resetMockForTests());
+    afterEach(() => __resetMockForTests());
+
+    async function toReady(aiTools?: AiToolsSnapshot) {
+      await boot(aiTools ? { aiTools } : {});
+      await toVoice();
+      await click("v3-start-ready");
+      expect(stepOf()).toBe("ready");
+    }
+
+    it("a Mac without the tools gets a quiet offer with the size; installing never blocks the Booth", async () => {
+      await toReady(OFF);
+      expect(el("v3-start-ai-tools")!.textContent).toContain("About 0.8 GB");
+      expect(el("v3-ai-tools-card")).toBeNull();
+      await click("v3-start-ai-tools-open");
+      expect(el("v3-ai-tools-card")).not.toBeNull();
+      await click("v3-ai-tools-install");
+      expect(el("v3-ai-tools-status")!.textContent).toBe("Installing Python…");
+      const go = must<HTMLButtonElement>("v3-start-go-booth");
+      expect(go.disabled).toBe(false);
+      const before = engine.calls.length;
+      await click("v3-start-go-booth");
+      expect(useV3.getState().posture).toBe("booth");
+      expect(engine.calls.length, "the offer sends no session command").toBe(before);
+    });
+
+    it("Not now folds the card back to the offer line", async () => {
+      await toReady(OFF);
+      await click("v3-start-ai-tools-open");
+      await click("v3-ai-tools-close");
+      expect(el("v3-ai-tools-card")).toBeNull();
+      expect(el("v3-start-ai-tools-open")).not.toBeNull();
+    });
+
+    it("no offer when the tools are already here, or the backend predates the gate", async () => {
+      await toReady(ON);
+      expect(el("v3-start-ai-tools")).toBeNull();
+      act(() => root.unmount());
+      root = createRoot(host);
+      await toReady();
+      expect(el("v3-start-ai-tools")).toBeNull();
+    });
   });
 
   // (11)

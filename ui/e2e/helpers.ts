@@ -101,7 +101,7 @@ export async function bootV3(page: Page, query = ""): Promise<void> {
  *  the other boots: a reload must keep what the page's own "Show this when Mosh opens"
  *  checkbox wrote. `seed` picks a mock session (?mockSeed=), `fault` the mock's
  *  ?mockFault= knobs (bridge.mock.ts). */
-export async function bootV3Start(page: Page, opts: { seed?: string; fault?: string; colorway?: string } = {}): Promise<void> {
+export async function bootV3Start(page: Page, opts: { seed?: string; fault?: string; colorway?: string; aiToolsOff?: boolean } = {}): Promise<void> {
   await page.addInitScript((colorway) => {
     if (window.sessionStorage.getItem("mosh.e2e.seeded")) return;
     window.sessionStorage.setItem("mosh.e2e.seeded", "1");
@@ -113,6 +113,7 @@ export async function bootV3Start(page: Page, opts: { seed?: string; fault?: str
   const q = new URLSearchParams({ shell: "v3" });
   if (opts.seed) q.set("mockSeed", opts.seed);
   if (opts.fault) q.set("mockFault", opts.fault);
+  if (opts.aiToolsOff) q.set("mockAiTools", "off");
   await page.goto(`/?${q.toString()}`);
   await expect(page.getByTestId("v3-shell")).toBeVisible();
   await expect(page.getByTestId("v3-start")).toBeVisible();
