@@ -15,6 +15,7 @@ import { useV3 } from "./shellState";
 import { MoshiFace } from "./MoshiFace";
 import { SilhouetteWave } from "./waves/SilhouetteWave";
 import { InputMeter } from "./InputMeter";
+import { AiToolsStartOffer } from "./AiToolsCard";
 import { dropDrumBeat } from "./beats";
 import {
   AUTOTUNE_KEYS, AUTOTUNE_SCALES, PIPS, beatClipOf, beatDone, firstIncomplete, hasOwnChain, pickBackingTrack, pickContinueLead,
@@ -874,6 +875,7 @@ export function StartPage({ snapshot }: { snapshot: Snapshot }) {
               <button type="button" className="btn" data-testid="v3-start-add-phone" disabled={busy}
                 onClick={() => setStep("phone")}>Add your phone (optional)</button>
             </div>
+            <AiToolsStartOffer />
           </section>
         )}
 

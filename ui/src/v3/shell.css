@@ -1115,3 +1115,22 @@
   background: color-mix(in srgb, var(--bg) 55%, transparent); border: 2px dashed var(--accent);
 }
 .v3-shell .drop-veil span { padding: 8px 14px; border-radius: 999px; background: var(--glass); border: 1px solid var(--glass-border); color: var(--text); font-size: 12px; }
+
+/* "Add AI tools" (AiToolsCard.tsx): the Start page offer, the dock's dialog, the Settings row. */
+.v3-shell .start-ai { padding-top: 8px; border-top: 1px solid var(--fog-line); }
+.v3-shell .ai-card { display: flex; flex-direction: column; gap: 8px; }
+.v3-shell .ai-card p, .v3-shell [data-testid="v3-ai-tools-settings"] p { margin: 0; }
+.v3-shell .ai-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.v3-shell .ai-steps li { display: flex; gap: 8px; align-items: center; color: var(--muted); }
+.v3-shell .ai-steps li.running, .v3-shell .ai-steps li.done { color: var(--text); }
+.v3-shell .ai-steps li.done .mark { color: var(--accent); }
+.v3-shell .ai-steps li.failed { color: var(--warn); }
+.v3-shell .ai-steps .mark { width: 12px; text-align: center; }
+.v3-shell .ai-fail {
+  display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 8px; font-size: 12px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+.v3-shell .ai-detail { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: 10px; color: var(--muted); max-height: 120px; overflow-y: auto; }
+.v3-shell .ai-settings-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.v3-shell .receipt > [data-testid="v3-ai-tools-offer"] { align-self: flex-start; }

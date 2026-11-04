@@ -214,8 +214,24 @@ Together these catch stale UI, the agent and scripts.
        refresh.
    - **Not covered:** a fresh macOS user without the Command Line Tools. That is the
      `AITOOLS-fresh` and `AITOOLS-install` owner rows.
-4. **Slice 4 — the Start page card and Settings row.** Tests: StartPage component tests (the
-   card never blocks Go to the Booth); e2e with `?mockFault=ai-install-fail`.
+4. **Slice 4 — the Start page card and Settings row.** *Built on `claude/ai-tools-card`.*
+   - **One card** (`ui/src/v3/AiToolsCard.tsx`), met three ways:
+     - the Start page's Ready step: a quiet line under Go to the Booth ("Add AI tools
+       (optional): beatbox into a beat, and more. About 0.8 GB.") that opens the card in place;
+     - the dock's "That needs AI tools" reply: an **Add AI tools** button that opens the card
+       as a dialog;
+     - Settings → **AI tools**: status, size, Install / Cancel / Remove and the last error.
+   - **What the card offers** comes from `ui/src/v3/aiToolsSetup.ts`, which reads the snapshot
+     (what is on disk) and the installer status (what it is doing) together:
+     - tools set up outside Mosh (the owner's venvs, `pythonSource` not `managed`) show "On (set
+       up outside Mosh)" with no Install or Remove;
+     - a build that can't add them offers nothing: no Start page line, no dock button;
+     - a snapshot without `aiTools` (an older backend) reads as present.
+   - **Tests:** `aiToolsSetup.test.ts` (the view), `AiToolsCard.test.ts` (Settings install,
+     cancel and remove; the dock dialog; the failure copy and Try again), StartPage tests (the
+     offer never disables Go to the Booth and sends no session command), the dock test (the
+     reply carries the button), and `e2e/v3-ai-tools.spec.ts` (`?mockFault=ai-install-fail`
+     from the Start page, and dock → install → Beatbox shown → Settings → Remove → hidden).
 5. **Slice 5 — docs.** This brief's status, `docs/VERIFICATION.md` rows, and the tester
    quickstart line.
 

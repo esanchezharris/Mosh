@@ -12,6 +12,7 @@ import type { ChangeSet } from "../agent/executor";
 import { __resetMockForTests } from "../bridge.mock";
 import { noteUndoHeadMove, undoHeadMark } from "../agent/undoHead";
 import { AI_TOOLS_NEEDED } from "../aiTools";
+import { useV3 } from "./shellState";
 
 vi.mock("../vendor/moshi.js", () => ({}));
 vi.mock("../bridge", async () => {
@@ -546,6 +547,13 @@ describe("v3 Moshi dock", () => {
     expect(sent).not.toContain("generate_beat_recipe");
     expect(useStore.getState().pushAgentUtter).toHaveBeenCalledWith("HUH", AI_TOOLS_NEEDED);
     expect(host.textContent).toContain(AI_TOOLS_NEEDED);
+    // The reply carries the way to add them: the setup card, as a dialog.
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    const offer = host.querySelector<HTMLButtonElement>('[data-testid="v3-ai-tools-offer"]');
+    expect(offer).not.toBeNull();
+    act(() => offer!.click());
+    expect(useV3.getState().aiToolsOpen).toBe(true);
+    useV3.setState({ aiToolsOpen: false });
   });
 
   it("U3: setAgentChangeSet refuses a change set stamped before the latest undo-head move; unstamped ones pass", () => {

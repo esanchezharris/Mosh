@@ -10,6 +10,7 @@ import { activeShell } from "../v2/shellFlag";
 import type { Snapshot } from "../types";
 import { useV3 } from "./shellState";
 import { colorwayAttr } from "./colorway";
+import { AiToolsSettings } from "./AiToolsCard";
 
 const SWATCHES = [
   { key: "lime", hex: "#C6F542", label: "Lime" },
@@ -153,6 +154,8 @@ export function SettingsModal({ snapshot }: { snapshot: Snapshot }) {
               </button>
             </label>
           </div>
+
+          <AiToolsSettings />
 
           <EngineSettings snapshot={snapshot} />
           <AudioRouting snapshot={snapshot} />
