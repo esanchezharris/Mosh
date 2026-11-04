@@ -1,5 +1,12 @@
 # Optional AI tools — brief, 2026-11-02
 
+> **Status, 2026-11-03: built.** All five slices are on main: status and refusal (PR #810),
+> relocatable scripts (#811), bundled uv and the installer (#812), the Start page, dock and
+> Settings card (#813), and these docs. What is left is owner acceptance: the four `AITOOLS-*`
+> rows in [VERIFICATION.md](VERIFICATION.md), none of which tests can close. The installed app
+> has not been redeployed with this work, and no install has yet run on a fresh Mac without the
+> Command Line Tools.
+
 ## 1. Why
 
 Friends who only want to record themselves should get a Mosh that never touches Python, never
@@ -233,7 +240,12 @@ Together these catch stale UI, the agent and scripts.
      reply carries the button), and `e2e/v3-ai-tools.spec.ts` (`?mockFault=ai-install-fail`
      from the Start page, and dock → install → Beatbox shown → Settings → Remove → hidden).
 5. **Slice 5 — docs.** This brief's status, `docs/VERIFICATION.md` rows, and the tester
-   quickstart line.
+   quickstart line. *Built on `claude/ai-tools-docs`.*
+   - The four `AITOOLS-*` rows sit in their own section of `docs/VERIFICATION.md`, after the
+     Start page rows.
+   - `docs/TESTER_QUICKSTART.md` gains step 4's "Add AI tools" line. Its jam section now says
+     Re-imagine appears only after the optional SA3 setup in step 7, which is what the
+     slice 1 gating does.
 
 ## 7. Verification
 

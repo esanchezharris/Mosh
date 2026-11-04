@@ -12,8 +12,8 @@ Mac's built-in mic is fine to start.
 - An **Apple Silicon Mac** (an M1, M2, M3, or M4 chip — anything from the last few years).
   This build won't run on an older Intel Mac.
 - **macOS 11 (Big Sur) or newer.**
-- About **1 GB** of free disk space for the app itself. If you later opt into the real AI
-  engine (step 7, totally optional), budget another **~10 GB**.
+- About **1 GB** of free disk space for the app itself. The optional AI tools (step 4) take
+  about **0.8 GB** more; the real AI engine (step 7, totally optional) another **~10 GB**.
 - **Headphones.** Without them the mic hears the beat through the speakers.
 - An **iPhone** if you want to use it as a remote (optional).
 
@@ -65,6 +65,11 @@ Mac's built-in mic is fine to start.
    you're recording. Every pass is kept: **Keep** the good ones, **Again** for another try,
    **Review** to listen back. The counter shows how many takes you've done.
 
+Under **Go to the Booth** there's also **Add AI tools (optional)**: about 0.8 GB that lets
+Mosh turn a beatbox into a beat and transcribe your takes. You never need it to record or
+mix. It downloads in the background, so you can keep recording; you can add it, or remove it
+again, any time from **Settings → AI tools**.
+
 ## 5. Your phone as a remote (optional)
 
 On the "You're set" screen, click **Add your phone**, then **Show the code**, and scan it with
@@ -105,20 +110,20 @@ Mosh syncs the *song*, not your voices.
   file transfer at all.
 - Have **each person take one track** — you can both work at once without stepping on each
   other (a small lock badge shows who's currently editing a track).
-- Try a **Re-imagine** on a clip — it's Mosh's AI re-render of a take. The little **engine
-  badge** at the top of the generative panel shows which engine **your Mac will use for your
-  next render**: **SA3** for the real Stable Audio 3 model, or **preview** for a fast
-  stand-in (normal on a guest Mac that hasn't installed the real model yet — see step 7 if
-  you want the real thing). Once a render finishes, look just below its status for a small
+- **Re-imagine** (Mosh's AI re-render of a take) only appears once you've done the optional
+  real-model setup in step 7; until then the button isn't there at all. After that, the
+  little **engine badge** at the top of the generative panel shows which engine **your Mac
+  will use for your next render**: **SA3** for the real Stable Audio 3 model, or **preview**
+  for a fast stand-in. Once a render finishes, look just below its status for a small
   **"rendered by preview engine"** note — that's the truth for *that specific render* (the
   badge up top can only tell you what's about to happen, not what already happened, e.g. if
   the real model went down mid-session).
 
 ## 7. Optional: real AI on your Mac (10–30 minutes, ~10 GB)
 
-By default, Mosh's AI re-renders run on a fast **preview engine** — good enough to get a
-feel for the feature, but not the real model. If you want the genuine Stable Audio 3 model
-running locally on your own Mac:
+This is separate from **Add AI tools** on the Start page, which is the small 0.8 GB pack.
+Re-imagine needs the real Stable Audio 3 model. If you want it running locally on your own
+Mac:
 
 1. Make sure Apple's command-line developer tools are installed (one-time, if you don't
    already have them):
@@ -131,10 +136,10 @@ running locally on your own Mac:
    bash /Applications/Mosh.app/Contents/Resources/setup-guest.sh --all
    ```
 3. **Quit Mosh completely and reopen it.**
-4. Try another Re-imagine and check the engine badge again — it should now say **SA3**
-   instead of **preview**. That's your confirmation the real model is live.
+4. Re-imagine now shows on a clip. Try one and check the engine badge: it should say
+   **SA3**. That's your confirmation the real model is live.
 
-This step is entirely optional — everything else in Mosh works fine on the preview engine.
+This step is entirely optional: recording, mixing and everything else in Mosh work without it.
 
 ## 8. Tips (a few known quirks)
 
