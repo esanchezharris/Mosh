@@ -161,6 +161,17 @@ relay/multiplayer → MP-two-mac · phone pad → PHONE rows.
 | START-mic-denied | At the macOS prompt choose Don't Allow. | The Voice step says what to do; after turning Mosh on in System Settings, Retry passes. | 5 | — |
 | START-listen | Clean Lead and Tuned Lead (with your key) on your own voice. | Fit to be every friend's default; updates `validation.listening` in both preset files. | 15 | — |
 
+### Optional AI tools (owner; [docs/AI-TOOLS-OPTIONAL-BRIEF-2026-11-02.md](AI-TOOLS-OPTIONAL-BRIEF-2026-11-02.md))
+
+*The packaged app, built with `scripts/fetch-uv.sh` so `Contents/Helpers/uv` is present. `ui/e2e/v3-ai-tools.spec.ts`, `tests/test_ai_tools_installer.cpp` (fake uv) and the native refusal selftest are software evidence only; none of these rows can be closed by them.*
+
+| id | Steps | Expect | ~min | last-passed |
+| --- | --- | --- | --- | --- |
+| AITOOLS-fresh | A new macOS user account without the Command Line Tools: launch, record a take, open the Studio, click around (Files, the inspector, the dock). | No "install developer tools" dialog; no `python` process (`pgrep -fl python`); no "unavailable" error; no Re-Imagine, LoRA or Beatbox → beat buttons. | 10 | — |
+| AITOOLS-install | Same user: Start page → Ready → **Add AI tools** → Install, then go record while it runs. | The steps tick through Python → Beatbox → beat → Transcription; disk use stays within the stated ~0.8 GB; Beatbox → beat appears in Files and turns a real beatbox take into a beat. Cut the Wi-Fi on a second try: the card says to check the internet and offers Try again. | 15 | — |
+| AITOOLS-remove | Settings → AI tools → **Remove AI tools**. | The status reads Not installed; `~/Library/Mosh/python` and the `sketch` and `transcribe` venvs it made under `~/Library/Mosh/venvs` are gone (the disk space comes back); Beatbox → beat hides again. | 3 | — |
+| AITOOLS-owner | Your own Mac after updating the installed app. | Settings reads "On (set up outside Mosh)" with no Install or Remove; Re-Imagine, LoRA Lab and Beatbox → beat all still show and work. | 5 | — |
+
 ### V3 default-shell acceptance (owner; the last row of the V3 parity gate)
 
 *Row §5 of [docs/V3-PARITY-BRIEF-2026-09-17.md](V3-PARITY-BRIEF-2026-09-17.md). One real session on
