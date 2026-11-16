@@ -57,7 +57,11 @@ concurrency:
 
 jobs:
   linux-x64:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04 (GCC 15) in November 2026, and GCC 15 rejects
+    # a template body in Tracktion's vendored nanorange.hpp (iota_view::iterator::value,
+    # -Wtemplate-body). The last green run was ubuntu-24.04 / GCC 13.3. Unpin once the
+    # Tracktion pin carries a nanorange that builds under GCC 15.
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
