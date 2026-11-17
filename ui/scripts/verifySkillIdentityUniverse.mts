@@ -139,7 +139,11 @@ async function main(): Promise<void> {
 
     const porcelain = gitOutput(["status", "--porcelain"]);
     const gitState: "clean" | "dirty" | "unknown" = porcelain === null ? "unknown" : porcelain.length === 0 ? "clean" : "dirty";
-    if (gitState !== "clean") fail(`dirty/unknown Git state is not permitted in Release (gitState=${gitState})`);
+    if (gitState !== "clean") {
+      // Name the offending paths: a bare "dirty" in a CI log tail can't be acted on.
+      const paths = porcelain ? porcelain.split("\n").slice(0, 10).join("; ") : "";
+      fail(`dirty/unknown Git state is not permitted in Release (gitState=${gitState})${paths ? ` — ${paths}` : ""}`);
+    }
 
     const gitCommit = gitOutput(["rev-parse", "HEAD"]);
     if (!gitCommit || !/^[0-9a-f]{40}$/.test(gitCommit)) fail("stale/unresolvable git commit: `git rev-parse HEAD` did not return 40 lowercase hex characters");
