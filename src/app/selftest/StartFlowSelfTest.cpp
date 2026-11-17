@@ -2,8 +2,9 @@
 // Every step goes through MoshOps::execute with the JSON the UI sends, in the order the
 // UI sends it, so a regression here is a regression a first-time singer would hit:
 //
-//   START-FLOW      template -> beat on Backing -> BPM -> tempo + loop -> loop_setup ->
-//                   Clean Lead on both lanes -> Clean->Tuned as ONE undo step ->
+//   START-FLOW      template -> beat on Beat -> BPM -> tempo + loop -> loop_setup (the
+//                   phone remote) -> Takes mirrors the Lead's Tuned Lead -> Clean Lead on
+//                   both lanes -> Clean->Tuned as ONE undo step ->
 //                   the import_clip fallback beatImport.ts undoes.
 //   START-RELAUNCH  Tuned Lead survives a save and a cold load exactly once per lane.
 //
@@ -248,17 +249,17 @@ void runStartFlowSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSelfT
     String backing, vocal, takes, cleanFile, tunedFile;
 
     // ── START-FLOW ───────────────────────────────────────────────────────────────────
-    section ("START-FLOW: template, beat on Backing, tempo, loop, Clean Lead, Clean->Tuned in one undo");
+    section ("START-FLOW: template, beat on Beat, tempo, loop, Takes mirrors the Lead, Clean->Tuned in one undo");
     {
         // startVocalProject (menuActions.ts): exactly { template: "vocal" }.
         const auto made = command (ops, "new_project", object ({ { "template", "vocal" } }));
         check (ok (made), "new_project {template:'vocal'} ok" + why (made));
         backing = dataOf (made).getProperty ("backingTrackId", var()).toString();
         vocal   = dataOf (made).getProperty ("vocalTrackId", var()).toString();
-        check (backing.isNotEmpty() && backing == trackIdNamed (ops, "Backing"),
-               "the template made a Backing track and the result names it");
-        check (vocal.isNotEmpty() && vocal == trackIdNamed (ops, "Vocal") && vocal != backing,
-               "the template made a Vocal track and the result names it");
+        check (backing.isNotEmpty() && backing == trackIdNamed (ops, "Beat"),
+               "the template made a Beat track and the result names it (backingTrackId)");
+        check (vocal.isNotEmpty() && vocal == trackIdNamed (ops, "Lead vocal") && vocal != backing,
+               "the template made a Lead vocal track and the result names it (vocalTrackId)");
         if (backing.isEmpty() || vocal.isEmpty())
             return;
 
@@ -340,10 +341,24 @@ void runStartFlowSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSelfT
         check (tunedFile.isNotEmpty(), "list_presets {plugin:'track-chain'} lists mosh-tuned-lead-v0");
         if (cleanFile.isEmpty() || tunedFile.isEmpty())
             return;
-        check (rackPlugins (ops, vocal) == 0 && rackPlugins (ops, takes) == 0,
-               "Lead and Takes start with no rack plugins, so the default chain applies to both");
+        // The template already put Tuned Lead on the Lead; the Takes lane loop_setup just
+        // made has nothing. mirrorLeadChain (vocalSetup.ts) gives Takes the Lead's preset,
+        // so what the rapper hears while recording is what a kept pass plays back with.
+        check (presetStages (ops, vocal, kTunedId) == 3 && rackPlugins (ops, vocal) == 3 && rackPlugins (ops, takes) == 0,
+               "the template's Lead carries Tuned Lead and the new Takes lane starts empty (lead "
+                   + String (rackPlugins (ops, vocal)) + ", takes " + String (rackPlugins (ops, takes)) + ")");
+        {
+            const auto mirrored = command (ops, "apply_track_preset", object ({ { "trackId", takes }, { "file", tunedFile } }));
+            check (ok (mirrored) && presetStages (ops, takes, kTunedId) == 3 && pluginsOfType (ops, takes, "moshAutoTune") == 1,
+                   "mirroring the Lead's Tuned Lead onto Takes gives it one AutoTune and 3 tuned stages" + why (mirrored));
+        }
+        // The Voice step's "Clean Lead" choice, lane by lane (the switch under test below is
+        // the way back to Tuned).
         for (const auto& lane : { vocal, takes })
         {
+            for (int index : vocalPresetStageIndices (ops, lane))
+                check (ok (command (ops, "remove_plugin", object ({ { "trackId", lane }, { "index", index } }))),
+                       "remove_plugin of a tuned stage ok");
             const auto applied = command (ops, "apply_track_preset", object ({ { "trackId", lane }, { "file", cleanFile } }));
             check (ok (applied), "apply_track_preset Clean Lead ok" + why (applied));
         }

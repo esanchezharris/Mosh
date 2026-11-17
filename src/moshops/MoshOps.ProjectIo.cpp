@@ -21,6 +21,7 @@
 #include "ExportRange.h"
 #include "RenderSourceWindow.h"
 #include "StemExport.h"
+#include "TrackPreset.h"
 #include "state/Ids.h"
 #include "state/ProjectName.h"
 #include "engine/SourceRef.h"
@@ -1921,14 +1922,20 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
     refreshMpStemDir();   // PR-2: eng.editFile() just changed
     logLine ("new_project", args, true, {}, false);   // replaces the Edit — not undoable
 
-    // TPL-001 — the simple vocal recording template. Pure COMPOSITION of existing
-    // commands on the fresh Edit (nothing new in the engine): a Backing track to drop
-    // the beat on, a Vocal track armed with automatic input monitoring, a one-bar
-    // count-in, overdub takes (each loop pass stacks a take on the same clip), and a
-    // four-bar loop from bar 1 so the singer can go straight to Record. Every step
-    // is the same command the producer could issue by hand, so the JSONL reads as a
-    // recipe and any failure leaves an ordinary (partially set-up) project, never a
+    // TPL-001 — the recording template. Pure COMPOSITION of existing commands on the
+    // fresh Edit (nothing new in the engine): a Beat track to drop the beat on, a Lead
+    // vocal track armed with automatic input monitoring and the Tuned Lead chain (Mosh
+    // AutoTune first), an un-armed Ad-libs track with the lighter Clean Lead chain, a
+    // one-bar count-in, overdub takes (each loop pass stacks a take on the same clip),
+    // and a four-bar loop from bar 1 so the rapper can go straight to Record. Every
+    // step is the same command the producer could issue by hand, so the JSONL reads as
+    // a recipe and any failure leaves an ordinary (partially set-up) project, never a
     // broken one.
+    //
+    // UNDO POSTURE. new_project is undoable:false, and the template is the project's
+    // STARTING STATE, not a run of edits: the recipe's own undo steps are dropped when it
+    // finishes, so a first Cmd+Z in a brand-new song is a no-op rather than peeling the
+    // compressor off Ad-libs (or the tracks out from under the phone remote).
     auto* data = new DynamicObject();
     const auto tpl = args.getProperty ("template", var()).toString().trim().toLowerCase();
     if (tpl == "vocal")
@@ -1950,22 +1957,59 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
         {
             return r.getProperty ("data", var()).getProperty ("trackId", var()).toString();
         };
-        const auto backing = trackIdOf (run ("create_track", obj ({ { "name", "Backing" }, { "type", "audio" } })));
-        const auto vocal   = trackIdOf (run ("create_track", obj ({ { "name", "Vocal" },   { "type", "audio" } })));
-        if (vocal.isNotEmpty())
+        // The bundled chains, found the way the UI finds them (list_presets names file
+        // stems). A build that does not ship one still gets its tracks: the result says
+        // which chain is missing instead of failing the project.
+        const auto listed = run ("list_presets", obj ({ { "plugin", trackpreset::kLibraryKey } }));
+        const auto presetList = listed.getProperty ("data", var()).getProperty ("presets", var());
+        auto presetFile = [&] (const char* stem) -> String
         {
-            run ("arm_track",         obj ({ { "trackId", vocal }, { "armed", true } }));
-            run ("set_input_monitor", obj ({ { "trackId", vocal }, { "mode", "automatic" } }));
+            if (auto* arr = presetList.getArray())
+                for (auto& p : *arr)
+                    if (p.getProperty ("name", var()).toString() == stem)
+                        return p.getProperty ("file", var()).toString();
+            return {};
+        };
+        auto applyChain = [&] (const String& trackId, const char* stem) -> bool
+        {
+            const auto file = presetFile (stem);
+            if (trackId.isEmpty() || file.isEmpty())
+                return false;
+            return (bool) run ("apply_track_preset", obj ({ { "trackId", trackId }, { "file", file } }))
+                              .getProperty ("ok", false);
+        };
+
+        const auto beat  = trackIdOf (run ("create_track", obj ({ { "name", "Beat" },       { "type", "audio" } })));
+        const auto lead  = trackIdOf (run ("create_track", obj ({ { "name", "Lead vocal" }, { "type", "audio" } })));
+        const auto adlib = trackIdOf (run ("create_track", obj ({ { "name", "Ad-libs" },    { "type", "audio" } })));
+        // Chains BEFORE the arm: apply_track_preset refuses while recording, and nothing
+        // here should depend on whether an input device answered.
+        const bool leadChain  = applyChain (lead,  "mosh-tuned-lead-v0");
+        const bool adlibChain = applyChain (adlib, "mosh-clean-lead-v0");
+        if (lead.isNotEmpty())
+        {
+            run ("arm_track",         obj ({ { "trackId", lead }, { "armed", true } }));
+            run ("set_input_monitor", obj ({ { "trackId", lead }, { "mode", "automatic" } }));
         }
+        // Ad-libs is deliberately NOT armed: two armed tracks on one mic record every
+        // pass twice. The rapper arms it when they get to the doubles.
         run ("set_count_in",       obj ({ { "bars", 1 } }));
         run ("set_record_options", obj ({ { "overdub", true }, { "replaceExisting", false }, { "punchInOut", false } }));
         // Four bars from bar 1, in the Edit's own tempo/signature (16 beats in 4/4).
         const auto loopEnd = eng.edit().tempoSequence.toTime (tracktion::BeatPosition::fromBeats (16.0)).inSeconds();
         run ("set_transport", obj ({ { "loop", true }, { "loopStart", 0.0 }, { "loopEnd", loopEnd } }));
+        undoManager().clearUndoHistory();   // the starting state is not a run of edits (see above)
         eng.markDirty();
         data->setProperty ("template", "vocal");
-        data->setProperty ("backingTrackId", backing);
-        data->setProperty ("vocalTrackId", vocal);
+        // The original keys, for the consumers that already read them…
+        data->setProperty ("backingTrackId", beat);
+        data->setProperty ("vocalTrackId", lead);
+        // …and one key per track the template makes.
+        data->setProperty ("beatTrackId", beat);
+        data->setProperty ("leadTrackId", lead);
+        data->setProperty ("adlibTrackId", adlib);
+        data->setProperty ("leadPreset",  leadChain  ? "mosh.tuned-lead" : "");
+        data->setProperty ("adlibPreset", adlibChain ? "mosh.clean-lead" : "");
         data->setProperty ("loopEnd", loopEnd);
     }
     else if (tpl.isNotEmpty())
