@@ -37,7 +37,7 @@ jobs:
   # ── Classifier: decides whether the expensive macOS native lane is needed. ──
   # Reuses scripts/auto-loop/classify.sh — the SAME classifier the local gate and
   # the auto-loop use — so CI's skip decision can never drift from local truth.
-  # Runs on ubuntu (1× billing) to gate a macos-14 job (10× billing): a docs- or
+  # Runs on ubuntu (1× billing) to gate a macos-15 job (10× billing): a docs- or
   # UI-only PR skips ~12 min of macOS build, the single largest line on the bill.
   #
   # FAIL-CLOSED: native-gate's `if` runs the native lane unless this job
@@ -71,7 +71,7 @@ jobs:
   # ── Cheap lane: no native build. The required check. ────────────────────────
   cheap-gate:
     name: cheap gate (typecheck · vitest · e2e · py)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -146,7 +146,7 @@ jobs:
       (github.event_name != 'pull_request' ||
        needs.classify.result != 'success' ||
        needs.classify.outputs.class != 'cheap')
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
