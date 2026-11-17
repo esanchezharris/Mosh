@@ -29,14 +29,14 @@ Reuse the existing Mixer and PianoRoll, with the same V3 tokens. Mixer is a reve
 
 Native acceptance covers empty start, added audio/MIDI tracks, MIDI editing and undo, mixer level/mute changes and undo, Browser/Plugins reachability, Booth/count-in, Settings/Escape, save/reopen and exported scratch content. Capture the repaired states at the built Release identity; browser fixtures additionally check narrow containment and colorways.
 
-## 10. Start page (2026-10-30)
-The friends-first way in ([brief](../../../docs/LAUNCH-PAGE-BRIEF-2026-10-30.md)). A posture, not a modal: `"start"` replaces the rail, panes, arrangement, inspector and dock; the TopBar, device/recovery/missing-media notices and the modals stay. One centred column, at most 640px wide, with a 16px gutter: the splat and a four-pip rail (Beat · Voice · Phone · Record), one step card, a status line, and a footer (Show this when Mosh opens; Open the studio).
+## 10. First-run checklist (2026-11-16; was the Start page, 2026-10-30)
+The friends-first way in ([brief](../../../docs/LAUNCH-PAGE-BRIEF-2026-10-30.md)). Not a posture and not a modal: a 360px panel pinned to the workspace's lower right (`.start-check`), no scrim, the arrangement live behind it. Three items (Beat, Voice, Phone), one open at a time; each row shows a dot (empty, ✓, –), a one-line hint and To do / Done / Skipped. The song it works on (Beat, Lead vocal, Ad-libs) is made at launch by `RecordingSetup.tsx`. The Booth is never shown from here.
 
-Copy speaks to a nervous singer in the second person: short, no jargon, no blame. Mic, speaker and pairing problems are rewritten for a friend (`micCheck.ts`); other engine strings show verbatim. Numbers are tabular. A pip is done only once the singer has moved past it. Headphones are a warning, never a block. Every state stays readable: loading, opening, recording-disabled, and each failure in the brief.
+Copy speaks to a nervous rapper in the second person: short, no jargon, no blame, and none of "posture", "lane", "Booth" or "Moshi". Mic, speaker and pairing problems are rewritten for a friend (`micCheck.ts`); other engine strings show verbatim. Numbers are tabular. The beat's ✓ is a fact about the open song; Voice and Phone are what was confirmed. Headphones are a warning, never a block.
 
-Tokens only, all four colorways. Motion: the existing `--ease-out` colour/border transitions; the drop zone, countdown and pips are state changes, not animations. The splat uses its existing idle, thinking and laugh states.
+Tokens only, all four colorways. Motion: the existing `--ease-out` colour/border transitions; the drop zone and countdown are state changes, not animations.
 
-Verification: fresh native Release screenshots of welcome, beat (with a beat and its tempo), voice, ready and phone in four colorways; `ui/e2e/v3-start*.spec.ts` on the mock. Fixtures are software evidence, not listening or phone acceptance.
+Verification: screenshots of the checklist open, beat (with a beat and its tempo), voice, phone and all-set in four colorways (`ui/e2e/v3-acceptance-screens.spec.ts`); `ui/e2e/v3-checklist*.spec.ts` on the mock. Fixtures are software evidence, not listening or phone acceptance.
 
 ## Moshi in the dock
 

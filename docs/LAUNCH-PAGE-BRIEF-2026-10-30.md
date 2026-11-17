@@ -1,5 +1,31 @@
 # Start page — the friends-first way into Mosh (2026-10-30)
 
+> **Superseded in part, 2026-11-16 (owner-approved).** The flow below ended "→ the Booth" and
+> lived on its own full-screen page. Both are replaced:
+>
+> - Mosh opens into the regular V3 workspace with a **recording template** already made:
+>   **Beat** (empty), **Lead vocal** (armed, heard live through Tuned Lead) and **Ad-libs**
+>   (Clean Lead, not armed). One `new_project {template:"vocal"}`; its undo history starts empty.
+> - The page's steps are a **first-run checklist** over the workspace
+>   (`ui/src/v3/StartChecklist.tsx`): a small panel, not a modal, with three items (Beat, Voice,
+>   Phone). Each can be skipped; progress is remembered across launches; it closes for good with
+>   × and reopens from **File › Getting started** or the top bar's **Start** button.
+> - Nothing routes into the **Booth** any more and it has no menu entry. `BoothView.tsx` stays in
+>   the code for its redesign. The iPhone is a remote for record / keep / again / hear on the
+>   Lead vocal from the plain workspace; it is not the microphone.
+> - Showing the phone code sets the remote up on the Lead vocal (`loop_setup`) and puts the
+>   Lead's chain on the new Takes track, so the live voice keeps its tuning. A phone that is
+>   already paired when a new song opens gets the same setup by itself (`RecordingSetup.tsx`).
+>
+> What still holds from this brief: the beat rules (bar 1 on the beat's track, detect then
+> confirm, ÷2 / ×2), the mic-permission-before-`new_project` rule, the speaker guard, the
+> Clean/Tuned switch rules, the failure copy, and the shipping blockers in §8. Sections 2 to 6
+> are kept as the record of the page that shipped on 2026-10-31; where they say "Start page",
+> "Backing", "Vocal", "I'm ready" or "Go to the Booth", read the checklist, "Beat",
+> "Lead vocal", "Sounds right" and the workspace. `ui/e2e/v3-checklist*.spec.ts`,
+> `StartChecklist.test.ts` and the selftest's TPL-001 / START-FLOW / START-PHONE sections are
+> the current software evidence.
+
 | | |
 |---|---|
 | **Baseline** | `main` c5bb3480 + PR #794 (rebased) + PR #784 |

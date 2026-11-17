@@ -27,7 +27,8 @@ companion — see [IPHONE_COMPANION.md](IPHONE_COMPANION.md).
 | Server routing (`GET /pad`, `GET /api/state`, `POST /api/action`) | `src/remote/RemoteCompanionServer.cpp` |
 | Desktop QR/pairing modal | `ui/src/v3/PhoneLauncher.tsx` |
 | Booth (rewritten on the loop) | `ui/src/v3/BoothView.tsx` |
-| Start page Phone step (inline QR, countdown, New code) | `ui/src/v3/StartPage.tsx`, `ui/src/v3/phonePairing.ts` |
+| Getting started checklist, Phone item (sets the remote up on the Lead vocal, inline QR, countdown, New code) | `ui/src/v3/StartChecklist.tsx`, `ui/src/v3/phonePairing.ts`, `ui/src/v3/vocalSetup.ts` |
+| Remote set up by itself when a paired phone meets a new song | `ui/src/v3/RecordingSetup.tsx` |
 
 ## The loop model
 

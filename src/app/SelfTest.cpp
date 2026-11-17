@@ -13,6 +13,7 @@
 #include "moshops/AgentMemoryStore.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "plugins/moshfx/MoshFxPlugins.h"
+#include "plugins/moshfx/retune/RetuneCore.h"
 #include "plugins/moshfx/MoshLowPassPlugin.h"
 #include "plugins/moshfx/MoshFourOscPlugin.h"
 #include "plugins/moshfx/MoshSamplerPlugin.h"
@@ -13129,6 +13130,27 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 if (t.getProperty ("id", var()).toString() == beatId)
                     check (t.getProperty ("plugins", var()).size() == 0 && t.getProperty ("clips", var()).size() == 0,
                            "the Beat track is empty: no effects, no clips");
+        // LIVE-MONITORING DELAY the chain itself adds (the device path is hardware and is
+        // the owner's acoustic check, VERIFICATION.md START-latency). Only AutoTune reports
+        // any; the high-pass and compressor are zero-latency. Read from the Lead's real
+        // plugin state: look-ahead must be 0, which leaves the pitch shifter's fixed delay.
+        if (auto* leadTrack = te::findAudioTrackForID (eng.edit(), te::EditItemID::fromString (vocalId)))
+        {
+            float lookaheadMs = -1.0f;
+            for (auto* p : leadTrack->pluginList.getPlugins())
+                if (dynamic_cast<MoshAutoTunePlugin*> (p) != nullptr)
+                    lookaheadMs = (float) p->state.getProperty ("moshAutoTuneLookahead", 0.0f);
+            check (lookaheadMs == 0.0f, "the Lead's AutoTune ships with look-ahead 0 (" + String (lookaheadMs, 2) + " ms)");
+            using moshfx::retune::RetuneCore;
+            const double at0   = 1000.0 * RetuneCore::latencySamplesFor (48000.0, 0.0f) / 48000.0;
+            const double atMax = 1000.0 * RetuneCore::latencySamplesFor (48000.0, RetuneCore::kMaxLookaheadMs) / 48000.0;
+            check (at0 > 0.0 && at0 < 3.0,
+                   "Tuned Lead adds " + String (at0, 2) + " ms to the live voice at look-ahead 0 (48 kHz, "
+                       + String (RetuneCore::latencySamplesFor (48000.0, 0.0f)) + " samples); under 3 ms");
+            check (std::abs ((atMax - at0) - (double) RetuneCore::kMaxLookaheadMs) < 0.05,
+                   "look-ahead adds its own length on top: " + String (atMax, 2) + " ms at the "
+                       + String (RetuneCore::kMaxLookaheadMs, 0) + " ms maximum");
+        }
         // UNDO POSTURE: the template is the project's starting state (new_project is
         // undoable:false), not a run of edits. Nothing to undo, and an Undo changes nothing.
         check (! eng.edit().getUndoManager().canUndo(), "a fresh template project has nothing to undo");
