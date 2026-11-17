@@ -197,7 +197,10 @@ TEST_CASE ("ensureServiceRunning waits out a slow-but-alive cold start instead o
         "        else:\n"
         "            self.send_response(404); self.end_headers()\n"
         "    def log_message(self, *a): pass\n"
-        "http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()\n");
+        "class S(http.server.HTTPServer):\n"
+        "    def server_bind(self):\n"
+        "        import socketserver; socketserver.TCPServer.server_bind(self); self.server_name, self.server_port = '127.0.0.1', self.server_address[1]\n"
+        "S(('127.0.0.1', port), H).serve_forever()\n");
 
     ScopedEnv host ("MOSH_SERVICE_HOST", "127.0.0.1");
     ScopedEnv port ("MOSH_SERVICE_PORT", "59994");
@@ -267,7 +270,10 @@ TEST_CASE ("cancelJob verifies the /cancel acknowledgement instead of firing-and
             "        self.end_headers()\n"
             "        self.wfile.write(body)\n"
             "    def log_message(self, *a): pass\n"
-            "http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()\n");
+            "class S(http.server.HTTPServer):\n"
+            "    def server_bind(self):\n"
+            "        import socketserver; socketserver.TCPServer.server_bind(self); self.server_name, self.server_port = '127.0.0.1', self.server_address[1]\n"
+            "S(('127.0.0.1', port), H).serve_forever()\n");
 
         ScopedEnv host ("MOSH_SERVICE_HOST", "127.0.0.1");
         ScopedEnv port ("MOSH_SERVICE_PORT", "59997");

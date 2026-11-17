@@ -218,6 +218,10 @@ jobs:
         working-directory: ui
         run: npm ci
 
+      - name: Probe loopback reverse DNS (diagnostic)
+        # http.server used to reverse-resolve its host before listen(); a slow answer here is
+        # what held every local test service closed on the first macos-15 runs.
+        run: python3 -c "import socket,time; t=time.time(); n=socket.getfqdn('127.0.0.1'); print(f'getfqdn(127.0.0.1)={n!r} in {time.time()-t:.1f}s')"
       - name: Run native gate
         env:
           MOSH_AUTOLOOP_HOME: ${{ runner.temp }}/mosh-autoloop
