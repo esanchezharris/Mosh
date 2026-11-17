@@ -96,12 +96,13 @@ export async function bootV3(page: Page, query = ""): Promise<void> {
   await expect(page.getByTestId("v3-arrangement")).toBeVisible();
 }
 
-/** Boot V3 onto the Start page (StartPage.tsx) with the startOnLaunch setting ON. The
- *  seed is written ONCE per test (a sessionStorage marker), not on every navigation like
- *  the other boots: a reload must keep what the page's own "Show this when Mosh opens"
- *  checkbox wrote. `seed` picks a mock session (?mockSeed=), `fault` the mock's
- *  ?mockFault= knobs (bridge.mock.ts). */
-export async function bootV3Start(page: Page, opts: { seed?: string; fault?: string; colorway?: string; aiToolsOff?: boolean } = {}): Promise<void> {
+/** Boot V3 the way a friend's first launch does: the "set up a song when Mosh opens"
+ *  setting ON, so an empty session becomes the recording template and the first-run
+ *  checklist (StartChecklist.tsx) opens over the workspace. The seed is written ONCE per
+ *  test (a sessionStorage marker), not on every navigation like the other boots: a reload
+ *  must keep what the checklist itself wrote. `seed` picks a mock session (?mockSeed=),
+ *  `fault` the mock's ?mockFault= knobs (bridge.mock.ts), `query` any other knob. */
+export async function bootV3Start(page: Page, opts: { seed?: string; fault?: string; colorway?: string; aiToolsOff?: boolean; query?: Record<string, string> } = {}): Promise<void> {
   await page.addInitScript((colorway) => {
     if (window.sessionStorage.getItem("mosh.e2e.seeded")) return;
     window.sessionStorage.setItem("mosh.e2e.seeded", "1");
@@ -110,13 +111,31 @@ export async function bootV3Start(page: Page, opts: { seed?: string; fault?: str
       version: 2, template: null, values: { colorway, startOnLaunch: true }, keyOverrides: {},
     }));
   }, opts.colorway ?? "lime");
-  const q = new URLSearchParams({ shell: "v3" });
+  const q = new URLSearchParams({ shell: "v3", ...(opts.query ?? {}) });
   if (opts.seed) q.set("mockSeed", opts.seed);
   if (opts.fault) q.set("mockFault", opts.fault);
   if (opts.aiToolsOff) q.set("mockAiTools", "off");
   await page.goto(`/?${q.toString()}`);
   await expect(page.getByTestId("v3-shell")).toBeVisible();
-  await expect(page.getByTestId("v3-start")).toBeVisible();
+  // The workspace, never a separate page and never the Booth.
+  await expect(page.getByTestId("v3-arrangement")).toBeVisible();
+  await expect(page.getByTestId("v3-checklist")).toBeVisible();
+  await expect(page.getByTestId("v3-booth")).toHaveCount(0);
+}
+
+/** Show the Booth view. It has no menu entry while its redesign is pending (the friends
+ *  flow never routes into it), so the Booth's own specs switch to it through the dev
+ *  handle shellState.ts exposes. */
+export async function enterBooth(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __moshV3: { getState: () => { setPosture: (p: "booth") => void } };
+      __moshStore: { getState: () => { setView: (v: "arrange") => void } };
+    };
+    w.__moshStore.getState().setView("arrange");
+    w.__moshV3.getState().setPosture("booth");
+  });
+  await expect(page.getByTestId("v3-booth")).toBeVisible();
 }
 
 /** Switch the mock's output to headphones. The default mock session plays through

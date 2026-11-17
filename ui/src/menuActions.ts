@@ -183,8 +183,12 @@ async function writeSessionSummary(ctx: ActionCtx, digest: string): Promise<void
 export interface VocalProjectResult {
   ok: boolean;
   error?: string;
+  /** The beat's track ("Beat"). */
   backingTrackId: string;
+  /** The Lead vocal track. */
   vocalTrackId: string;
+  /** The Ad-libs track ("" from an engine that predates the three-track template). */
+  adlibTrackId: string;
   /** Set when the engine did not recognise the template (an older build): the project is
    *  then an empty one, and the caller must create its own tracks. */
   templateError: string;
@@ -201,13 +205,14 @@ export async function startVocalProject(ctx: ActionCtx): Promise<VocalProjectRes
   const result = await store.exec("new_project", { template: "vocal" });
   await store.refresh();
   store.invalidateMemory?.();
-  const data = (result.data ?? {}) as { backingTrackId?: unknown; vocalTrackId?: unknown; templateError?: unknown };
+  const data = (result.data ?? {}) as { backingTrackId?: unknown; vocalTrackId?: unknown; adlibTrackId?: unknown; templateError?: unknown };
   const str = (v: unknown) => (typeof v === "string" ? v : "");
   return {
     ok: !!result.ok,
     ...(result.ok ? {} : { error: result.error ?? "new_project failed" }),
     backingTrackId: str(data.backingTrackId),
     vocalTrackId: str(data.vocalTrackId),
+    adlibTrackId: str(data.adlibTrackId),
     templateError: str(data.templateError),
   };
 }

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { bootV3, bootV3Start, commandTrace } from "./helpers";
+import { bootV3, commandTrace } from "./helpers";
 
 // Optional AI tools (docs/AI-TOOLS-OPTIONAL-BRIEF-2026-11-02.md). A friend's Mac has no
 // Python, no Beatbox venv and no Stable Audio 3 (?mockAiTools=off): nothing generative is
@@ -47,34 +47,6 @@ test("control: the owner's Mac keeps every generative surface", async ({ page })
   await expect(page.getByTestId("v3-reimagine-open")).toBeEnabled();
   const browser = await audioRow(page);
   await expect(browser.getByTestId("sample-sketch-beatbox").first()).toBeVisible();
-});
-
-// "Add AI tools" (§5.4): the Start page's Ready step offers the setup under Go to the Booth;
-// ?mockFault=ai-install-fail fails the beatbox step once, as native would on a network error.
-test("Start page: a failed install says why, never blocks the Booth, and Try again finishes it", async ({ page }) => {
-  await bootV3Start(page, { seed: "fresh", fault: "ai-install-fail", aiToolsOff: true });
-  await page.getByTestId("v3-start-new").click();
-  await page.getByTestId("v3-start-skip-beat").click();
-  await page.getByTestId("v3-start-ready").click();
-  await expect(page.getByTestId("v3-start")).toHaveAttribute("data-step", "ready");
-
-  const offer = page.getByTestId("v3-start-ai-tools");
-  await expect(offer).toContainText("About 0.8 GB");
-  await page.getByTestId("v3-start-ai-tools-open").click();
-  await page.getByTestId("v3-ai-tools-install").click();
-  const card = page.getByTestId("v3-ai-tools-card");
-  await expect(card).toHaveAttribute("data-phase", "failed");
-  await expect(page.getByTestId("v3-ai-tools-error")).toContainText("Couldn't install the beatbox tool. Check your internet and try again.");
-  await expect(page.getByTestId("v3-ai-tools-detail")).toContainText("librosa");
-  await expect(page.getByTestId("v3-start-go-booth")).toBeEnabled();
-
-  await page.getByTestId("v3-ai-tools-install").click();
-  await expect(card).toHaveAttribute("data-phase", "installing");
-  await expect(page.getByTestId("v3-start-go-booth")).toBeEnabled();
-  await expect(page.getByTestId("v3-ai-tools-done")).toBeVisible();
-
-  await page.getByTestId("v3-start-go-booth").click();
-  await expect(page.getByTestId("v3-booth")).toBeVisible();
 });
 
 test("the dock's 'That needs AI tools' reply opens the setup; Settings then offers Remove", async ({ page }) => {

@@ -5174,26 +5174,37 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       stopPlayback();
       // TPL-001 — mirror the native recipe with the mock's own commands (synchronous
       // dispatch, exactly as native composes through execute()) so the UI sees the same
-      // shape: two audio tracks, Vocal armed, count-in 1, overdub, a four-bar loop.
+      // shape: Beat, Lead vocal (armed, Tuned Lead) and Ad-libs (not armed, Clean Lead),
+      // count-in 1, overdub, a four-bar loop, and no undo history.
       const template = str(args.template).trim().toLowerCase();
       if (template === "vocal") {
-        const t1 = dispatch("create_track", { name: "Backing", type: "audio" });
-        const t2 = dispatch("create_track", { name: "Vocal", type: "audio" });
-        const vocalId = (t2.data as { trackId?: string } | undefined)?.trackId ?? "";
-        if (vocalId) {
-          dispatch("arm_track", { trackId: vocalId, armed: true });
-          dispatch("set_input_monitor", { trackId: vocalId, mode: "automatic" });
+        const idOf = (r: CommandResult) => (r.data as { trackId?: string } | undefined)?.trackId ?? "";
+        const beatId = idOf(dispatch("create_track", { name: "Beat", type: "audio" }));
+        const leadId = idOf(dispatch("create_track", { name: "Lead vocal", type: "audio" }));
+        const adlibId = idOf(dispatch("create_track", { name: "Ad-libs", type: "audio" }));
+        const chain = (trackId: string, stem: string) => {
+          const file = MOCK_TRACK_PRESETS.find((p) => p.fileName === stem)?.file;
+          return !!trackId && !!file && dispatch("apply_track_preset", { trackId, file }).ok;
+        };
+        const leadChain = chain(leadId, "mosh-tuned-lead-v0");
+        const adlibChain = chain(adlibId, "mosh-clean-lead-v0");
+        if (leadId) {
+          dispatch("arm_track", { trackId: leadId, armed: true });
+          dispatch("set_input_monitor", { trackId: leadId, mode: "automatic" });
         }
         dispatch("set_count_in", { bars: 1 });
         dispatch("set_record_options", { overdub: true });
         const bpm = snapshot.session.tempo ?? 120;
         const loopEnd = (16 * 60) / bpm;
         dispatch("set_transport", { loop: true, loopStart: 0, loopEnd });
+        history.length = 0; future.length = 0;   // the template is the starting state, not edits
         invalidate();
         return ok(command, {
           editFile: snapshot.session.editFile, template: "vocal",
-          backingTrackId: (t1.data as { trackId?: string } | undefined)?.trackId ?? "",
-          vocalTrackId: vocalId, loopEnd,
+          backingTrackId: beatId, vocalTrackId: leadId,
+          beatTrackId: beatId, leadTrackId: leadId, adlibTrackId: adlibId,
+          leadPreset: leadChain ? "mosh.tuned-lead" : "", adlibPreset: adlibChain ? "mosh.clean-lead" : "",
+          loopEnd,
         });
       }
       if (template) {

@@ -179,15 +179,28 @@ describe("the Start page's commands (default seed)", () => {
   it("new_project {template:'vocal'} mirrors TPL-001", async () => {
     const r = await run("new_project", { template: " Vocal " });
     expect(r.ok).toBe(true);
-    const d = r.data as { template: string; backingTrackId: string; vocalTrackId: string; loopEnd: number; editFile: string };
+    const d = r.data as { template: string; backingTrackId: string; vocalTrackId: string; beatTrackId: string; leadTrackId: string;
+      adlibTrackId: string; leadPreset: string; adlibPreset: string; loopEnd: number; editFile: string };
     expect(d.template).toBe("vocal");
     expect(d.editFile).toMatch(/^\/mock\/untitled-/);
     const s = await snap();
-    expect(s.tracks.map((t) => [t.name, t.type])).toEqual([["Backing", "audio"], ["Vocal", "audio"]]);
+    expect(s.tracks.map((t) => [t.name, t.type])).toEqual([["Beat", "audio"], ["Lead vocal", "audio"], ["Ad-libs", "audio"]]);
     expect(s.tracks[0]!.id).toBe(d.backingTrackId);
+    // The original keys still name the same tracks; every track has its own key too.
+    expect([d.beatTrackId, d.leadTrackId]).toEqual([d.backingTrackId, d.vocalTrackId]);
+    const adlib = s.tracks.find((t) => t.id === d.adlibTrackId)!;
+    expect(adlib.name).toBe("Ad-libs");
+    expect(adlib.armed).toBeFalsy();
+    expect((adlib.plugins ?? []).map((p) => p.preset?.id)).toEqual(["mosh.clean-lead", "mosh.clean-lead"]);
+    expect([d.leadPreset, d.adlibPreset]).toEqual(["mosh.tuned-lead", "mosh.clean-lead"]);
+    // Nothing to undo: the template is the starting state.
+    await run("undo");
+    expect((await snap()).tracks.map((t) => t.name)).toEqual(["Beat", "Lead vocal", "Ad-libs"]);
     const vocal = s.tracks.find((t) => t.id === d.vocalTrackId)!;
     expect(vocal.armed).toBe(true);
     expect(vocal.monitor).toBe("automatic");
+    expect((vocal.plugins ?? []).map((p) => [p.type, p.preset?.id])[0]).toEqual(["moshAutoTune", "mosh.tuned-lead"]);
+    expect((vocal.plugins ?? []).filter((p) => p.preset?.id === "mosh.tuned-lead")).toHaveLength(3);
     expect(s.tracks.find((t) => t.id === d.backingTrackId)!.armed).toBeFalsy();
     expect(s.session.countInBars).toBe(1);
     expect(s.session.project?.countInBars).toBe(1);

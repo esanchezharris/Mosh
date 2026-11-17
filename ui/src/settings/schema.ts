@@ -224,18 +224,20 @@ export const SETTINGS: SettingDef[] = [
     },
   },
   {
-    // The V3 Start page (beat → voice → phone → record) at launch. UI-local view state:
-    // never crosses the bridge, never an undo step. Its only control is the page's own
-    // "Show this when Mosh opens" checkbox (hidden from every Settings surface).
+    // The friends-first launch: an empty session becomes the recording template (Beat, Lead
+    // vocal, Ad-libs) and the first-run checklist opens over the workspace. UI-local view
+    // state: never crosses the bridge, never an undo step. Its only control is the
+    // checklist's own "Set up a song when Mosh opens" checkbox (hidden from every Settings
+    // surface).
     id: "startOnLaunch",
     type: "bool",
-    // ON for fresh settings (2026-10-30 owner decision): a first launch opens on the Start
-    // page. Existing installs pick the default up too until the page's checkbox is cleared.
+    // ON for fresh settings (2026-10-30 owner decision; 2026-11-16: into the workspace, not
+    // a Start page). Existing installs pick the default up too until the checkbox is cleared.
     default: true,
     scope: "app",
     category: "Layout",
-    label: "Start page at launch",
-    help: "Open the Start page when Mosh opens. The Start button in the top bar opens it any time.",
+    label: "Set up a song at launch",
+    help: "Open Mosh with a recording song and the getting-started checklist. The Start button in the top bar opens the checklist any time.",
   },
   {
     id: "protoolsDefaultFadeLengthMs",

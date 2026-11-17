@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { bootV3, useHeadphones } from "./helpers";
+import { bootV3, useHeadphones, enterBooth } from "./helpers";
 
 // V3 parity brief row 4, rewritten for the Moshi recording loop (the Booth is now the
 // desktop twin of the phone pad): pick a Lead, Put Me In, and every pass is PRESERVED —
@@ -8,13 +8,6 @@ import { bootV3, useHeadphones } from "./helpers";
 // real input device stay owner rows in docs/VERIFICATION.md.
 
 type MoshWindow = Window & { __moshStore?: { getState: () => { snapshot?: { session: { countInBars?: number } } } } };
-
-async function enterBooth(page: Parameters<typeof bootV3>[0]) {
-  await page.getByTestId("v3-file-trigger").click();
-  await page.getByTestId("v3-templates").hover();
-  await page.getByTestId("v3-template-booth").click();
-  await expect(page.getByTestId("v3-booth")).toBeVisible();
-}
 
 test("count-in writes the engine setting and reads back through the snapshot", async ({ page }) => {
   await bootV3(page);
