@@ -291,5 +291,6 @@ jobs:
           path: |
             ${{ runner.temp }}/mosh-autoloop/selftest-logs
             ${{ runner.temp }}/mosh-autoloop/direct-reimagine
+            ${{ runner.temp }}/mosh-autoloop/catch2-logs
           if-no-files-found: ignore
           retention-days: 7
