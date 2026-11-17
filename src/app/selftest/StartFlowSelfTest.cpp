@@ -7,6 +7,8 @@
 //                   both lanes -> Clean->Tuned as ONE undo step ->
 //                   the import_clip fallback beatImport.ts undoes.
 //   START-RELAUNCH  Tuned Lead survives a save and a cold load exactly once per lane.
+//   START-PHONE     the phone remote's commands work on the template's Lead vocal from the
+//                   plain workspace: no Booth, never Ad-libs or the Beat.
 //
 // Arming is hardware-gated (TPL-001 in SelfTest.cpp): headless the arm is issued but
 // never takes, so arming is asserted only under eng.hasAudio(). None of this is a
@@ -474,6 +476,76 @@ void runStartFlowSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSelfT
                     if (p != nullptr && trackpreset::isOwnedBy (*p, kTunedId))
                         ++tuned;
             check (tuned == 3, String (label) + " reopens with all 3 tuned-lead stages (found " + String (tuned) + ")");
+        }
+    }
+
+    // ── START-PHONE ──────────────────────────────────────────────────────────────────
+    // The phone remote from the PLAIN workspace: no Booth on screen, only the template and
+    // the commands the phone's endpoint sends (src/remote/PhoneLoopEndpoint.cpp turns a pad
+    // button into loop_<action>). What must hold: the remote is set up on the template's
+    // Lead vocal, never on Ad-libs or the Beat, and record / keep / again / hear answer
+    // about THAT pair rather than refusing with "pick a track".
+    section ("START-PHONE: the phone remote works on the template's Lead vocal with no Booth");
+    {
+        const auto made = command (ops, "new_project", object ({ { "template", "vocal" } }));
+        const auto beat  = dataOf (made).getProperty ("beatTrackId", var()).toString();
+        const auto lead  = dataOf (made).getProperty ("leadTrackId", var()).toString();
+        const auto adlib = dataOf (made).getProperty ("adlibTrackId", var()).toString();
+        check (ok (made) && lead.isNotEmpty() && adlib.isNotEmpty() && beat.isNotEmpty(), "a fresh recording template" + why (made));
+        if (lead.isEmpty())
+            return;
+
+        auto loopState = [&] { return dataOf (command (ops, "loop_state", object ({ { "phonePoll", true } }))); };
+        check (! (bool) loopState().getProperty ("engaged", true)
+                   && loopState().getProperty ("phase", var()).toString() == "setup_required",
+               "the template alone does not set the remote up: three tracks, no Takes lane yet");
+
+        if (eng.hasAudio())
+        {
+            // With a microphone the Lead vocal is the ONE armed track, so the phone's own
+            // Record sets the pair up on it without anyone touching the Mac.
+            const auto first = command (ops, "loop_record");
+            check (ok (first) && ops.snapshot().getProperty ("loop", var()).getProperty ("leadTrackId", var()).toString() == lead,
+                   "with a mic, the phone's first Record sets the remote up on the Lead vocal by itself" + why (first));
+            command (ops, "loop_stop");
+        }
+
+        // What the checklist's "Show the code" sends (setupVocalLoop, vocalSetup.ts).
+        const auto setup = command (ops, "loop_setup", object ({ { "trackId", lead } }));
+        check (ok (setup), "loop_setup on the Lead vocal ok" + why (setup));
+        const auto pairTakes = dataOf (setup).getProperty ("takesTrackId", var()).toString();
+        {
+            const auto state = loopState();
+            check ((bool) state.getProperty ("engaged", false)
+                       && state.getProperty ("leadTrackId", var()).toString() == lead
+                       && state.getProperty ("takesTrackId", var()).toString() == pairTakes
+                       && pairTakes != adlib && pairTakes != beat && pairTakes.isNotEmpty(),
+                   "the remote's pair is the Lead vocal and its own Takes lane, not Ad-libs or the Beat");
+            check (trackVar (ops, pairTakes).getProperty ("name", var()).toString().startsWith ("Lead vocal"),
+                   "the Takes lane is named after the Lead vocal (" + trackVar (ops, pairTakes).getProperty ("name", var()).toString() + ")");
+        }
+        check (! (bool) trackVar (ops, adlib).getProperty ("armed", true), "Ad-libs stays un-armed after the remote is set up");
+
+        // Record. Headless the transport cannot roll, and the answer must be about the
+        // DEVICE, not about a missing track.
+        const auto rec = command (ops, "loop_record");
+        check (ok (rec), "loop_record from the plain workspace is accepted" + why (rec));
+        if (eng.hasAudio())
+            check ((bool) dataOf (rec).getProperty ("applied", false), "loop_record rolls (audio device present)");
+        else
+            check (! (bool) dataOf (rec).getProperty ("applied", true)
+                       && dataOf (rec).getProperty ("reason", var()).toString().contains ("no audio device"),
+                   "headless, loop_record says there is no audio device (" + dataOf (rec).getProperty ("reason", var()).toString() + ")");
+        command (ops, "loop_stop");
+
+        // Keep / Again / Hear on a pass that does not exist are refused for THAT reason:
+        // the pair is engaged, so none of them answers "pick a track".
+        for (const char* name : { "loop_keep", "loop_again", "loop_hear" })
+        {
+            const auto r = command (ops, name, object ({ { "targetId", "no-such-pass" } }));
+            const auto said = errorOf (r) + dataOf (r).getProperty ("reason", var()).toString();
+            check (! said.containsIgnoreCase ("Pick a track"),
+                   String (name) + " answers about the pass, not about a missing track (" + said + ")");
         }
     }
 }
