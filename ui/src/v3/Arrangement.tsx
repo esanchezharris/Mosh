@@ -24,13 +24,17 @@ import { IconSnap, IconZoomIn, IconZoomOut } from "./icons";
 import { SNAP_DIVISIONS, type SnapDiv } from "../time";
 import { setInputMonitor } from "./vocalSetup";
 import { speakerGuard } from "./startSong";
+import { useStartMemory } from "./startMemory";
 
 /** The track header's Hear switch: live mic through this track, on or off. Turning it on is
  *  the singer's own choice, so the speaker guard stands down until the output changes. */
 export async function toggleHearTrack(track: Pick<Track, "id" | "monitor">): Promise<void> {
   const store = useStore.getState();
   const target = track.monitor === "off" ? "automatic" : "off";
-  if (target === "automatic") speakerGuard.markOverride();
+  if (target === "automatic") {
+    speakerGuard.markOverride();
+    useStartMemory.getState().setNote(null);   // the guard's "Hear myself is off" note is now stale
+  }
   const r = await setInputMonitor(store.exec, track.id, target);
   if (r.deferred) store.setLastError(`Hear myself turns ${target === "off" ? "off" : "on"} when this take ends.`);
   else if (!r.ok) store.setLastError(`Hear myself did not change: ${r.reason}`);
