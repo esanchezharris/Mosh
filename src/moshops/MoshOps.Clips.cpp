@@ -18,6 +18,7 @@
 #include "state/Ids.h"
 #include "engine/SourceRef.h"
 #include "files/ImportCopy.h"
+#include "audio/BpmEstimate.h"
 #include <limits>
 
 namespace mosh
@@ -1145,11 +1146,11 @@ juce::var MoshOps::cmdRelinkClip (const juce::var& args)
 // over the map-tempo default. A pure tone / silence scores ~0 and falls back.
 static constexpr double kBpmDetectConfidence = 0.10;
 
-// Offline loop-BPM estimate from an audio file: build a coarse onset-energy
-// envelope (positive first-difference of per-hop RMS), autocorrelate it across a
-// musical tempo range, argmax. Pure + deterministic (no service) so it runs inside
-// --selftest. Returns {bpm, confidence}; confidence is the normalized autocorrelation
-// at the winning lag (0 == flat/no beat, up toward 1 == a strong periodic pulse).
+// Offline loop-BPM estimate from an audio file: the first 30 s, mixed to mono, through
+// mosh::bpm::estimate (src/audio/BpmEstimate.h — log spectral flux, a 1/2/4-beat comb and
+// a 120 BPM prior). Pure + deterministic (no service) so it runs inside --selftest.
+// Returns {bpm, confidence}; confidence is the normalized autocorrelation at the winning
+// beat lag (0 == flat/no beat, up toward 1 == a strong periodic pulse).
 static std::pair<double, double> detectBpmFromFile (const juce::File& file)
 {
     juce::AudioFormatManager fm; fm.registerBasicFormats();
@@ -1158,73 +1159,19 @@ static std::pair<double, double> detectBpmFromFile (const juce::File& file)
         return { 0.0, 0.0 };
 
     const double sr = reader->sampleRate;
-    const int chans = (int) reader->numChannels;
+    const int chans = juce::jmax (1, (int) reader->numChannels);
     // Analyse at most the first 30s — plenty for a loop, and it bounds the cost.
-    const juce::int64 maxSamples = (juce::int64) juce::jmin ((double) reader->lengthInSamples, sr * 30.0);
-    const int hop = juce::jmax (1, (int) std::llround (sr / 200.0)); // ~5ms hops → ~200 Hz envelope
-    const int nHops = (int) (maxSamples / hop);
-    if (nHops < 16) return { 0.0, 0.0 };
-
-    // Per-hop RMS energy.
-    std::vector<float> energy ((size_t) nHops, 0.0f);
-    juce::AudioBuffer<float> buf (juce::jmax (1, chans), hop);
-    for (int h = 0; h < nHops; ++h)
+    const int n = (int) juce::jmin ((double) reader->lengthInSamples, sr * 30.0);
+    juce::AudioBuffer<float> buf (chans, n);
+    reader->read (&buf, 0, n, 0, true, chans > 1);
+    std::vector<float> mono ((size_t) n, 0.0f);
+    for (int c = 0; c < chans; ++c)
     {
-        buf.clear();
-        reader->read (&buf, 0, hop, (juce::int64) h * hop, true, chans > 1);
-        double e = 0.0;
-        for (int c = 0; c < buf.getNumChannels(); ++c)
-        {
-            const float* p = buf.getReadPointer (c);
-            for (int i = 0; i < hop; ++i) e += (double) p[i] * (double) p[i];
-        }
-        energy[(size_t) h] = (float) std::sqrt (e / (double) juce::jmax (1, hop * juce::jmax (1, chans)));
+        const float* p = buf.getReadPointer (c);
+        for (int i = 0; i < n; ++i) mono[(size_t) i] += p[i] / (float) chans;
     }
-
-    // Onset function: positive first difference of the energy envelope, zero-meaned.
-    std::vector<float> onset ((size_t) nHops, 0.0f);
-    double mean = 0.0;
-    for (int h = 1; h < nHops; ++h)
-    {
-        const float d = energy[(size_t) h] - energy[(size_t) h - 1];
-        onset[(size_t) h] = d > 0.0f ? d : 0.0f;
-        mean += (double) onset[(size_t) h];
-    }
-    mean /= (double) juce::jmax (1, nHops - 1);
-    if (mean <= 1.0e-9) return { 0.0, 0.0 };  // silence / DC
-    double var0 = 0.0;
-    for (auto& v : onset) { v = (float) ((double) v - mean); var0 += (double) v * (double) v; }
-    var0 /= (double) nHops;
-    if (var0 <= 1.0e-12) return { 0.0, 0.0 };
-
-    const double hopRate = sr / (double) hop; // hops per second
-    auto autocorrAtLag = [&] (double lag) -> double
-    {
-        // Linear-interpolated autocorrelation at a fractional lag (in hops).
-        const int L = (int) std::floor (lag);
-        const double frac = lag - (double) L;
-        double acc = 0.0; int cnt = 0;
-        for (int i = 0; i + L + 1 < nHops; ++i)
-        {
-            const double shifted = (double) onset[(size_t) (i + L)] * (1.0 - frac)
-                                 + (double) onset[(size_t) (i + L + 1)] * frac;
-            acc += (double) onset[(size_t) i] * shifted;
-            ++cnt;
-        }
-        return cnt > 0 ? acc / (double) cnt : 0.0;
-    };
-
-    // Scan a musical tempo range; the reported tempo stays in [70,180].
-    double bestScore = -1.0e30, bestBpm = 0.0;
-    for (double bpm = 70.0; bpm <= 180.0 + 1.0e-6; bpm += 0.5)
-    {
-        const double lag = 60.0 / bpm * hopRate;
-        if (lag < 1.0 || lag >= (double) (nHops - 2)) continue;
-        const double s = autocorrAtLag (lag);
-        if (s > bestScore) { bestScore = s; bestBpm = bpm; }
-    }
-    if (bestBpm <= 0.0) return { 0.0, 0.0 };
-    return { bestBpm, juce::jlimit (0.0, 1.0, bestScore / var0) };
+    const auto est = mosh::bpm::estimate (mono.data(), n, sr);
+    return { est.bpm, est.confidence };
 }
 
 juce::var MoshOps::cmdSetClipWarp (const juce::var& args)

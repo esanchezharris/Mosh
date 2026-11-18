@@ -360,6 +360,11 @@ gate_native() {
       if [ -n "$tb" ]; then ( "$tb" ) >"$clog" 2>&1 || catch_ok=false; else catch_ok=false; fi
     else catch_ok=false; fi
   fi
+  # The step detail keeps only the last 800 bytes, which hides which case failed. On failure,
+  # keep the whole log under $AL_HOME/catch2-logs (CI uploads it with the gate evidence).
+  if [ "$catch_ok" != true ] && mkdir -p "$AL_HOME/catch2-logs" 2>/dev/null; then
+    cp "$clog" "$AL_HOME/catch2-logs/${HEAD_SHA:0:12}-$(date +%Y%m%dT%H%M%S)-$$.log" 2>/dev/null || true
+  fi
   emit_step "catch2" "$catch_ok" "$(jq -nc --arg log "$(safe_tail "$clog" 800)" '{log:$log}')"
   rm -f "$clog"
 

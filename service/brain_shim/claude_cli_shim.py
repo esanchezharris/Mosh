@@ -47,6 +47,7 @@ import subprocess
 import sys
 import threading
 import time
+import socketserver
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DEFAULT_PORT = 8788
@@ -370,8 +371,22 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200, resp)
 
 
+
+class _NoLookupHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer without server_bind's socket.getfqdn(host) reverse lookup.
+
+    That lookup runs after bind() and before listen(), so a stalling resolver keeps the port
+    closed for its whole timeout (~30 s on the macos-15 CI runner). See service/server.py.
+    """
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = port
+
 def make_server(host="127.0.0.1", port=None):
-    return ThreadingHTTPServer((host, _shim_port() if port is None else port), Handler)
+    return _NoLookupHTTPServer((host, _shim_port() if port is None else port), Handler)
 
 
 def main(argv=None):

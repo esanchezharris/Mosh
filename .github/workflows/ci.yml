@@ -37,7 +37,7 @@ jobs:
   # ── Classifier: decides whether the expensive macOS native lane is needed. ──
   # Reuses scripts/auto-loop/classify.sh — the SAME classifier the local gate and
   # the auto-loop use — so CI's skip decision can never drift from local truth.
-  # Runs on ubuntu (1× billing) to gate a macos-14 job (10× billing): a docs- or
+  # Runs on ubuntu (1× billing) to gate a macos-15 job (10× billing): a docs- or
   # UI-only PR skips ~12 min of macOS build, the single largest line on the bill.
   #
   # FAIL-CLOSED: native-gate's `if` runs the native lane unless this job
@@ -71,8 +71,10 @@ jobs:
   # ── Cheap lane: no native build. The required check. ────────────────────────
   cheap-gate:
     name: cheap gate (typecheck · vitest · e2e · py)
-    runs-on: macos-14
-    timeout-minutes: 30
+    runs-on: macos-15
+    # 30 was enough on macos-14. On macos-15 passing runs took 23-27 min, and a ui/ change
+    # (full vitest + e2e) ran past 30 and was cancelled mid-gate.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -146,7 +148,7 @@ jobs:
       (github.event_name != 'pull_request' ||
        needs.classify.result != 'success' ||
        needs.classify.outputs.class != 'cheap')
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -218,6 +220,10 @@ jobs:
         working-directory: ui
         run: npm ci
 
+      - name: Probe loopback reverse DNS (diagnostic)
+        # http.server used to reverse-resolve its host before listen(); a slow answer here is
+        # what held every local test service closed on the first macos-15 runs.
+        run: python3 -c "import socket,time; t=time.time(); n=socket.getfqdn('127.0.0.1'); print(f'getfqdn(127.0.0.1)={n!r} in {time.time()-t:.1f}s')"
       - name: Run native gate
         env:
           MOSH_AUTOLOOP_HOME: ${{ runner.temp }}/mosh-autoloop
@@ -291,5 +297,6 @@ jobs:
           path: |
             ${{ runner.temp }}/mosh-autoloop/selftest-logs
             ${{ runner.temp }}/mosh-autoloop/direct-reimagine
+            ${{ runner.temp }}/mosh-autoloop/catch2-logs
           if-no-files-found: ignore
           retention-days: 7
