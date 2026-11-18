@@ -226,3 +226,30 @@ test("a session that already has tracks is left alone, and File › New Recordin
   await page.getByTestId("v3-new-vocal").click();
   await expect.poll(async () => (await snap(page)).tracks.map((t) => t.name)).toEqual(["Beat", "Lead vocal", "Ad-libs"]);
 });
+
+test("Hear myself is one click on the armed track, with the checklist closed, and stays in step with the checklist's switch", async ({ page }) => {
+  await bootV3Start(page, { seed: "fresh" });
+  const row = (name: string) => page.getByTestId("v3-track").filter({ has: page.getByRole("button", { name: `Select track ${name}` }) });
+  const hear = row("Lead vocal").getByTestId("v3-track-hear");
+  await expect(hear).toHaveAttribute("aria-pressed", "true");
+  // Only a track that is taking the mic has the switch.
+  await expect(row("Beat").getByTestId("v3-track-hear")).toHaveCount(0);
+  await expect(row("Ad-libs").getByTestId("v3-track-hear")).toHaveCount(0);
+
+  await page.getByTestId("v3-check-dismiss").click();
+  await expect(list(page)).toHaveCount(0);
+  await hear.click();
+  await expect(hear).toHaveAttribute("aria-pressed", "false");
+  expect(named(await snap(page), "Lead vocal")!.monitor).toBe("off");
+  expect(named(await snap(page), "Lead vocal")!.armed).toBe(true);   // still records, just silently
+
+  await hear.click();
+  await expect(hear).toHaveAttribute("aria-pressed", "true");
+  expect(named(await snap(page), "Lead vocal")!.monitor).toBe("automatic");
+
+  // The checklist's own switch reads the same state.
+  await hear.click();
+  await page.getByTestId("v3-start-trigger").click();
+  if ((await item(page, "voice").getAttribute("aria-expanded")) !== "true") await item(page, "voice").click();
+  await expect(page.getByTestId("v3-check-monitor")).toHaveText("Hear myself: Off");
+});

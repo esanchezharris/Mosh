@@ -36,6 +36,8 @@ Copy speaks to a nervous rapper in the second person: short, no jargon, no blame
 
 Tokens only, all four colorways. Motion: the existing `--ease-out` colour/border transitions; the drop zone and countdown are state changes, not animations.
 
+**Hear switch (2026-11-17).** An armed audio track's header carries `HEAR` beside `R` (`v3-track-hear`, `toggleHearTrack` in `Arrangement.tsx`): one click turns the live mic through that track on or off, with the checklist open or closed, so Mosh can be used on speakers. It is the same `set_input_monitor` the checklist's "Hear myself" uses; turning it on stands the speaker guard down until the output changes.
+
 Verification: screenshots of the checklist open, beat (with a beat and its tempo), voice, phone and all-set in four colorways (`ui/e2e/v3-acceptance-screens.spec.ts`); `ui/e2e/v3-checklist*.spec.ts` on the mock. Fixtures are software evidence, not listening or phone acceptance.
 
 ## Moshi in the dock
