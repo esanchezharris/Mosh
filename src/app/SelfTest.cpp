@@ -13094,11 +13094,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             auto tLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
             bool armIssued = false, adlibArmIssued = false, monitorIssued = false;
+            // Match the id as the command's own trackId argument, quotes included: a bare
+            // substring test on a short numeric id also matches a timestamp or another id
+            // that happens to contain its digits (it failed 1 run in 6 that way).
+            auto names = [] (const juce::String& ln, const juce::String& id)
+            {
+                return ln.contains ("\"trackId\": \"" + id + "\"") || ln.contains ("\"trackId\":\"" + id + "\"");
+            };
             for (auto& ln : juce::StringArray::fromLines (tLog))
             {
-                if (ln.contains ("\"command\": \"arm_track\"") && ln.contains (vocalId)) armIssued = true;
-                if (ln.contains ("\"command\": \"arm_track\"") && ln.contains (adlibId)) adlibArmIssued = true;
-                if (ln.contains ("\"command\": \"set_input_monitor\"") && ln.contains (vocalId) && ln.contains ("automatic")) monitorIssued = true;
+                if (ln.contains ("\"command\": \"arm_track\"") && names (ln, vocalId)) armIssued = true;
+                if (ln.contains ("\"command\": \"arm_track\"") && names (ln, adlibId)) adlibArmIssued = true;
+                if (ln.contains ("\"command\": \"set_input_monitor\"") && names (ln, vocalId) && ln.contains ("automatic")) monitorIssued = true;
             }
             check (armIssued, "the recipe issued arm_track for the Lead vocal (JSONL witness)");
             check (monitorIssued, "the recipe issued set_input_monitor automatic for the Lead vocal (JSONL witness)");
