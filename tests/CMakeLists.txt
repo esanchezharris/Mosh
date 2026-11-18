@@ -37,6 +37,8 @@ target_sources(MoshTests PRIVATE
     # Low/high-pass slope: the Butterworth cascade MoshLowPassPlugin runs
     # (plugins/moshfx/MoshFilterDesign.h, header-only, juce_audio_basics).
     test_lowpass_design.cpp
+    # Offline tempo estimate behind detect_clip_bpm (src/audio/BpmEstimate.h, header-only).
+    test_bpm_estimate.cpp
     # Native AutoTune engine (docs/AUTOTUNE-SCOPE-2026-10-01.md). Header-only and
     # JUCE-free under src/plugins/moshfx/retune/.
     test_retune_shifter.cpp

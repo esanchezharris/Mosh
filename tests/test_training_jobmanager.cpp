@@ -69,7 +69,10 @@ namespace
         "        self._send(200, {'ok': True, 'jobId': jid, 'status': job['status'],\n"
         "                         'progress': job['progress'], 'cancelRequested': live})\n"
         "    def log_message(self, *a): pass\n"
-        "http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()\n";
+        "class S(http.server.HTTPServer):\n"
+        "    def server_bind(self):\n"
+        "        import socketserver; socketserver.TCPServer.server_bind(self); self.server_name, self.server_port = '127.0.0.1', self.server_address[1]\n"
+        "S(('127.0.0.1', port), H).serve_forever()\n";
 
     struct FakeTrainingService
     {

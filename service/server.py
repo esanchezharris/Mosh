@@ -30,6 +30,7 @@ import threading
 import time
 import urllib.parse
 import uuid
+import socketserver
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # On Windows a JUCE GUI parent may launch this service with stdout/stderr pipes
@@ -1996,13 +1997,29 @@ def _write_quietly(path: str, text: str) -> None:
         pass
 
 
+class _LocalHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer without the reverse-DNS lookup in server_bind.
+
+    HTTPServer.server_bind calls socket.getfqdn(host) after bind() and before listen(), so a
+    resolver that stalls on 127.0.0.1 holds the port closed for the whole lookup timeout
+    (~30 s on the macos-15 CI runner). Clients probing the port see "not running" meanwhile.
+    server_name is only used for the SERVER_NAME CGI variable, which this service never reads.
+    """
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = port
+
+
 def _bind_with_fallback(host: str, port: int, tries: int = 10):
     """Bind ThreadingHTTPServer on `port`, falling back to the next few ports on collision
     (a non-Mosh squatter we must not kill). Returns (httpd, actual_port)."""
     last = None
     for p in range(port, port + tries):
         try:
-            return ThreadingHTTPServer((host, p), Handler), p
+            return _LocalHTTPServer((host, p), Handler), p
         except OSError as e:  # EADDRINUSE (and friends) → try the next port
             last = e
     raise last

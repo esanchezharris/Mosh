@@ -43,6 +43,7 @@ import time
 import uuid
 import zipfile
 from datetime import datetime, timezone
+import socketserver
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -310,13 +311,27 @@ class Handler(BaseHTTPRequestHandler):
                          "backend": backend_name()})
 
 
+
+class _NoLookupHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer without server_bind's socket.getfqdn(host) reverse lookup.
+
+    That lookup runs after bind() and before listen(), so a stalling resolver keeps the port
+    closed for its whole timeout (~30 s on the macos-15 CI runner). See service/server.py.
+    """
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = port
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Mosh RunPod LoRA training server (Lane C)")
     ap.add_argument("--port", type=int, default=int(os.environ.get("MOSH_TRAINER_PORT", "8799")))
     ap.add_argument("--host", default=os.environ.get("MOSH_TRAINER_HOST", "0.0.0.0"))
     args = ap.parse_args()
     WORK_ROOT.mkdir(parents=True, exist_ok=True)
-    srv = ThreadingHTTPServer((args.host, args.port), Handler)
+    srv = _NoLookupHTTPServer((args.host, args.port), Handler)
     print(f"mosh-runpod-train: backend={backend_name()} listening on {args.host}:{args.port} "
           f"(sa3_dir={SA3_TRAIN_DIR}, work={WORK_ROOT})", flush=True)
     try:
