@@ -1,7 +1,8 @@
 # Shell retirement plan — 2026-11-17
 
 **Status:** owner chose to retire all four shells (2026-11-17). Step 1 (move the shared
-pieces) is on `claude/shells-1-shared`. Decisions 2–4 in §6 are still open. Nothing is
+pieces) is on `claude/shells-1-shared`. Decision 2 is answered (remove the group commands);
+decisions 3 and 4 in §6 are still open. Nothing is
 deleted yet.
 
 **Goal:** make V3 the only interface. Retire Classic, v2 ("Mosh (new)"), Live (clone) and
@@ -101,8 +102,13 @@ Slice 2 (AI off) removes the group-3 specs along with the generative UI.
 
 1. **Retire all four shells?** Or keep one, for example Pro Tools for your own mixing?
    Keeping one keeps its code and specs.
-2. **Track and clip groups.** Keep the backend commands with conformance tests and no UI,
-   or remove them?
+2. **Track and clip groups.** Answered 2026-11-18: **remove them.** The 12 group commands
+   (`create/rename/duplicate/remove/configure_track_group`, `set_track_group_enabled`,
+   `set_track_group_members`, `set_track_groups_suspended`,
+   `create/rename/regroup/ungroup_clip_group`) go in step 3, together with their
+   dispatch entries, the other command registrations, their native tests and the snapshot
+   fields that only they write. Old sessions that hold groups must still load: the loader
+   ignores the group state.
 3. **Lyrics commands.** Remove with FMS, or keep them paused and covered by native tests?
 4. **Existing installs on an old shell** move to V3 silently at next launch. Is a one-line
    notice wanted?
