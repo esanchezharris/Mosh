@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 // follows live via ResizeObserver — skipped where the API is unavailable (e.g.
 // a bare jsdom), in which case the initial read still lands. Extracted from the
 // identical inline effect in the classic plugin modal (ui/PluginBrowser.tsx)
-// and the v2 picker list (v2/PluginBrowser.tsx).
+// and the v2 picker list (v3/PluginBrowser.tsx).
 //
 // `initial` is the height used until the first measurement (and forever in
 // non-DOM environments where the ref never attaches).

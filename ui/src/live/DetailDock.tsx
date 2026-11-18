@@ -25,7 +25,7 @@ import { PianoRoll } from "../ui/PianoRoll";
 import { IconClose } from "../ui/icons";
 import { AgentDrawer } from "../v2/agent/AgentDrawer";
 import { ChangeToast } from "../v2/ChangeToast";
-import { useLive } from "./liveState";
+import { useLive } from "../liveState";
 import { DeviceStrip } from "./DeviceStrip";
 import { AudioClipEditor } from "./AudioClipEditor";
 import { clampDockHeight, dockDragDismisses, DOCK_MIN, DOCK_MAX_FRAC, DEVICE_PANEL_H } from "./dockGeometry";

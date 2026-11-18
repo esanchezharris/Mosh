@@ -1,4 +1,4 @@
-import { PluginDock } from "../v2/PluginBrowser";
+import { PluginDock } from "./PluginBrowser";
 
 export function PluginsPane() {
   return (

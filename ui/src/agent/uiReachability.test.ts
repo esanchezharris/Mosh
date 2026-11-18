@@ -31,7 +31,7 @@
 // This test is therefore a FLOOR — it catches a command with no reference anywhere in the
 // shell graph (that is how it found all 22 originally) and ratchets the gap list — but it
 // is not a substitute for a test of the specific gesture. High-value paths get their own:
-// `v2/lanes/trackKinds.test.ts` pins the add-track wiring against the real mock backend.
+// `trackKinds.test.ts` pins the add-track wiring against the real mock backend.
 //
 // The worst instance of that floor leaking has now been closed, and it is worth recording
 // how it looked, because it looked like success. `v2/lanes/ClipView.tsx` imported four

@@ -16,8 +16,8 @@ import { useTransportControls } from "../v2/useTransportControls";
 import { MoshTip } from "../chrome/Tooltip";
 import { MoshMenu, MoshMenuItem } from "../chrome/Menu";
 import { qwertyState, onQwertyChange, setQwertyActive } from "../hooks/useQwertyMidi";
-import { loopToggleArgs } from "./transportBar";
-import { useLive } from "./liveState";
+import { loopToggleArgs } from "../transportBar";
+import { useLive } from "../liveState";
 import type { Snapshot } from "../types";
 import {
   IconKeys, IconMore, IconPause, IconPlay, IconSkipStart, IconSpark, IconStop,

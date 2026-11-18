@@ -22,7 +22,7 @@ import { editorKeyFocused } from "../hooks/editorFocus";
 import { applyNoteEdits, removeNotes, addNotes, type NewNote, type NoteEdit } from "./noteCommands";
 import { moveEdits, resizeEdits, resizeStartEdits, previewFrom, transposeEdits, nudgeEdits, lengthEdits, velocityEdits, toggleActiveEdits, drawNoteSpan, type GestureGeom } from "./pianoRollEdit";
 import { expandLoopedNotes } from "../midi/midiLoop";
-import { ClipLoopBar } from "../live/ClipLoopBar";
+import { ClipLoopBar } from "./ClipLoopBar";
 import { marqueeHit, toggleSelection, selectAtPitch, selectAll, invertSelection, stepSelection, noteIdentity, reselectByIdentity } from "./pianoRollSelection";
 import { notePreview } from "../audio/notePreview";
 import { MoshTip } from "../chrome/Tooltip";
@@ -35,11 +35,11 @@ import { copyNotes, pasteAt, duplicateAfter, setClipboard, getClipboard } from "
 import { editorGridProjection, effectiveStepBeats, gridLabel, GRID_DIVISIONS, GRID_DEFAULT, type EditorGrid } from "./pianoRollGrid";
 import { PianoRollContextNotes, type PianoRollContextNote } from "./PianoRollContextNotes";
 import { pianoRollCursorCss, useNativeEditorCursor, type PianoRollCursor } from "./useNativeEditorCursor";
-// Live shell's draw mode (the control-bar pencil, live/liveState.ts). Read here
+// Live shell's draw mode (the control-bar pencil, liveState.ts). Read here
 // rather than passed as a prop so the docked editor and the control bar can't drift;
 // the slice defaults false and only the live shell ever toggles it, so the modal
 // mounts in classic/v2 are never affected. `docked &&` below is the second gate.
-import { useLive } from "../live/liveState";
+import { useLive } from "../liveState";
 
 const ROW_H = 15;
 // The roll spans the FULL MIDI range: it used to stop at 36..96, so notes outside that

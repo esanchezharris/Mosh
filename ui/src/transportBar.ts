@@ -1,7 +1,7 @@
 // Pure control-bar helpers for the live shell — the loop toggle's argument shaping.
 // Kept store-free so the behaviour is unit-testable without React or the bridge.
 
-import type { Transport } from "../types";
+import type { Transport } from "./types";
 
 /** Args for the control-bar loop toggle.
  *

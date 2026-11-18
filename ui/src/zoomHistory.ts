@@ -9,7 +9,7 @@
 // the previous one starts a new entry. The stack caps at 50 (Live's order of
 // magnitude; beyond that zoom-back stops being meaningful).
 
-import { useStore } from "../store";
+import { useStore } from "./store";
 
 export type ZoomView = { pxPerSec: number; scrollLeft: number };
 

@@ -5,7 +5,7 @@
 // (unit-tested); this component is just glue.
 //
 // The list/filters are factored into PluginBrowserContent, which backs ONLY this
-// classic modal — the v2 shell has its own picker surface (v2/PluginBrowser.tsx).
+// classic modal — the v2 shell has its own picker surface (v3/PluginBrowser.tsx).
 // What the two shells actually share lives in pluginBrowserUtil (entry shapes,
 // sectioning/windowing, favorites/recents, loadPluginEntry) — that's the one
 // place the load/filter behavior can drift.

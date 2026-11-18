@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PianoRoll, pianoRollNoteGripWidth, pianoRollNoteHitAtX } from "./PianoRoll";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
-import { useLive } from "../live/liveState";
+import { useLive } from "../liveState";
 import { FEEL_DEFAULTS } from "../interaction/feel";
 import type { CommandResult, Snapshot, Track } from "../types";
 

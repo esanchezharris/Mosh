@@ -12,10 +12,10 @@
 // is the failure mode that would otherwise pass a string-matching test.
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { addTrackOfKind, TRACK_KINDS } from "./TrackLaneList";
-import { useStore } from "../../store";
-import { __resetMockForTests } from "../../bridge.mock";
-import type { CommandResult } from "../../types";
+import { addTrackOfKind, TRACK_KINDS } from "./trackKinds";
+import { useStore } from "./store";
+import { __resetMockForTests } from "./bridge.mock";
+import type { CommandResult } from "./types";
 
 type Exec = (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
 
