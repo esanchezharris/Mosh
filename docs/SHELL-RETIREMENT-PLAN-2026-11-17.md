@@ -1,8 +1,8 @@
 # Shell retirement plan — 2026-11-17
 
 **Status:** owner chose to retire all four shells (2026-11-17). Step 1 (move the shared
-pieces) is on `claude/shells-1-shared`. Decisions 2 and 3 are answered (remove the group and lyrics
-commands); decision 4 in §6 is still open. Nothing is
+pieces) is on `claude/shells-1-shared`. All four decisions in §6 are answered (retire all four shells,
+remove the group and lyrics commands, switch silently). Nothing is
 deleted yet.
 
 **Goal:** make V3 the only interface. Retire Classic, v2 ("Mosh (new)"), Live (clone) and
@@ -112,8 +112,8 @@ Slice 2 (AI off) removes the group-3 specs along with the generative UI.
 3. **Lyrics commands.** Answered 2026-11-18: **remove them** with the paused FMS work. The 14
    lyrics commands, their registrations, the lyrics UI and the `lyrics` spec go together.
    They can land in step 3 or with friends slice 2 (AI off), whichever comes first.
-4. **Existing installs on an old shell** move to V3 silently at next launch. Is a one-line
-   notice wanted?
+4. **Existing installs on an old shell** move to V3 silently at next launch. Answered
+   2026-11-18: **silent, no notice.** Nobody outside the owner uses the app yet.
 
 ## 7. Expected effect
 
