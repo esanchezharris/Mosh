@@ -16,11 +16,11 @@ import { meterAt, snapStep, snapStepBeats, tempoMapFrom, barSeconds, SNAP_DIVISI
 import { useShell } from "./v2/shellState";
 // The loop toggle's argument shaping is shared with the live shell's control bar
 // (one rule: re-arm the existing range, default the first four bars when collapsed).
-import { loopToggleArgs } from "./live/transportBar";
+import { loopToggleArgs } from "./transportBar";
 // The add-track command sequence (create_track, then add_midi_clip with the explicit
 // trackId for mock/native parity) lives in exactly one place — the v2 lane list owns
 // it, and the Live-12 ⌘T/⇧⌘T bindings ride it rather than duplicating the sequence.
-import { addTrackOfKind } from "./v2/lanes/TrackLaneList";
+import { addTrackOfKind } from "./trackKinds";
 import type { CommandResult } from "./types";
 
 type ExecFn = (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
@@ -35,7 +35,7 @@ import {
   saveProjectDefaultName,
   saveProjectFilters,
 } from "./projectFile";
-import { recordZoom } from "./live/zoomHistory";
+import { recordZoom } from "./zoomHistory";
 
 export type { ActionId };
 

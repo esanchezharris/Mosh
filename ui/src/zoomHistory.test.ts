@@ -1,4 +1,4 @@
-// Unit pins for the zoom-history stack (live/zoomHistory.ts): push/pop/coalesce/cap
+// Unit pins for the zoom-history stack (zoomHistory.ts): push/pop/coalesce/cap
 // semantics — the DOM/module layer is exercised by the live-shell e2e pins.
 
 import { describe, expect, it } from "vitest";

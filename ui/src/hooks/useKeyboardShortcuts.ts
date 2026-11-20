@@ -7,7 +7,7 @@ import { liveKeymap } from "../interaction/config";
 import { isAriaValueControl, isEditableTarget, resolveKey } from "../interaction/keymap";
 import { unshiftForQwerty } from "../interaction/qwertyMidi";
 import { qwertyState } from "./useQwertyMidi";
-import { useLive } from "../live/liveState";
+import { useLive } from "../liveState";
 import { activeShell } from "../v2/shellFlag";
 import { useV3 } from "../v3/shellState";
 import { editorKeyFocused } from "./editorFocus";

@@ -3,7 +3,7 @@
 // clip context menu — one geometry implementation, both entry points.
 
 import { useStore } from "../store";
-import { applyArrangementZoom, recordZoom } from "./zoomHistory";
+import { applyArrangementZoom, recordZoom } from "../zoomHistory";
 
 export function zoomToFitSpan(span: { start: number; end: number }): boolean {
   if (!span || span.end - span.start < 1e-6) return false;

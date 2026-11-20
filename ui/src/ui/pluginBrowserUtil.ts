@@ -154,7 +154,7 @@ export function buildPluginRows(args: {
  * Dispatch the right load command for an entry — built-ins and installed plugins
  * load via different commands with different arg shapes — and record the entry in
  * the recents list. No-op (returns false) when no track is selected. Shared by the
- * classic modal (PluginBrowser.tsx) and the v2 picker (v2/PluginBrowser.tsx) so the
+ * classic modal (PluginBrowser.tsx) and the v2 picker (v3/PluginBrowser.tsx) so the
  * command dispatch cannot drift between shells; callers keep their own UI reactions
  * (refresh recents state, close-on-load).
  */

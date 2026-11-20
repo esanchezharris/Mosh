@@ -6,7 +6,7 @@ import { useStore } from "../store";
 import { nativeMenuPresent } from "../bridge";
 import type { CommandResult } from "../types";
 import { useSettings } from "../settings/store";
-import { useLive } from "../live/liveState";
+import { useLive } from "../liveState";
 import { useV3 } from "../v3/shellState";
 
 const bridgeMock = vi.hoisted(() => ({

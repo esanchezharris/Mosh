@@ -35,10 +35,10 @@ import { DetailDock } from "./DetailDock";
 import { StatusBar } from "./StatusBar";
 import { SettingsPanel } from "../settings/SettingsPanel";
 import { pushEscapeHandler } from "../hooks/escapeStack";
-import { useLive } from "./liveState";
+import { useLive } from "../liveState";
 import { useLiveKeys } from "./useLiveKeys";
 import { useSelectionFollow } from "./selectionFollow";
-import { clearZoomHistory } from "./zoomHistory";
+import { clearZoomHistory } from "../zoomHistory";
 import "./live.css";
 
 export function AppLive() {
