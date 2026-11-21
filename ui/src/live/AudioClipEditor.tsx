@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { ClipWave } from "../ui/clipRenderers";
 import type { Clip } from "../types";
-import { ClipLoopBar } from "./ClipLoopBar";
+import { ClipLoopBar } from "../ui/ClipLoopBar";
 
 type AudioClipEditorProps = {
   readonly clip: Clip;

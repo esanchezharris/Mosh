@@ -10,7 +10,7 @@
 
 import { useShell } from "./shellState";
 import { SampleBrowser } from "../ui/SampleBrowser";
-import { PluginDock } from "./PluginBrowser";
+import { PluginDock } from "../v3/PluginBrowser";
 import { IconClose, IconFolder } from "../ui/icons";
 
 export function LeftDrawer({ open }: { open: boolean }) {

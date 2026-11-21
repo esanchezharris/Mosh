@@ -2,7 +2,7 @@ import { MoshMenu, MoshMenuItem } from "../chrome/Menu";
 import { useStore } from "../store";
 import type { Snapshot, Track } from "../types";
 import { IconLayers, IconPlus } from "../ui/icons";
-import { addTrackOfKind, TRACK_KINDS } from "../v2/lanes/TrackLaneList";
+import { addTrackOfKind, TRACK_KINDS } from "../trackKinds";
 import { useProTools } from "./proToolsState";
 import { proToolsEditTracks, proToolsShownTracks } from "./proToolsTrackVisibility";
 import { scaledTrackHeights } from "./trackHeightZoom";

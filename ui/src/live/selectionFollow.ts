@@ -16,7 +16,7 @@
 
 import { useEffect, useRef } from "react";
 import { useStore } from "../store";
-import { useLive } from "./liveState";
+import { useLive } from "../liveState";
 
 export type FollowDecision = { open: string } | "close" | null;
 

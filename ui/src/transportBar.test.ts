@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "vitest";
 import { loopToggleArgs } from "./transportBar";
-import type { Transport } from "../types";
+import type { Transport } from "./types";
 
 const T = (over: Partial<Transport>): Transport => ({
   playing: false, recording: false, position: 0,

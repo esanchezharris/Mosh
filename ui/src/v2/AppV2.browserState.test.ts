@@ -26,7 +26,7 @@ vi.mock("./MemoryToast", () => ({ MemoryToast: () => null }));
 vi.mock("../ui/SampleBrowser", () => ({
   SampleBrowser: () => React.createElement("div", null, "Sample browser body"),
 }));
-vi.mock("./PluginBrowser", () => ({
+vi.mock("../v3/PluginBrowser", () => ({
   PluginDock: () => React.createElement("div", null, "Plugin browser body"),
 }));
 

@@ -18,7 +18,7 @@ import { pushEscapeHandler } from "../hooks/escapeStack";
 import { runAction, type ActionCtx } from "../menuActions";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import type { Clip } from "../types";
-import { useLive } from "./liveState";
+import { useLive } from "../liveState";
 import { clampMenuIntoViewport } from "./menuClamp";
 import { zoomToFitSpan, currentFitSpan } from "./zoomFit";
 

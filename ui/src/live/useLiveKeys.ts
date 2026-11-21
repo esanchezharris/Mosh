@@ -19,9 +19,9 @@ import { EditorAction as EA } from "../interaction/actions";
 import { liveKeymap } from "../interaction/config";
 import { isEditableTarget, resolveKey } from "../interaction/keymap";
 import { editorKeyFocused } from "../hooks/editorFocus";
-import { useLive } from "./liveState";
+import { useLive } from "../liveState";
 import { zoomToFitSpan, contentFitSpan } from "./zoomFit";
-import { popZoomView } from "./zoomHistory";
+import { popZoomView } from "../zoomHistory";
 
 export function useLiveKeys() {
   useEffect(() => {

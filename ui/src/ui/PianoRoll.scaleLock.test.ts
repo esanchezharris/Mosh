@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PianoRoll } from "./PianoRoll";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
-import { useLive } from "../live/liveState";
+import { useLive } from "../liveState";
 import type { CommandResult, Snapshot, Track } from "../types";
 
 vi.mock("../bridge", async () => {
