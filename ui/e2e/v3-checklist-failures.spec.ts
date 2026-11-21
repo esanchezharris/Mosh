@@ -39,8 +39,8 @@ test("mic-denied: Voice says Mosh isn't allowed, offers Retry, blocks Sounds rig
   const ok = page.getByTestId("v3-check-voice-ok");
   await expect(ok).toBeDisabled();
   await expect(ok).toHaveText("Fix the microphone first");
-  // The engine refused the arm: the Lead vocal is NOT armed in the session.
-  expect(leadOf(await snap(page))?.armed).toBeFalsy();
+  // The engine refused the arm: nothing is armed in the session, the Takes lane included.
+  expect((await snap(page)).tracks.filter((t) => t.armed).map((t) => t.name)).toEqual([]);
 
   // Retry re-reads the permission; still denied, so nothing changes.
   await page.getByTestId("v3-check-mic-retry").click();
@@ -78,8 +78,8 @@ test("?mockNoInput=1: no input device → no-mic copy with Audio settings, and S
   const ok = page.getByTestId("v3-check-voice-ok");
   await expect(ok).toBeDisabled();
   await expect(ok).toHaveText(/Fix the microphone first|Recording is unavailable/);
-  // arm_track answered applied:false, so the track never armed.
-  expect(leadOf(await snap(page))?.armed).toBeFalsy();
+  // arm_track answered applied:false, so no track ever armed (the Takes lane included).
+  expect((await snap(page)).tracks.filter((t) => t.armed).map((t) => t.name)).toEqual([]);
 });
 
 // ── the room ────────────────────────────────────────────────────────────────────────
@@ -87,7 +87,8 @@ test("?mockNoInput=1: no input device → no-mic copy with Audio settings, and S
 test("speakers: the song opens with Hear myself off, the Headphones row names the device, and it warns without blocking", async ({ page }) => {
   await bootV3Start(page, { seed: "fresh", fault: "speakers" });
   // Turned off on the track itself the moment the song was made, not just in the UI.
-  await expect.poll(async () => leadOf(await snap(page))?.monitor).toBe("off");
+  // (On the Takes lane under the Lead: that is the track holding the mic.)
+  await expect.poll(async () => (await snap(page)).tracks.find((t) => t.name === "Lead vocal · Takes")?.monitor).toBe("off");
   await openItem(page, "voice");
   const row = page.getByTestId("v3-check-headphones");
   await expect(row).toHaveClass(/warn/);

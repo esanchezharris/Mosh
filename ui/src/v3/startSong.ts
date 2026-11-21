@@ -11,7 +11,7 @@ import { looksLikeSpeakers, setInputMonitor, type VocalSetupIO } from "./vocalSe
 
 // Making the recording song, and the one way the first-run checklist talks to the engine.
 // React-free: the launch path (RecordingSetup.tsx) and the checklist's own "New song"
-// button run the SAME function, so a friend ends up with the same three tracks either way.
+// button run the SAME function, so a friend ends up with the same tracks either way.
 // Every edit goes through store.exec; nothing here adds a command.
 
 /** Engine refusals that mean "not now" rather than "broken". */
@@ -73,8 +73,8 @@ export async function askForMic(known: MicState = "unknown"): Promise<{ status: 
   return { status, proceed: status !== "not-determined" };
 }
 
-/** A new song from the recording template: Beat, Lead vocal (armed, heard live through
- *  Tuned Lead) and Ad-libs. Returns true when the song is in place. One at a time. */
+/** A new song from the recording template: Beat, Lead vocal with its Takes lane (armed,
+ *  heard live through Tuned Lead) and Ad-libs. Returns true when the song is in place. One at a time. */
 export async function createRecordingSong(): Promise<boolean> {
   const memory = useStartMemory.getState();
   if (memory.settingUp) return false;
@@ -104,13 +104,17 @@ export async function createRecordingSong(): Promise<boolean> {
     if (!leadId) { songError = "The Lead vocal track couldn't be made."; return false; }
     // No live mic into laptop speakers: the template turns Hear myself on, and on a Mac
     // with nothing plugged in that is a feedback howl the moment the song opens.
+    // The mic is heard through the Takes lane the template makes under the Lead (an older
+    // engine makes none, and the Lead itself holds the mic).
+    const takesId = made.takesTrackId && trackById(snap(), made.takesTrackId) ? made.takesTrackId : null;
+    const micId = takesId ?? leadId;
     const output = snap()?.audio?.outputDevice;
-    if (looksLikeSpeakers(output) && trackById(snap(), leadId)?.monitor !== "off"
-      && await startIO.setMonitor(leadId, "off")) {
+    if (looksLikeSpeakers(output) && trackById(snap(), micId)?.monitor !== "off"
+      && await startIO.setMonitor(micId, "off")) {
       useStartMemory.getState().setNote("Hear myself is off: plug in headphones first.");
     }
     useStartMemory.getState().patch({
-      ids: { backingTrackId: beatId, leadTrackId: leadId, takesTrackId: null },
+      ids: { backingTrackId: beatId, leadTrackId: leadId, takesTrackId: takesId },
       epoch: useStore.getState().projectEpoch,
     });
     return true;

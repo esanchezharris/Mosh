@@ -315,12 +315,18 @@ void runStartFlowSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSelfT
                        + " .. " + transport.getProperty ("loopEnd", var()).toString() + ")");
         }
 
-        // setupVocalLoop (vocalSetup.ts): loop_setup on Vocal.
+        // setupVocalLoop (vocalSetup.ts): loop_setup on Vocal. The template already made
+        // the pair, so the checklist's "Show the code" must find it, not add a lane.
+        const auto templateTakes = dataOf (made).getProperty ("takesTrackId", var()).toString();
+        const int tracksBeforeSetup = ops.snapshot().getProperty ("tracks", var()).size();
         const auto setup = command (ops, "loop_setup", object ({ { "trackId", vocal } }));
         check (ok (setup), "loop_setup on Vocal ok" + why (setup));
         takes = dataOf (setup).getProperty ("takesTrackId", var()).toString();
         check (takes.isNotEmpty() && takes != vocal && takes != backing && trackVar (ops, takes).isObject(),
-               "loop_setup made a distinct Takes lane");
+               "the song has a distinct Takes lane");
+        check (takes == templateTakes && ! (bool) dataOf (setup).getProperty ("created", true)
+                   && ops.snapshot().getProperty ("tracks", var()).size() == tracksBeforeSetup,
+               "loop_setup reuses the template's Takes lane: no second lane");
         {
             const auto loop = ops.snapshot().getProperty ("loop", var());
             check ((bool) loop.getProperty ("engaged", false)
@@ -343,17 +349,14 @@ void runStartFlowSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSelfT
         check (tunedFile.isNotEmpty(), "list_presets {plugin:'track-chain'} lists mosh-tuned-lead-v0");
         if (cleanFile.isEmpty() || tunedFile.isEmpty())
             return;
-        // The template already put Tuned Lead on the Lead; the Takes lane loop_setup just
-        // made has nothing. mirrorLeadChain (vocalSetup.ts) gives Takes the Lead's preset,
-        // so what the rapper hears while recording is what a kept pass plays back with.
-        check (presetStages (ops, vocal, kTunedId) == 3 && rackPlugins (ops, vocal) == 3 && rackPlugins (ops, takes) == 0,
-               "the template's Lead carries Tuned Lead and the new Takes lane starts empty (lead "
+        // The template put Tuned Lead on the Lead AND on its Takes lane, so what the rapper
+        // hears while recording is what a kept pass plays back with. mirrorLeadChain
+        // (vocalSetup.ts) leaves a Takes lane that already has effects alone.
+        check (presetStages (ops, vocal, kTunedId) == 3 && rackPlugins (ops, vocal) == 3
+                   && presetStages (ops, takes, kTunedId) == 3 && rackPlugins (ops, takes) == 3
+                   && pluginsOfType (ops, takes, "moshAutoTune") == 1,
+               "the template's Lead and its Takes lane both carry Tuned Lead, one AutoTune each (lead "
                    + String (rackPlugins (ops, vocal)) + ", takes " + String (rackPlugins (ops, takes)) + ")");
-        {
-            const auto mirrored = command (ops, "apply_track_preset", object ({ { "trackId", takes }, { "file", tunedFile } }));
-            check (ok (mirrored) && presetStages (ops, takes, kTunedId) == 3 && pluginsOfType (ops, takes, "moshAutoTune") == 1,
-                   "mirroring the Lead's Tuned Lead onto Takes gives it one AutoTune and 3 tuned stages" + why (mirrored));
-        }
         // The Voice step's "Clean Lead" choice, lane by lane (the switch under test below is
         // the way back to Tuned).
         for (const auto& lane : { vocal, takes })
@@ -496,17 +499,23 @@ void runStartFlowSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSelfT
             return;
 
         auto loopState = [&] { return dataOf (command (ops, "loop_state", object ({ { "phonePoll", true } }))); };
-        check (! (bool) loopState().getProperty ("engaged", true)
-                   && loopState().getProperty ("phase", var()).toString() == "setup_required",
-               "the template alone does not set the remote up: three tracks, no Takes lane yet");
+        const auto templateTakes = dataOf (made).getProperty ("takesTrackId", var()).toString();
+        check ((bool) loopState().getProperty ("engaged", false)
+                   && loopState().getProperty ("leadTrackId", var()).toString() == lead
+                   && loopState().getProperty ("takesTrackId", var()).toString() == templateTakes
+                   && templateTakes.isNotEmpty()
+                   && loopState().getProperty ("phase", var()).toString() != "setup_required",
+               "the template alone sets the remote up: a phone that is already paired finds the Lead vocal and its Takes lane ("
+                   + loopState().getProperty ("phase", var()).toString() + ")");
+        const int tracksAtStart = ops.snapshot().getProperty ("tracks", var()).size();
 
         if (eng.hasAudio())
         {
-            // With a microphone the Lead vocal is the ONE armed track, so the phone's own
-            // Record sets the pair up on it without anyone touching the Mac.
+            // With a microphone the phone's own Record works at once on the pair the
+            // template made, without anyone touching the Mac.
             const auto first = command (ops, "loop_record");
             check (ok (first) && ops.snapshot().getProperty ("loop", var()).getProperty ("leadTrackId", var()).toString() == lead,
-                   "with a mic, the phone's first Record sets the remote up on the Lead vocal by itself" + why (first));
+                   "with a mic, the phone's first Record lands on the Lead vocal's pair by itself" + why (first));
             command (ops, "loop_stop");
         }
 
@@ -521,6 +530,9 @@ void runStartFlowSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSelfT
                        && state.getProperty ("takesTrackId", var()).toString() == pairTakes
                        && pairTakes != adlib && pairTakes != beat && pairTakes.isNotEmpty(),
                    "the remote's pair is the Lead vocal and its own Takes lane, not Ad-libs or the Beat");
+            check (pairTakes == templateTakes && ! (bool) dataOf (setup).getProperty ("created", true)
+                       && ops.snapshot().getProperty ("tracks", var()).size() == tracksAtStart,
+                   "pairing the phone reuses the template's Takes lane instead of adding a second one");
             check (trackVar (ops, pairTakes).getProperty ("name", var()).toString().startsWith ("Lead vocal"),
                    "the Takes lane is named after the Lead vocal (" + trackVar (ops, pairTakes).getProperty ("name", var()).toString() + ")");
         }

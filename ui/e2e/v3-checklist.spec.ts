@@ -23,7 +23,7 @@ const presetIds = (t: Snap["tracks"][number] | undefined) => (t?.plugins ?? []).
 const named = (s: Snap, name: string) => s.tracks.find((t) => t.name === name);
 const noBooth = (page: Page) => expect(page.getByTestId("v3-booth")).toHaveCount(0);
 
-test("a fresh install opens into the workspace with the three-track song and the checklist, never the Booth", async ({ page }) => {
+test("a fresh install opens into the workspace with the recording song and the checklist, never the Booth", async ({ page }) => {
   await bootV3Start(page, { seed: "fresh" });
   await expect(page.getByTestId("v3-shell")).toHaveAttribute("data-posture", "studio");
   await expect(page.getByTestId("v3-arrangement")).toBeVisible();
@@ -31,18 +31,23 @@ test("a fresh install opens into the workspace with the three-track song and the
   await noBooth(page);
 
   const s = await snap(page);
-  expect(s.tracks.map((t) => t.name)).toEqual(["Beat", "Lead vocal", "Ad-libs"]);
+  expect(s.tracks.map((t) => t.name)).toEqual(["Beat", "Lead vocal", "Lead vocal · Takes", "Ad-libs"]);
   const lead = named(s, "Lead vocal")!;
-  expect(lead.armed).toBe(true);
-  expect(lead.monitor).toBe("automatic");
+  // The Takes lane under the Lead is part of the song from the start: it holds the arm and
+  // the mic, and carries the Lead's chain so the live voice is tuned.
+  const takes = named(s, "Lead vocal · Takes")!;
+  expect(takes.armed).toBe(true);
+  expect(takes.monitor).toBe("automatic");
+  expect(presetIds(takes)).toEqual(["mosh.tuned-lead", "mosh.tuned-lead", "mosh.tuned-lead"]);
+  expect(lead.armed).toBeFalsy();
   expect(presetIds(lead)).toEqual(["mosh.tuned-lead", "mosh.tuned-lead", "mosh.tuned-lead"]);
   expect(lead.plugins?.[0]?.type).toBe("moshAutoTune");
   const adlib = named(s, "Ad-libs")!;
   expect(adlib.armed).toBeFalsy();
   expect(presetIds(adlib)).toEqual(["mosh.clean-lead", "mosh.clean-lead"]);
   expect(named(s, "Beat")!.clips).toHaveLength(0);
-  // Nothing has set the phone remote up yet: no Takes track, no loop.
-  expect(s.loop?.engaged).toBeFalsy();
+  // The phone remote's pair is already in place, so a phone that pairs later adds nothing.
+  expect(s.loop).toMatchObject({ engaged: true, leadTrackId: lead.id, takesTrackId: takes.id });
 
   // It is a panel, not a modal: the workspace behind it still takes clicks.
   await expect(page.locator(".scrim")).toHaveCount(0);
@@ -147,6 +152,7 @@ test("voice: tuned by default on headphones, Sounds right marks it done; Clean a
 
 test("phone: the code sets the remote up on the Lead vocal with its tuned chain on the Takes track, and stays in the workspace", async ({ page }) => {
   await bootV3Start(page, { seed: "fresh" });
+  const tracksBefore = (await snap(page)).tracks.map((t) => t.id);
   await item(page, "phone").click();
   await page.getByTestId("v3-check-show-code").click();
   await expect(page.getByTestId("v3-check-qr")).toBeVisible();
@@ -161,6 +167,9 @@ test("phone: the code sets the remote up on the Lead vocal with its tuned chain 
   expect(takes.name).toBe("Lead vocal · Takes");
   expect(presetIds(takes)).toEqual(["mosh.tuned-lead", "mosh.tuned-lead", "mosh.tuned-lead"]);
   expect(takes.armed).toBe(true);
+  // Pairing reuses the Takes lane the song started with: no second one.
+  expect(s.tracks.map((t) => t.id)).toEqual(tracksBefore);
+  expect(s.tracks.filter((t) => t.name.endsWith("· Takes"))).toHaveLength(1);
   await noBooth(page);
   await expect(page.getByTestId("v3-arrangement")).toBeVisible();
 });
@@ -182,7 +191,7 @@ test("the checklist can be dismissed and reopened from the File menu and the Sta
   await page.reload();
   await expect(page.getByTestId("v3-arrangement")).toBeVisible();
   // The song is still made at launch; the checklist stays away.
-  await expect.poll(async () => (await snap(page))?.tracks.map((t) => t.name)).toEqual(["Beat", "Lead vocal", "Ad-libs"]);
+  await expect.poll(async () => (await snap(page))?.tracks.map((t) => t.name)).toEqual(["Beat", "Lead vocal", "Lead vocal · Takes", "Ad-libs"]);
   await expect(list(page)).toHaveCount(0);
   await noBooth(page);
   await page.getByTestId("v3-start-trigger").click();
@@ -213,7 +222,7 @@ test("unticking 'Set up a song when Mosh opens' survives a reload: a plain empty
   await page.getByTestId("v3-start-trigger").click();
   await expect(list(page)).toBeVisible();
   await page.getByTestId("v3-check-new-song").first().click();
-  await expect.poll(async () => (await snap(page)).tracks.map((t) => t.name)).toEqual(["Beat", "Lead vocal", "Ad-libs"]);
+  await expect.poll(async () => (await snap(page)).tracks.map((t) => t.name)).toEqual(["Beat", "Lead vocal", "Lead vocal · Takes", "Ad-libs"]);
   await noBooth(page);
 });
 
@@ -224,28 +233,30 @@ test("a session that already has tracks is left alone, and File › New Recordin
   await expect(list(page)).toHaveCount(0);   // "set up a song when Mosh opens" is off in workspace specs
   await page.getByTestId("v3-file-trigger").click();
   await page.getByTestId("v3-new-vocal").click();
-  await expect.poll(async () => (await snap(page)).tracks.map((t) => t.name)).toEqual(["Beat", "Lead vocal", "Ad-libs"]);
+  await expect.poll(async () => (await snap(page)).tracks.map((t) => t.name)).toEqual(["Beat", "Lead vocal", "Lead vocal · Takes", "Ad-libs"]);
 });
 
 test("Hear myself is one click on the armed track, with the checklist closed, and stays in step with the checklist's switch", async ({ page }) => {
   await bootV3Start(page, { seed: "fresh" });
-  const row = (name: string) => page.getByTestId("v3-track").filter({ has: page.getByRole("button", { name: `Select track ${name}` }) });
-  const hear = row("Lead vocal").getByTestId("v3-track-hear");
+  const row = (name: string) => page.getByTestId("v3-track").filter({ has: page.getByRole("button", { name: `Select track ${name}`, exact: true }) });
+  const mic = "Lead vocal · Takes";   // the lane that holds the arm and the mic
+  const hear = row(mic).getByTestId("v3-track-hear");
   await expect(hear).toHaveAttribute("aria-pressed", "true");
   // Only a track that is taking the mic has the switch.
   await expect(row("Beat").getByTestId("v3-track-hear")).toHaveCount(0);
+  await expect(row("Lead vocal").getByTestId("v3-track-hear")).toHaveCount(0);
   await expect(row("Ad-libs").getByTestId("v3-track-hear")).toHaveCount(0);
 
   await page.getByTestId("v3-check-dismiss").click();
   await expect(list(page)).toHaveCount(0);
   await hear.click();
   await expect(hear).toHaveAttribute("aria-pressed", "false");
-  expect(named(await snap(page), "Lead vocal")!.monitor).toBe("off");
-  expect(named(await snap(page), "Lead vocal")!.armed).toBe(true);   // still records, just silently
+  expect(named(await snap(page), mic)!.monitor).toBe("off");
+  expect(named(await snap(page), mic)!.armed).toBe(true);   // still records, just silently
 
   await hear.click();
   await expect(hear).toHaveAttribute("aria-pressed", "true");
-  expect(named(await snap(page), "Lead vocal")!.monitor).toBe("automatic");
+  expect(named(await snap(page), mic)!.monitor).toBe("automatic");
 
   // The checklist's own switch reads the same state.
   await hear.click();

@@ -1,6 +1,6 @@
 # Mosh pre-pivot run manifest
 
-> **Friends build, 2026-11-16:** Mosh opens into the V3 workspace with a recording template (Beat, Lead vocal armed through Tuned Lead, Ad-libs) and a first-run checklist over it (beat, voice, phone); nothing routes into the Booth, and the phone is a remote, not the mic. This supersedes the Start page's "→ the Booth" ending (note at the top of the [Start page brief](docs/LAUNCH-PAGE-BRIEF-2026-10-30.md)). Still owner steps: hearing it, a physical phone pairing, the acoustic monitoring-latency run (VERIFICATION.md START-*).
+> **Friends build, 2026-11-16:** Mosh opens into the V3 workspace with a recording template (Beat, Lead vocal with its armed Takes lane heard through Tuned Lead, Ad-libs) and a first-run checklist over it (beat, voice, phone); nothing routes into the Booth, and the phone is a remote, not the mic. This supersedes the Start page's "→ the Booth" ending (note at the top of the [Start page brief](docs/LAUNCH-PAGE-BRIEF-2026-10-30.md)). Still owner steps: hearing it, a physical phone pairing, the acoustic monitoring-latency run (VERIFICATION.md START-*).
 >
 > **Start page, 2026-10-30:** the [Start page brief](docs/LAUNCH-PAGE-BRIEF-2026-10-30.md) is the friends-first way into Mosh: a V3 posture that walks a novice singer through beat → voice → phone → the Booth. Shipping it to friends is still blocked on a notarized build, the owner's listening pass on the vocal presets, and a physical phone pairing (brief §8).
 >

@@ -13069,12 +13069,26 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             }
         const auto beatId  = np["data"].getProperty ("beatTrackId", var()).toString();
         const auto adlibId = np["data"].getProperty ("adlibTrackId", var()).toString();
-        var adlib;
+        const auto takesId = np["data"].getProperty ("takesTrackId", var()).toString();
+        const auto takesName = juce::String (juce::CharPointer_UTF8 ("Lead vocal \xc2\xb7 Takes"));
+        var adlib, takes;
         if (auto* arr = tracks.getArray())
             for (auto& t : *arr)
+            {
                 if (t.getProperty ("id", var()).toString() == adlibId) adlib = t;
-        check (names.size() == 3 && names[0] == "Beat" && names[1] == "Lead vocal" && names[2] == "Ad-libs",
-               "template created exactly Beat, Lead vocal, Ad-libs, in that order (" + names.joinIntoString (", ") + ")");
+                if (t.getProperty ("id", var()).toString() == takesId) takes = t;
+            }
+        check (names.size() == 4 && names[0] == "Beat" && names[1] == "Lead vocal" && names[2] == takesName && names[3] == "Ad-libs",
+               "template created exactly Beat, Lead vocal, its Takes lane, Ad-libs, in that order (" + names.joinIntoString (", ") + ")");
+        check (takesId.isNotEmpty() && takes.isObject() && takesId != vocalId && takesId != adlibId && takesId != beatId,
+               "takesTrackId is reported, distinct, and in the snapshot");
+        {
+            const auto loop = snap.getProperty ("loop", var());
+            check ((bool) loop.getProperty ("engaged", false)
+                       && loop.getProperty ("leadTrackId", var()).toString() == vocalId
+                       && loop.getProperty ("takesTrackId", var()).toString() == takesId,
+                   "the song starts with the phone remote's pair in place: Lead vocal and its Takes lane");
+        }
         check (beatId.isNotEmpty() && beatId == np["data"].getProperty ("backingTrackId", var()).toString(),
                "beatTrackId is reported and the original backingTrackId still names the same track");
         check (vocalId == np["data"].getProperty ("leadTrackId", var()).toString(),
@@ -13087,13 +13101,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (adlib.isObject(), "Ad-libs track exists in the snapshot");
         if (eng.hasAudio())
         {
-            check ((bool) vocal.getProperty ("armed", false), "Lead vocal is armed (audio device present)");
-            check (vocal.getProperty ("monitor", var()).toString() == "automatic", "Lead vocal monitors automatically (audio device present)");
+            check ((bool) takes.getProperty ("armed", false), "the Takes lane is armed (audio device present)");
+            check (! (bool) vocal.getProperty ("armed", true), "the Lead vocal is not armed: passes land on Takes (audio device present)");
+            check (takes.getProperty ("monitor", var()).toString() == "automatic", "the Takes lane monitors automatically (audio device present)");
         }
         check (! (bool) adlib.getProperty ("armed", true), "Ad-libs is NOT armed by default");
         {
             auto tLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
-            bool armIssued = false, adlibArmIssued = false, monitorIssued = false;
+            bool armIssued = false, adlibArmIssued = false, monitorIssued = false, setupIssued = false;
             // Match the id as the command's own trackId argument, quotes included: a bare
             // substring test on a short numeric id also matches a timestamp or another id
             // that happens to contain its digits (it failed 1 run in 6 that way).
@@ -13103,12 +13118,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             };
             for (auto& ln : juce::StringArray::fromLines (tLog))
             {
-                if (ln.contains ("\"command\": \"arm_track\"") && names (ln, vocalId)) armIssued = true;
+                if (ln.contains ("\"command\": \"arm_track\"") && names (ln, takesId)) armIssued = true;
+                if (ln.contains ("\"command\": \"loop_setup\"") && names (ln, vocalId)) setupIssued = true;
                 if (ln.contains ("\"command\": \"arm_track\"") && names (ln, adlibId)) adlibArmIssued = true;
-                if (ln.contains ("\"command\": \"set_input_monitor\"") && names (ln, vocalId) && ln.contains ("automatic")) monitorIssued = true;
+                if (ln.contains ("\"command\": \"set_input_monitor\"") && names (ln, takesId) && ln.contains ("automatic")) monitorIssued = true;
             }
-            check (armIssued, "the recipe issued arm_track for the Lead vocal (JSONL witness)");
-            check (monitorIssued, "the recipe issued set_input_monitor automatic for the Lead vocal (JSONL witness)");
+            check (setupIssued, "the recipe issued loop_setup on the Lead vocal (JSONL witness)");
+            check (armIssued, "the recipe issued arm_track for the Takes lane (JSONL witness)");
+            check (monitorIssued, "the recipe issued set_input_monitor automatic for the Takes lane (JSONL witness)");
             check (! adlibArmIssued, "the recipe never arms Ad-libs");
         }
         // The chains: Tuned Lead (AutoTune first) on the Lead, the lighter Clean Lead on Ad-libs,
@@ -13122,7 +13139,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                     out.add (p.getProperty ("type", var()).toString() + "@" + p.getProperty ("preset", var()).getProperty ("id", var()).toString());
             return out;
         };
-        const auto leadChain = chainOf (vocal), adlibChain = chainOf (adlib);
+        const auto leadChain = chainOf (vocal), adlibChain = chainOf (adlib), takesChain = chainOf (takes);
+        check (takesChain == leadChain, "the Takes lane mirrors the Lead's chain, so the live voice is tuned (" + takesChain.joinIntoString (", ") + ")");
+        check (np["data"].getProperty ("takesPreset", var()).toString() == "mosh.tuned-lead", "the result names the chain on the Takes lane");
         check (leadChain.size() == 3 && leadChain[0] == "moshAutoTune@mosh.tuned-lead"
                    && leadChain[1].endsWith ("@mosh.tuned-lead") && leadChain[2].endsWith ("@mosh.tuned-lead"),
                "Lead vocal carries Tuned Lead: AutoTune first, 3 stages (" + leadChain.joinIntoString (", ") + ")");
@@ -13171,7 +13190,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                     afterNames.add (t.getProperty ("name", var()).toString());
                     if (t.getProperty ("id", var()).toString() == vocalId) leadPlugins = t.getProperty ("plugins", var()).size();
                 }
-            check (afterNames == names && leadPlugins == 3, "Undo right after the template leaves all three tracks and the Lead's chain in place");
+            check (afterNames == names && leadPlugins == 3, "Undo right after the template leaves all four tracks and the Lead's chain in place");
+            // A phone that pairs later (or is already paired) reuses the pair: no second lane.
+            auto again = cmd (ops, "loop_setup", args1 ("trackId", vocalId));
+            int tracksNow = ops.snapshot().getProperty ("tracks", var()).size();
+            check (ok (again) && ! (bool) again["data"].getProperty ("created", true)
+                       && again["data"].getProperty ("takesTrackId", var()).toString() == takesId && tracksNow == 4,
+                   "loop_setup on the template's Lead reuses its Takes lane instead of adding one");
+            check (! eng.edit().getUndoManager().canUndo(), "reusing the pair adds nothing to undo");
         }
         {
             auto tLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();

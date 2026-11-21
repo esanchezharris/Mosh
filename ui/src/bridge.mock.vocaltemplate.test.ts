@@ -23,9 +23,10 @@ describe("new_project template:vocal — mock parity", () => {
     expect(d.template).toBe("vocal");
     const s = await snap();
     const names = s.tracks.map((t) => t.name);
-    expect(names).toEqual(["Beat", "Lead vocal", "Ad-libs"]);
-    const vocal = s.tracks.find((t) => t.id === d.vocalTrackId)!;
-    expect(vocal.armed).toBe(true);
+    expect(names).toEqual(["Beat", "Lead vocal", "Lead vocal · Takes", "Ad-libs"]);
+    // Passes land on the Lead's Takes lane, which holds the arm.
+    expect(s.tracks.find((t) => t.name === "Lead vocal · Takes")!.armed).toBe(true);
+    expect(s.tracks.find((t) => t.id === d.vocalTrackId)!.armed).toBe(false);
     expect(s.session.countInBars).toBe(1);
     expect(s.session.project?.recordOptions?.overdub).toBe(true);
     expect(s.transport.looping).toBe(true);

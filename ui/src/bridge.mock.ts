@@ -5172,9 +5172,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       syncRecents();
       history.length = 0; future.length = 0;
       stopPlayback();
+      mockLoop = freshLoopModel();   // the loop's pair belongs to the Edit that just left
       // TPL-001 — mirror the native recipe with the mock's own commands (synchronous
       // dispatch, exactly as native composes through execute()) so the UI sees the same
-      // shape: Beat, Lead vocal (armed, Tuned Lead) and Ad-libs (not armed, Clean Lead),
+      // shape: Beat, Lead vocal (Tuned Lead) with its armed Takes lane, and Ad-libs (not armed, Clean Lead),
       // count-in 1, overdub, a four-bar loop, and no undo history.
       const template = str(args.template).trim().toLowerCase();
       if (template === "vocal") {
@@ -5188,9 +5189,16 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         };
         const leadChain = chain(leadId, "mosh-tuned-lead-v0");
         const adlibChain = chain(adlibId, "mosh-clean-lead-v0");
+        // The Takes lane is part of the song from the start (owner decision 2026-11-20):
+        // the same loop_setup the phone uses, then the Lead's chain mirrored onto it.
+        let takesId = "";
+        let takesChain = false;
         if (leadId) {
           dispatch("arm_track", { trackId: leadId, armed: true });
-          dispatch("set_input_monitor", { trackId: leadId, mode: "automatic" });
+          const pair = dispatch("loop_setup", { trackId: leadId });
+          takesId = (pair.data as { takesTrackId?: string } | undefined)?.takesTrackId ?? "";
+          takesChain = chain(takesId, "mosh-tuned-lead-v0");
+          dispatch("set_input_monitor", { trackId: takesId || leadId, mode: "automatic" });
         }
         dispatch("set_count_in", { bars: 1 });
         dispatch("set_record_options", { overdub: true });
@@ -5203,6 +5211,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
           editFile: snapshot.session.editFile, template: "vocal",
           backingTrackId: beatId, vocalTrackId: leadId,
           beatTrackId: beatId, leadTrackId: leadId, adlibTrackId: adlibId,
+          takesTrackId: takesId, takesPreset: takesChain ? "mosh.tuned-lead" : "",
           leadPreset: leadChain ? "mosh.tuned-lead" : "", adlibPreset: adlibChain ? "mosh.clean-lead" : "",
           loopEnd,
         });

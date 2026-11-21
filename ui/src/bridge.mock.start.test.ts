@@ -180,11 +180,11 @@ describe("the Start page's commands (default seed)", () => {
     const r = await run("new_project", { template: " Vocal " });
     expect(r.ok).toBe(true);
     const d = r.data as { template: string; backingTrackId: string; vocalTrackId: string; beatTrackId: string; leadTrackId: string;
-      adlibTrackId: string; leadPreset: string; adlibPreset: string; loopEnd: number; editFile: string };
+      adlibTrackId: string; takesTrackId: string; takesPreset: string; leadPreset: string; adlibPreset: string; loopEnd: number; editFile: string };
     expect(d.template).toBe("vocal");
     expect(d.editFile).toMatch(/^\/mock\/untitled-/);
     const s = await snap();
-    expect(s.tracks.map((t) => [t.name, t.type])).toEqual([["Beat", "audio"], ["Lead vocal", "audio"], ["Ad-libs", "audio"]]);
+    expect(s.tracks.map((t) => [t.name, t.type])).toEqual([["Beat", "audio"], ["Lead vocal", "audio"], ["Lead vocal · Takes", "audio"], ["Ad-libs", "audio"]]);
     expect(s.tracks[0]!.id).toBe(d.backingTrackId);
     // The original keys still name the same tracks; every track has its own key too.
     expect([d.beatTrackId, d.leadTrackId]).toEqual([d.backingTrackId, d.vocalTrackId]);
@@ -195,10 +195,18 @@ describe("the Start page's commands (default seed)", () => {
     expect([d.leadPreset, d.adlibPreset]).toEqual(["mosh.tuned-lead", "mosh.clean-lead"]);
     // Nothing to undo: the template is the starting state.
     await run("undo");
-    expect((await snap()).tracks.map((t) => t.name)).toEqual(["Beat", "Lead vocal", "Ad-libs"]);
+    expect((await snap()).tracks.map((t) => t.name)).toEqual(["Beat", "Lead vocal", "Lead vocal · Takes", "Ad-libs"]);
     const vocal = s.tracks.find((t) => t.id === d.vocalTrackId)!;
-    expect(vocal.armed).toBe(true);
-    expect(vocal.monitor).toBe("automatic");
+    // The Takes lane is part of the song from the start: it holds the arm and the mic,
+    // carries the Lead's chain, and is the phone remote's pair.
+    const takes = s.tracks.find((t) => t.id === d.takesTrackId)!;
+    expect(takes.name).toBe("Lead vocal · Takes");
+    expect(takes.armed).toBe(true);
+    expect(takes.monitor).toBe("automatic");
+    expect(vocal.armed).toBe(false);
+    expect((takes.plugins ?? []).map((p) => [p.type, p.preset?.id])).toEqual((vocal.plugins ?? []).map((p) => [p.type, p.preset?.id]));
+    expect(d.takesPreset).toBe("mosh.tuned-lead");
+    expect(s.loop).toMatchObject({ engaged: true, leadTrackId: d.vocalTrackId, takesTrackId: d.takesTrackId });
     expect((vocal.plugins ?? []).map((p) => [p.type, p.preset?.id])[0]).toEqual(["moshAutoTune", "mosh.tuned-lead"]);
     expect((vocal.plugins ?? []).filter((p) => p.preset?.id === "mosh.tuned-lead")).toHaveLength(3);
     expect(s.tracks.find((t) => t.id === d.backingTrackId)!.armed).toBeFalsy();
@@ -213,12 +221,15 @@ describe("the Start page's commands (default seed)", () => {
   });
 
   it("loop_setup arms Takes, disarms the Lead and reports armed; again on a re-run", async () => {
-    const tpl = (await run("new_project", { template: "vocal" })).data as { vocalTrackId: string };
+    const tpl = (await run("new_project", { template: "vocal" })).data as { vocalTrackId: string; takesTrackId: string };
+    const before = (await snap()).tracks.length;
     const r = await run("loop_setup", { trackId: tpl.vocalTrackId });
     expect(r.ok).toBe(true);
     const d = r.data as { takesTrackId: string; leadTrackId: string; created: boolean; armed: boolean };
-    expect(d).toMatchObject({ created: true, leadTrackId: tpl.vocalTrackId, armed: true });
+    // The template already made the pair: pairing the phone reuses it, no second lane.
+    expect(d).toMatchObject({ created: false, leadTrackId: tpl.vocalTrackId, takesTrackId: tpl.takesTrackId, armed: true });
     let s = await snap();
+    expect(s.tracks).toHaveLength(before);
     expect(s.tracks.find((t) => t.id === d.takesTrackId)!.armed).toBe(true);
     expect(s.tracks.find((t) => t.id === tpl.vocalTrackId)!.armed).toBe(false);
     expect(s.loop).toMatchObject({ engaged: true, leadTrackId: tpl.vocalTrackId, takesTrackId: d.takesTrackId });

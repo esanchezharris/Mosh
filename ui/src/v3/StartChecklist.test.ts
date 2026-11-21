@@ -96,16 +96,20 @@ function makeEngine(opts: EngineOpts = {}) {
         state.tracks = [];
         state.loop = { engaged: false, leadTrackId: null, takesTrackId: null };
         undo.length = 0;
-        // The native template: Beat, Lead vocal (armed, Tuned Lead), Ad-libs (Clean Lead).
+        // The native template: Beat, Lead vocal (Tuned Lead) with its Takes lane already
+        // under it (armed, the same chain, the phone remote's pair), Ad-libs (Clean Lead).
         const beat = newTrack("Beat");
         state.tracks.push(beat);
-        const vocal = newTrack("Lead vocal", { armed: true, plugins: presetStages(TUNED_FILE) });
+        const vocal = newTrack("Lead vocal", { plugins: presetStages(TUNED_FILE) });
         state.tracks.push(vocal);
+        const takes = newTrack("Lead vocal · Takes", { armed: true, plugins: presetStages(TUNED_FILE) });
+        state.tracks.push(takes);
+        state.loop = { engaged: true, leadTrackId: vocal.id, takesTrackId: takes.id };
         const adlib = newTrack("Ad-libs", { plugins: presetStages(CLEAN_FILE) });
         state.tracks.push(adlib);
         state.tracks.forEach((t) => reindex(t));
         return ok(command, { template: "vocal", backingTrackId: beat.id, vocalTrackId: vocal.id, adlibTrackId: adlib.id,
-          beatTrackId: beat.id, leadTrackId: vocal.id });
+          beatTrackId: beat.id, leadTrackId: vocal.id, takesTrackId: takes.id });
       }
       case "create_track": {
         save();
@@ -116,6 +120,12 @@ function makeEngine(opts: EngineOpts = {}) {
       case "loop_setup": {
         const lead = find(a.trackId);
         if (!lead) return err(command, "track not found");
+        // Already paired (the template made it): reuse the lane, as the engine does.
+        const paired = state.loop.engaged && state.loop.leadTrackId === lead.id ? find(state.loop.takesTrackId) : null;
+        if (paired) {
+          paired.armed = true; lead.armed = false;
+          return ok(command, { leadTrackId: lead.id, takesTrackId: paired.id, created: false, armed: true });
+        }
         save();
         const takes = newTrack(`${lead.name} · Takes`, { armed: true });
         state.tracks.splice(state.tracks.indexOf(lead) + 1, 0, takes);
@@ -357,16 +367,17 @@ describe("v3 first-run checklist (StartChecklist.tsx) against a fake engine", ()
   });
 
   // ── launch ──────────────────────────────────────────────────────────────────────────
-  it("an empty session at launch becomes the three-track song, asked for the mic first, and the checklist opens on Beat", async () => {
+  it("an empty session at launch becomes the recording song, asked for the mic first, and the checklist opens on Beat", async () => {
     vi.mocked(microphonePermissionStatus).mockResolvedValue({ status: "not-determined" });
     await boot();
     expect(vi.mocked(requestMicrophonePermission)).toHaveBeenCalledTimes(1);
     expect(commands().filter((c) => c === "new_project")).toHaveLength(1);
     expect(argsOf("new_project")[0]).toEqual({ template: "vocal" });
-    expect(engine.state.tracks.map((t) => t.name)).toEqual(["Beat", "Lead vocal", "Ad-libs"]);
-    // Nothing sets the phone remote up yet: three tracks, the Lead still armed.
+    expect(engine.state.tracks.map((t) => t.name)).toEqual(["Beat", "Lead vocal", "Lead vocal · Takes", "Ad-libs"]);
+    // The template made the Takes lane itself; the UI adds nothing on top of it.
     expect(commands()).not.toContain("loop_setup");
-    expect(song().lead.armed).toBe(true);
+    expect(engine.byName("Lead vocal · Takes")!.armed).toBe(true);
+    expect(song().lead.armed).toBe(false);
     expect(currentItem()).toBe("beat");
     expect(must("v3-check-beat")).toBeTruthy();
     expect(["beat", "voice", "phone"].map(stateOf)).toEqual(["todo", "todo", "todo"]);
@@ -404,8 +415,9 @@ describe("v3 first-run checklist (StartChecklist.tsx) against a fake engine", ()
 
   it("on laptop speakers the new song's Hear myself is turned off, and the checklist says why", async () => {
     await boot({ output: "MacBook Pro Speakers" });
-    expect(argsOf("set_input_monitor")).toContainEqual({ trackId: song().lead.id, mode: "off" });
-    expect(song().lead.monitor).toBe("off");
+    // On the Takes lane: that is the track holding the mic.
+    expect(argsOf("set_input_monitor")).toContainEqual({ trackId: engine.byName("Lead vocal · Takes")!.id, mode: "off" });
+    expect(engine.byName("Lead vocal · Takes")!.monitor).toBe("off");
     expect(must("v3-check-note").textContent).toContain("plug in headphones");
   });
 
@@ -489,21 +501,25 @@ describe("v3 first-run checklist (StartChecklist.tsx) against a fake engine", ()
     expect(stateOf("voice")).toBe("skipped");
   });
 
-  it("Voice: Clean Lead replaces Tuned Lead on the Lead alone, as one batch, before the phone remote exists", async () => {
+  it("Voice: Clean Lead replaces Tuned Lead on the Lead and its Takes lane, as one batch", async () => {
     await boot();
     await click("v3-check-item-voice");
     const from = engine.calls.length;
     await click("v3-check-clean");
     expect(commands(from).filter((c) => c !== "list_presets")).toEqual([
-      "batch_begin", "remove_plugin", "remove_plugin", "remove_plugin", "apply_track_preset", "batch_end",
+      "batch_begin",
+      "remove_plugin", "remove_plugin", "remove_plugin", "apply_track_preset",   // the Lead
+      "remove_plugin", "remove_plugin", "remove_plugin", "apply_track_preset",   // its Takes lane: what you hear live
+      "batch_end",
     ]);
     expect(presetIds(song().lead)).toEqual(["mosh.clean-lead", "mosh.clean-lead"]);
+    expect(presetIds(engine.byName("Lead vocal · Takes")!)).toEqual(["mosh.clean-lead", "mosh.clean-lead"]);
     // Ad-libs keeps its own chain: the voice check is about the Lead.
     expect(presetIds(song().adlib)).toEqual(["mosh.clean-lead", "mosh.clean-lead"]);
     expect(must("v3-check-voice-say").textContent).not.toContain("tuned");
   });
 
-  it("Voice: choosing a key writes it to the Lead's AutoTune and to the song, as one batch", async () => {
+  it("Voice: choosing a key writes it to the AutoTune on the Lead and on its Takes lane, and to the song, as one batch", async () => {
     await boot();
     await click("v3-check-item-voice");
     await click("v3-check-tuned");
@@ -512,9 +528,10 @@ describe("v3 first-run checklist (StartChecklist.tsx) against a fake engine", ()
     const from = engine.calls.length;
     await click("v3-check-tuned-apply");
     const params = argsOf("set_plugin_param", from);
-    expect(params.map((a) => [a.trackId, a.paramIndex])).toEqual([[song().lead.id, 0], [song().lead.id, 1]]);
-    expect(params[0]!.value).toBeCloseTo(9 / 11, 6);
-    expect(params[1]!.value).toBe(1);
+    const takesId = engine.byName("Lead vocal · Takes")!.id;
+    expect(params.map((a) => [a.trackId, a.paramIndex])).toEqual([[song().lead.id, 0], [song().lead.id, 1], [takesId, 0], [takesId, 1]]);
+    for (const i of [0, 2]) expect(params[i]!.value).toBeCloseTo(9 / 11, 6);
+    for (const i of [1, 3]) expect(params[i]!.value).toBe(1);
     expect(engine.state.key).toEqual({ tonic: "A", mode: "minor" });
     expect(commands(from).filter((c) => c === "batch_begin" || c === "batch_end")).toEqual(["batch_begin", "batch_end"]);
     expect(presetIds(song().lead)).toEqual(["mosh.tuned-lead", "mosh.tuned-lead", "mosh.tuned-lead"]);
@@ -532,14 +549,15 @@ describe("v3 first-run checklist (StartChecklist.tsx) against a fake engine", ()
   });
 
   // ── phone ───────────────────────────────────────────────────────────────────────────
-  it("Phone: Show the code sets the remote up on the Lead vocal first, with the Lead's tuned chain mirrored onto Takes", async () => {
+  it("Phone: Show the code finds the pair the song started with: no second Takes lane, no chain added twice", async () => {
     await boot();
     await click("v3-check-item-phone");
     const from = engine.calls.length;
     await click("v3-check-show-code");
-    expect(argsOf("loop_setup", from)).toEqual([{ trackId: song().lead.id }]);
     const takes = engine.byName("Lead vocal · Takes")!;
-    expect(argsOf("apply_track_preset", from)).toEqual([{ trackId: takes.id, file: TUNED_FILE }]);
+    expect(argsOf("loop_setup", from)).toEqual([]);
+    expect(argsOf("apply_track_preset", from)).toEqual([]);
+    expect(engine.state.tracks.filter((t) => t.name.endsWith("· Takes"))).toHaveLength(1);
     expect(presetIds(takes)).toEqual(["mosh.tuned-lead", "mosh.tuned-lead", "mosh.tuned-lead"]);
     expect(engine.state.loop).toMatchObject({ engaged: true, leadTrackId: song().lead.id, takesTrackId: takes.id });
     expect(vi.mocked(useStore.getState().startRemotePairing)).toHaveBeenCalledTimes(1);
@@ -562,13 +580,15 @@ describe("v3 first-run checklist (StartChecklist.tsx) against a fake engine", ()
     expect(commands(from)).not.toContain("apply_track_preset");
   });
 
-  it("a phone that is already paired when a new song opens gets its remote set up on the new Lead vocal", async () => {
+  it("a phone that is already paired when a new song opens finds the remote on the new Lead vocal, with nothing added", async () => {
     await boot();
     engine.state.phoneConnected = true;
     const from = engine.calls.length;
     await act(async () => { await engine.refresh(); });
     await settle();
-    expect(argsOf("loop_setup", from)).toEqual([{ trackId: song().lead.id }]);
+    expect(argsOf("loop_setup", from)).toEqual([]);
+    expect(engine.state.tracks.map((t) => t.name)).toEqual(["Beat", "Lead vocal", "Lead vocal · Takes", "Ad-libs"]);
+    expect(engine.state.loop).toMatchObject({ engaged: true, leadTrackId: song().lead.id, takesTrackId: engine.byName("Lead vocal · Takes")!.id });
     expect(presetIds(engine.byName("Lead vocal · Takes"))).toEqual(["mosh.tuned-lead", "mosh.tuned-lead", "mosh.tuned-lead"]);
   });
 

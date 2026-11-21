@@ -4,8 +4,10 @@
 > lived on its own full-screen page. Both are replaced:
 >
 > - Mosh opens into the regular V3 workspace with a **recording template** already made:
->   **Beat** (empty), **Lead vocal** (armed, heard live through Tuned Lead) and **Ad-libs**
->   (Clean Lead, not armed). One `new_project {template:"vocal"}`; its undo history starts empty.
+>   **Beat** (empty), **Lead vocal** (Tuned Lead) with its **Lead vocal · Takes** lane under
+>   it (armed, heard live through the same chain; owner decision 2026-11-20: the lane is part
+>   of the song from the start, and pairing a phone reuses it) and **Ad-libs** (Clean Lead,
+>   not armed). One `new_project {template:"vocal"}`; its undo history starts empty.
 > - The page's steps are a **first-run checklist** over the workspace
 >   (`ui/src/v3/StartChecklist.tsx`): a small panel, not a modal, with three items (Beat, Voice,
 >   Phone). Each can be skipped; progress is remembered across launches; it closes for good with

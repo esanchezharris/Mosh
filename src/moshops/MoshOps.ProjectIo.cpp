@@ -1924,8 +1924,9 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
 
     // TPL-001 — the recording template. Pure COMPOSITION of existing commands on the
     // fresh Edit (nothing new in the engine): a Beat track to drop the beat on, a Lead
-    // vocal track armed with automatic input monitoring and the Tuned Lead chain (Mosh
-    // AutoTune first), an un-armed Ad-libs track with the lighter Clean Lead chain, a
+    // vocal track with the Tuned Lead chain (Mosh AutoTune first) and its Takes lane
+    // (armed, automatic input monitoring, the same chain), an un-armed Ad-libs track
+    // with the lighter Clean Lead chain, a
     // one-bar count-in, overdub takes (each loop pass stacks a take on the same clip),
     // and a four-bar loop from bar 1 so the rapper can go straight to Record. Every
     // step is the same command the producer could issue by hand, so the JSONL reads as
@@ -1986,10 +1987,23 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
         // here should depend on whether an input device answered.
         const bool leadChain  = applyChain (lead,  "mosh-tuned-lead-v0");
         const bool adlibChain = applyChain (adlib, "mosh-clean-lead-v0");
+        // The Takes lane (owner decision 2026-11-20): the song starts with "Lead vocal ·
+        // Takes" already under the Lead, made by the same loop_setup the phone remote
+        // uses, so pairing a phone later finds the pair instead of adding a track. The
+        // arm ends where loop_setup leaves it (Takes armed, Lead not): every pass lands
+        // on Takes and a kept one moves up to the Lead. The mic is heard through Takes,
+        // so it carries the Lead's chain too.
+        String takes;
+        bool takesChain = false;
         if (lead.isNotEmpty())
         {
-            run ("arm_track",         obj ({ { "trackId", lead }, { "armed", true } }));
-            run ("set_input_monitor", obj ({ { "trackId", lead }, { "mode", "automatic" } }));
+            run ("arm_track", obj ({ { "trackId", lead }, { "armed", true } }));
+            const auto pair = run ("loop_setup", obj ({ { "trackId", lead } }));
+            takes = pair.getProperty ("data", var()).getProperty ("takesTrackId", var()).toString();
+            takesChain = applyChain (takes, "mosh-tuned-lead-v0");
+            // Monitoring belongs to the input the armed track holds: Takes when the pair
+            // was made, the Lead itself when it was not.
+            run ("set_input_monitor", obj ({ { "trackId", takes.isNotEmpty() ? takes : lead }, { "mode", "automatic" } }));
         }
         // Ad-libs is deliberately NOT armed: two armed tracks on one mic record every
         // pass twice. The rapper arms it when they get to the doubles.
@@ -2008,6 +2022,8 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
         data->setProperty ("beatTrackId", beat);
         data->setProperty ("leadTrackId", lead);
         data->setProperty ("adlibTrackId", adlib);
+        data->setProperty ("takesTrackId", takes);
+        data->setProperty ("takesPreset", takesChain ? "mosh.tuned-lead" : "");
         data->setProperty ("leadPreset",  leadChain  ? "mosh.tuned-lead" : "");
         data->setProperty ("adlibPreset", adlibChain ? "mosh.clean-lead" : "");
         data->setProperty ("loopEnd", loopEnd);
