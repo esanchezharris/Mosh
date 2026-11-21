@@ -22,6 +22,23 @@ import { dropChords, dropDrumBeat } from "./beats";
 import { useAgentTaskLive } from "./agentTask";
 import { IconSnap, IconZoomIn, IconZoomOut } from "./icons";
 import { SNAP_DIVISIONS, type SnapDiv } from "../time";
+import { setInputMonitor } from "./vocalSetup";
+import { speakerGuard } from "./startSong";
+import { useStartMemory } from "./startMemory";
+
+/** The track header's Hear switch: live mic through this track, on or off. Turning it on is
+ *  the singer's own choice, so the speaker guard stands down until the output changes. */
+export async function toggleHearTrack(track: Pick<Track, "id" | "monitor">): Promise<void> {
+  const store = useStore.getState();
+  const target = track.monitor === "off" ? "automatic" : "off";
+  if (target === "automatic") {
+    speakerGuard.markOverride();
+    useStartMemory.getState().setNote(null);   // the guard's "Hear myself is off" note is now stale
+  }
+  const r = await setInputMonitor(store.exec, track.id, target);
+  if (r.deferred) store.setLastError(`Hear myself turns ${target === "off" ? "off" : "on"} when this take ends.`);
+  else if (!r.ok) store.setLastError(`Hear myself did not change: ${r.reason}`);
+}
 
 const modsOf = (e: { shiftKey?: boolean; altKey?: boolean; metaKey?: boolean; ctrlKey?: boolean }): Mods =>
   ({ shift: !!e.shiftKey, alt: !!e.altKey, meta: !!(e.metaKey || e.ctrlKey) });
@@ -123,6 +140,7 @@ function TrackRow({ track, snapshot, marks, lanePx, pxPerSec }: { track: Track; 
   const sel = selectedTrackId === track.id;
   const tempo = snapshot.session.tempo;
   const clips = track.clips.filter((c) => !c.hidden);
+  const isMidiTrack = track.type === "midi" || track.type === "drum" || clips.some((c) => c.type === "midi");
 
   useEffect(() => {
     for (const c of clips) if (c.type === "wave") ensurePeaks(c.id);
@@ -134,12 +152,19 @@ function TrackRow({ track, snapshot, marks, lanePx, pxPerSec }: { track: Track; 
       <div className="hd">
         <button type="button" className="track-name" aria-label={`Select track ${track.name}`} aria-pressed={sel}
           onClick={() => { useStore.getState().setSelectedTrack(track.id); useStore.getState().clearSelection(); }}><b>{track.name}</b></button>
-        {(track.type === "midi" || track.type === "drum" || clips.some((c) => c.type === "midi"))
-          ? <span className="midi-tag">MIDI</span> : null}
+        {isMidiTrack ? <span className="midi-tag">MIDI</span> : null}
         {lockName ? <span className="lock" data-testid="v3-track-lock" title={`Locked by ${lockName}`}>{lockName}</span> : null}
         <div className="ctl">
           <button type="button" className={track.armed ? "arm" : ""} aria-label="Arm" disabled={lockedByOther}
             onClick={() => void exec("arm_track", { trackId: track.id, armed: !track.armed })}>R</button>
+          {track.armed && !isMidiTrack ? (
+            <button type="button" className="hear" data-testid="v3-track-hear" aria-label="Hear myself"
+              aria-pressed={track.monitor !== "off"} disabled={lockedByOther}
+              title={track.monitor !== "off"
+                ? "You hear your mic live through this track. Turn it off when you are not on headphones."
+                : "Your mic is not played back live. Turn it on to hear yourself (headphones only)."}
+              onClick={() => void toggleHearTrack(track)}>HEAR</button>
+          ) : null}
           <button type="button" aria-pressed={!!track.mute} aria-label="Mute" disabled={lockedByOther}
             onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}>M</button>
           <button type="button" aria-pressed={!!track.solo} aria-label="Solo" disabled={lockedByOther}

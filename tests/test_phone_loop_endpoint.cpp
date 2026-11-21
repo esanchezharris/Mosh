@@ -202,7 +202,7 @@ TEST_CASE ("phone loop state maps the three blocking reasons in priority order",
 
     data.getDynamicObject()->setProperty ("engaged", false);
     host.stateEnvelope = okEnvelope (data);
-    CHECK (endpoint.state (status).getProperty ("error", {}).toString() == "Pick a track on the Mac first (Setup).");
+    CHECK (endpoint.state (status).getProperty ("error", {}).toString() == "Pick a track on the Mac first: open Getting started, then Phone.");
 
     // A dead host outranks everything: the state behind it cannot be trusted.
     host.stateEnvelope = errEnvelope ("engine is not running");

@@ -2,33 +2,62 @@ import type { LoopState, Plugin, Snapshot, Track } from "../types";
 import type { MicrophonePermissionStatus } from "../bridge";
 import { isLeadCandidate, pickLeadTrack } from "./BoothView";
 
-// The Start page's step machine, React-free so every gate is unit-tested on its own.
+// The first-run checklist's rules (StartChecklist.tsx), React-free so every gate is
+// unit-tested on its own.
 //
-// The page keeps CHOICES locally (which step, which tracks it set up, whether the tempo
-// was confirmed, whether the phone was skipped) and reads FACTS from the snapshot on every
-// render. The step only moves on a click or a documented auto-advance; the snapshot
-// decides whether a step's button is enabled and whether its pip shows done. So an undo,
-// a reload or a phone that drops out changes what the page SAYS, never where it is.
+// The checklist keeps CHOICES (which tracks the template made, whether the tempo was
+// confirmed, what was skipped or dismissed) and reads FACTS from the snapshot on every
+// render. The snapshot decides whether an item's button is enabled and whether it shows
+// done. So an undo, a reload or a phone that drops out changes what the checklist SAYS.
 
-export type StartStep = "welcome" | "song" | "beat" | "voice" | "ready" | "phone";
-
-/** The four pips. "Record" is lit once the singer reaches the ready card. */
-export const PIPS = [
+/** The three things a first-time rapper sets up, in order. */
+export const CHECK_ITEMS = [
   { key: "beat", label: "Beat" },
   { key: "voice", label: "Voice" },
   { key: "phone", label: "Phone" },
-  { key: "record", label: "Record" },
 ] as const;
-export type PipKey = (typeof PIPS)[number]["key"];
+export type CheckKey = (typeof CHECK_ITEMS)[number]["key"];
+export type CheckChoice = "todo" | "done" | "skipped";
+
+/** What the checklist remembers across launches (startMemory.ts persists it). */
+export interface ChecklistProgress {
+  beat: CheckChoice;
+  voice: CheckChoice;
+  phone: CheckChoice;
+  dismissed: boolean;
+}
+export const EMPTY_PROGRESS: ChecklistProgress = { beat: "todo", voice: "todo", phone: "todo", dismissed: false };
+
+/** Every item is done or skipped. */
+export function checklistSettled(p: ChecklistProgress): boolean {
+  return CHECK_ITEMS.every((item) => p[item.key] !== "todo");
+}
+/** Whether the checklist shows by itself at launch: not once it is settled or dismissed. */
+export function checklistOpensAtLaunch(p: ChecklistProgress): boolean {
+  return !p.dismissed && !checklistSettled(p);
+}
+/** The item to open first: the earliest one still to do, or null when none is. */
+export function firstOpenItem(p: ChecklistProgress): CheckKey | null {
+  return CHECK_ITEMS.find((item) => p[item.key] === "todo")?.key ?? null;
+}
 
 export const PRESET_IDS = { clean: "mosh.clean-lead", tuned: "mosh.tuned-lead" } as const;
 /** How many stages each bundled chain inserts (resources/presets/track-chain/*.json). */
 export const PRESET_STAGES = { clean: 2, tuned: 3 } as const;
 
 export interface StartIds {
+  /** The beat's track ("Beat"; "Backing" in songs made before the three-track template). */
   backingTrackId: string | null;
   leadTrackId: string | null;
+  /** The phone remote's Takes lane, once the remote has been set up on the Lead. */
   takesTrackId: string | null;
+}
+
+/** The names the beat's track goes by: the template's "Beat", and "Backing" from songs
+ *  made before it was renamed. */
+export function isBeatTrackName(name: string): boolean {
+  const n = name.trim().toLowerCase();
+  return n === "beat" || n === "backing";
 }
 
 export interface BeatLocal {
@@ -82,28 +111,29 @@ export function trackById(snapshot: Snapshot | null | undefined, id: string | nu
   return id ? snapshot?.tracks.find((t) => t.id === id) : undefined;
 }
 
-/** The beat's track for continue mode: a plain audio track named Backing that is not the
- *  loop's Lead or Takes. Never "the first audio track": that is usually the vocal. */
+/** The beat's track in a song that is already open: a plain audio track named Beat (or
+ *  Backing) that is not the loop's Lead or Takes. Never "the first audio track": that is
+ *  usually the vocal. */
 export function pickBackingTrack(tracks: readonly Track[], loop: LoopState | null | undefined): Track | undefined {
-  return tracks.find((t) => t.name.trim().toLowerCase() === "backing"
+  return tracks.find((t) => isBeatTrackName(t.name)
     && t.type !== "drum" && t.type !== "midi" && !t.isGroup && !t.isReturn
     && t.id !== loop?.leadTrackId && t.id !== loop?.takesTrackId);
 }
 
 const VOCAL_NAME = /\b(vocal|vocals|vox|voice|lead|rap|verse)\b/i;
 
-/** Which Lead continue mode sets up: the loop's own; else a vocal-named track; else an
- *  armed or EMPTY candidate. Never the beat: not the Backing track, and not a track that
+/** Which Lead an already-open song uses: the loop's own; else a vocal-named track; else an
+ *  armed or EMPTY candidate. Never the beat: not the Beat track, and not a track that
  *  only holds clips with nothing marking it as a voice (a dropped beat is usually also the
- *  SELECTED track, so the Booth's "selected first" rule would pick it). Undefined means
- *  "make a Vocal track". */
+ *  SELECTED track, so "selected first" would pick it). The template's "Ad-libs" is not
+ *  vocal-named on purpose, so "Lead vocal" wins. Undefined means "no vocal track here". */
 export function pickContinueLead(snapshot: Snapshot, selectedTrackId: string | null | undefined): Track | undefined {
   const loop = snapshot.loop;
   const engaged = trackById(snapshot, loop?.engaged ? loop.leadTrackId : null);
   if (engaged) return engaged;
   const backing = pickBackingTrack(snapshot.tracks, loop);
   const candidates = snapshot.tracks.filter((t) => t.id !== backing?.id
-    && t.name.trim().toLowerCase() !== "backing" && isLeadCandidate(t, loop));
+    && !isBeatTrackName(t.name) && isLeadCandidate(t, loop));
   const vocal = candidates.find((t) => VOCAL_NAME.test(t.name));
   if (vocal) return vocal;
   const safe = candidates.filter((t) => t.armed || t.clips.length === 0);
@@ -158,79 +188,75 @@ export function beatDone(snapshot: Snapshot | null | undefined, ids: StartIds, b
 
 export type MicState = MicrophonePermissionStatus | "unknown";
 
-export interface ReadyInput {
+/** The tracks the checklist works on: what the template reported (while those tracks
+ *  still exist), else what the open song offers. The Takes lane only counts while the
+ *  phone remote is set up on this Lead. */
+export function resolveIds(snapshot: Snapshot | null | undefined, remembered: StartIds): StartIds {
+  if (!snapshot) return { backingTrackId: null, leadTrackId: null, takesTrackId: null };
+  const loop = snapshot.loop;
+  const lead = trackById(snapshot, remembered.leadTrackId) ?? pickContinueLead(snapshot, null);
+  const beat = trackById(snapshot, remembered.backingTrackId) ?? pickBackingTrack(snapshot.tracks, loop);
+  const takes = lead && loop?.engaged && loop.leadTrackId === lead.id ? trackById(snapshot, loop.takesTrackId) : undefined;
+  return {
+    backingTrackId: beat && beat.id !== lead?.id ? beat.id : null,
+    leadTrackId: lead?.id ?? null,
+    takesTrackId: takes?.id ?? null,
+  };
+}
+
+/** The track the microphone records onto and is heard through: the Takes lane once the
+ *  phone remote is set up, otherwise the Lead itself. */
+export function micLaneOf(snapshot: Snapshot | null | undefined, ids: StartIds): Track | undefined {
+  return trackById(snapshot, ids.takesTrackId) ?? trackById(snapshot, ids.leadTrackId);
+}
+
+export interface VoiceInput {
   snapshot: Snapshot | null | undefined;
   ids: StartIds;
   mic: MicState;
-  /** The build ships no vocal presets, or the singer kept their own chain. */
+  /** The build ships no vocal presets, or the rapper kept their own chain. */
   chainNotRequired: boolean;
 }
 
-/** The first reason the singer is not ready, as the label the disabled "I'm ready" button
- *  carries, or null when everything is in place. Headphones are deliberately NOT here:
- *  they are a warning, never a block. */
-export function readyBlocker({ snapshot, ids, mic, chainNotRequired }: ReadyInput): string | null {
-  const loop = snapshot?.loop;
-  if (!songReady(snapshot, ids)) return "Setting up…";
+/** The first reason the voice is not ready, as the label the disabled "Sounds right"
+ *  button carries, or null when everything is in place. Headphones are deliberately NOT
+ *  here: they are a warning, never a block. */
+export function voiceBlocker({ snapshot, ids, mic, chainNotRequired }: VoiceInput): string | null {
+  const lead = trackById(snapshot, ids.leadTrackId);
+  if (!lead) return "Set up a song first";
   const session = snapshot?.session as { audioReady?: boolean; audioDeviceError?: string } | undefined;
-  if ((loop?.blockReason ?? "") !== "" || session?.audioReady === false || !!session?.audioDeviceError) {
+  if ((snapshot?.loop?.blockReason ?? "") !== "" || session?.audioReady === false || !!session?.audioDeviceError) {
     return "Recording is unavailable on this Mac";
   }
   if (mic === "denied" || mic === "restricted" || mic === "timed-out") return "Fix the microphone first";
-  const takes = trackById(snapshot, ids.takesTrackId);
-  if (!takes?.armed) return "Fix the microphone first";
+  const lane = micLaneOf(snapshot, ids);
+  if (!lane?.armed) return "Fix the microphone first";
   if (!chainNotRequired) {
-    const lead = voicePresetOf(trackById(snapshot, ids.leadTrackId));
-    const lane = voicePresetOf(takes);
-    if (lead !== lane || (lead !== "clean" && lead !== "tuned")) return "Finish your voice";
+    const leadPreset = voicePresetOf(lead);
+    if (leadPreset !== "clean" && leadPreset !== "tuned") return "Finish your voice";
+    if (lane.id !== lead.id && voicePresetOf(lane) !== leadPreset) return "Finish your voice";
   }
   return null;
 }
 
-export interface PipInput {
-  step: StartStep;
+/** How each item reads right now. The beat is a FACT about the open song (an undone tempo
+ *  brings it back); voice and phone are what the rapper confirmed, held while the facts
+ *  still agree. "skipped" only shows while the item is not actually done. */
+export function itemStates(input: {
   snapshot: Snapshot | null | undefined;
   ids: StartIds;
   beat: BeatLocal;
-  phone: PhoneLocal;
+  progress: ChecklistProgress;
   voiceReady: boolean;
-}
-
-export type PipState = "done" | "current" | "todo";
-
-/** Done/current/todo for each pip, from facts + choices. */
-export function pipStates({ step, snapshot, ids, beat, phone, voiceReady }: PipInput): Record<PipKey, PipState> {
-  const current: PipKey | null =
-    step === "beat" ? "beat"
-      : step === "voice" ? "voice"
-        : step === "phone" ? "phone"
-          : step === "ready" ? "record"
-            : null;
-  const done: Record<PipKey, boolean> = {
-    beat: beatDone(snapshot, ids, beat),
-    voice: voiceReady,
-    phone: phone.everConnected || phone.skipped,
-    record: false,
+  phoneConnected: boolean;
+}): Record<CheckKey, CheckChoice> {
+  const { snapshot, ids, beat, progress, voiceReady, phoneConnected } = input;
+  const beatFact = beatDone(snapshot, ids, { ...beat, skipped: false });
+  return {
+    beat: beatFact ? "done" : progress.beat === "skipped" ? "skipped" : "todo",
+    voice: progress.voice === "done" && voiceReady ? "done" : progress.voice === "skipped" ? "skipped" : "todo",
+    phone: phoneConnected || progress.phone === "done" ? "done" : progress.phone === "skipped" ? "skipped" : "todo",
   };
-  // A pip is only "done" once the singer has moved past it: a Voice check lit while they
-  // are still choosing a beat reads as a step they skipped.
-  const at = current === null ? -1 : PIPS.findIndex((p) => p.key === current);
-  const out = {} as Record<PipKey, PipState>;
-  PIPS.forEach((pip, i) => {
-    out[pip.key] = pip.key === current ? "current" : (i < at && done[pip.key]) ? "done" : "todo";
-  });
-  return out;
-}
-
-/** Where re-entering the page lands: Welcome for an empty session, otherwise the first
- *  step whose facts are not in place yet. */
-export function firstIncomplete(snapshot: Snapshot | null | undefined, ids: StartIds, beat: BeatLocal,
-  voiceReady: boolean): StartStep {
-  if (!snapshot || snapshot.tracks.length === 0) return "welcome";
-  if (!songReady(snapshot, ids)) return "welcome";
-  if (!beatDone(snapshot, ids, beat)) return "beat";
-  if (!voiceReady) return "voice";
-  return "ready";
 }
 
 // ── Tuned Lead's key: the AutoTune menu labels vs set_key's names ──────────────────────

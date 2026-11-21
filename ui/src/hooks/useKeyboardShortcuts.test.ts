@@ -809,9 +809,9 @@ describe("useKeyboardShortcuts", () => {
     await vi.waitFor(() => expect(execCalls.map((c) => c.command)).toContain("paste_clip"));
   });
 
-  // Review fix: the V3 Start page covers the arrangement, so clip/selection edits it cannot
-  // show are inert there — by key (↓, ⌘A) AND by the packaged app's Edit menu (mosh_menu).
-  describe("V3 Start page posture", () => {
+  // The first-run checklist sits OVER the workspace and never takes its keys: clip and
+  // selection edits keep working by key (↓, ⌘A) and by the packaged app's Edit menu.
+  describe("V3 workspace with the first-run checklist", () => {
     const startFixture = () => {
       // The ableton keymap binds ↓ (nudge_down) and ⌘A (select_all); mosh's core does not,
       // so under it these keys would be inert anyway and the block would go untested.
@@ -832,32 +832,6 @@ describe("useKeyboardShortcuts", () => {
       act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })); });
 
     afterEach(() => { useV3.setState({ posture: "studio" }); });
-
-    it("ArrowDown and ⌘A do nothing while posture is start", async () => {
-      startFixture();
-      useV3.setState({ posture: "start" });
-      act(() => root.render(React.createElement(Harness)));
-
-      key({ key: "ArrowDown" });
-      key({ key: "a", metaKey: true });
-      await flushQueue();
-
-      expect(execCalls).toEqual([]);
-      expect([...useStore.getState().selection]).toEqual(["clip-1"]);
-    });
-
-    it("a native-menu Cut (mosh_menu) is ignored while posture is start", async () => {
-      startFixture();
-      useV3.setState({ posture: "start" });
-      act(() => root.render(React.createElement(Harness)));
-
-      menu("cut");
-      await flushQueue();
-
-      expect(execCalls).toEqual([]);
-      expect(useStore.getState().clipboard).toBeNull();
-      expect(useStore.getState().selection.has("clip-1")).toBe(true);
-    });
 
     it("in posture studio the same ArrowDown, ⌘A and menu Cut still dispatch", async () => {
       startFixture();

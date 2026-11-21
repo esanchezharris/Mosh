@@ -102,7 +102,49 @@ export async function setupVocalLoop(io: VocalSetupIO, leadId: string, fallback:
   }
   const chain = await addDefaultChain(io, leadId, takesId, fallback);
   if (chain) notes.push(chain);
+  const mirror = await mirrorLeadChain(io, leadId, takesId, fallback);
+  if (mirror) notes.push(mirror);
   return { setup, leadId, takesId, armed, notes };
+}
+
+/** The one bundled vocal preset a track carries (its file stem), or null when it has none
+ *  or a mix of both. */
+export function bundledChainOf(track: Track | undefined): typeof DEFAULT_VOCAL_CHAIN | typeof TUNED_VOCAL_CHAIN | null {
+  const ids = new Set((track?.plugins ?? []).map((p) => p.preset?.id)
+    .filter((id): id is string => !!id && (VOCAL_PRESET_IDS as readonly string[]).includes(id)));
+  if (ids.size !== 1) return null;
+  return ids.has("mosh.tuned-lead") ? TUNED_VOCAL_CHAIN : DEFAULT_VOCAL_CHAIN;
+}
+
+/** A Lead that already carries a bundled chain (the recording template's Tuned Lead) and a
+ *  Takes lane with nothing on it: give Takes the same chain, with the same AutoTune Key and
+ *  Scale. The mic is heard through Takes while recording and a kept pass plays back through
+ *  the Lead, so without this the rapper's live voice loses its tuning the moment the phone
+ *  remote is set up. Never touches a Takes lane that already has effects.
+ *  Returns a line for the status note, or null when nothing was added. */
+export async function mirrorLeadChain(io: VocalSetupIO, leadId: string, takesId: string,
+  fallback: Snapshot): Promise<string | null> {
+  const tracks = (io.snapshot() ?? fallback).tracks;
+  const lead = tracks.find((t) => t.id === leadId);
+  const takes = tracks.find((t) => t.id === takesId);
+  const stem = bundledChainOf(lead);
+  if (!lead || !takes || !stem || (takes.plugins ?? []).length > 0 || !acceptsTrackPreset(takes)) return null;
+  const file = await findPresetFile(io, stem);
+  if (!file) return null;
+  const applied = await io.run("apply_track_preset", { trackId: takesId, file });
+  if (!applied?.ok) return `Vocal chain not added to ${takes.name}: ${applied?.error ?? "apply_track_preset failed"}`;
+  const leadTuner = lead.plugins?.find((p) => p.type === "moshAutoTune");
+  const takesTuner = io.snapshot()?.tracks.find((t) => t.id === takesId)?.plugins?.find((p) => p.type === "moshAutoTune");
+  if (leadTuner && takesTuner) {
+    for (const paramIndex of [0, 1]) {   // Key, Scale
+      const value = leadTuner.params.find((p) => p.index === paramIndex)?.value;
+      const now = takesTuner.params.find((p) => p.index === paramIndex)?.value;
+      if (typeof value === "number" && value !== now) {
+        await io.run("set_plugin_param", { trackId: takesId, index: takesTuner.index, paramIndex, value });
+      }
+    }
+  }
+  return null;
 }
 
 /** One monitoring change through `exec`, honest about its outcome: true when it applied or
@@ -146,7 +188,8 @@ const AUTOTUNE_SCALE_LABELS = ["Chromatic", "Major", "Minor"];
 
 const norm = (index: number, count: number) => (count < 2 ? 0 : Math.min(count - 1, Math.max(0, index)) / (count - 1));
 
-/** Replace whatever bundled vocal chain Lead and Takes carry with `to`, as ONE undo step:
+/** Replace whatever bundled vocal chain Lead and Takes carry with `to`, as ONE undo step
+ *  (just the Lead when the phone remote's Takes lane does not exist yet):
  *  inside batch_begin/batch_end, every bundled-preset stage on each lane is removed
  *  (highest index first: this also clears a stacked or half-lost chain), the chosen preset
  *  is applied, and for Tuned Lead the AutoTune Key and Scale are set.
@@ -159,7 +202,7 @@ const norm = (index: number, count: number) => (count < 2 ? 0 : Math.min(count -
  *  read back after it is applied. */
 export async function switchVocalPreset(io: VocalSetupIO, opts: {
   leadId: string;
-  takesId: string;
+  takesId?: string | null;
   to: "clean" | "tuned";
   key?: VoiceKey;
 }): Promise<{ ok: boolean; error: string | null }> {
@@ -177,7 +220,8 @@ export async function switchVocalPreset(io: VocalSetupIO, opts: {
     return { ok: false, error };
   };
 
-  for (const laneId of [opts.leadId, opts.takesId]) {
+  const lanes = [opts.leadId, ...(opts.takesId && opts.takesId !== opts.leadId ? [opts.takesId] : [])];
+  for (const laneId of lanes) {
     const lane = io.snapshot()?.tracks.find((t) => t.id === laneId);
     if (!lane) return fail("The vocal track went missing. Start the song again.");
     for (const index of vocalPresetStageIndices(lane)) {

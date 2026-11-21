@@ -1054,14 +1054,14 @@ describe("startVocalProject — the vocal template, shared by File › New Vocal
     const { ctx, store, execCalls } = makeCtx({}, {
       exec: vi.fn(async (command: string, args?: Record<string, unknown>) => {
         execCalls.push({ command, args });
-        return { ok: true, data: { template: "vocal", backingTrackId: "7", vocalTrackId: "8" } };
+        return { ok: true, data: { template: "vocal", backingTrackId: "7", vocalTrackId: "8", adlibTrackId: "9", takesTrackId: "10" } };
       }),
     });
     const r = await startVocalProject(ctx);
     expect(execCalls.find((c) => c.command === "new_project")).toEqual({ command: "new_project", args: { template: "vocal" } });
     expect(store.refresh).toHaveBeenCalled();
     expect(store.invalidateMemory).toHaveBeenCalled();
-    expect(r).toEqual({ ok: true, backingTrackId: "7", vocalTrackId: "8", templateError: "" });
+    expect(r).toEqual({ ok: true, backingTrackId: "7", vocalTrackId: "8", adlibTrackId: "9", takesTrackId: "10", templateError: "" });
   });
 
   it("reports an unknown template and a refused switch instead of pretending ids exist", async () => {

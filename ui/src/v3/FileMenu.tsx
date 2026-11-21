@@ -4,6 +4,8 @@ import { useStore } from "../store";
 import { pickFiles, pickSaveFile } from "../bridge";
 import { runAction } from "../menuActions";
 import { useV3 } from "./shellState";
+import { useStartMemory } from "./startMemory";
+import { createRecordingSong } from "./startSong";
 
 function actionCtx() {
   return { store: useStore.getState(), pickFiles, pickSaveFile };
@@ -32,7 +34,7 @@ export function FileMenu({ title }: { title: string }) {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open, setOpen]);
 
-  const run = (id: "new_project" | "new_vocal_project" | "open_project" | "save" | "save_as" | "export_audio") => {
+  const run = (id: "new_project" | "open_project" | "save" | "save_as" | "export_audio") => {
     setOpen(false);
     void runAction(id, actionCtx());
   };
@@ -48,10 +50,12 @@ export function FileMenu({ title }: { title: string }) {
         <button type="button" className="mi" role="menuitem" onClick={() => run("new_project")}>
           <span>New Session</span><kbd>⌘N</kbd>
         </button>
-        {/* TPL-001: Backing + armed Vocal, a one-bar count-in, overdub takes and a loop. */}
+        {/* TPL-001: Beat, an armed Lead vocal (Tuned Lead) and Ad-libs, a one-bar count-in,
+            overdub takes and a loop. The same function the launch setup runs, so the mic is
+            asked for first and Hear myself stays off on laptop speakers. */}
         <button type="button" className="mi" role="menuitem" data-testid="v3-new-vocal"
-          onClick={() => run("new_vocal_project")}>
-          <span>New Vocal Recording</span>
+          onClick={() => { setOpen(false); void createRecordingSong(); }}>
+          <span>New Recording Song</span>
         </button>
         <button type="button" className="mi" role="menuitem" onClick={() => run("open_project")}>
           <span>Open…</span><kbd>⌘O</kbd>
@@ -78,25 +82,20 @@ export function FileMenu({ title }: { title: string }) {
           }}>
           <span>Templates</span><span className="chev">›</span>
           <div className="menu-sub" role="menu" aria-label="Templates">
-            <button type="button" className="mi" role="menuitem" data-testid="v3-template-booth"
-              onClick={() => { useStore.getState().setView("arrange"); setPosture("booth"); close(); }}>
-              <span>Recording Booth</span>
-              {posture === "booth" ? <span className="check">✓</span> : null}
-            </button>
             <button type="button" className="mi" role="menuitem" data-testid="v3-template-studio"
               onClick={() => { useStore.getState().setView("arrange"); setPosture("studio"); close(); }}>
               <span>Full Studio</span>
               {posture === "studio" ? <span className="check">✓</span> : null}
             </button>
-            <button type="button" className="mi" role="menuitem" data-testid="v3-template-start"
-              onClick={() => { useStore.getState().setView("arrange"); setPosture("start"); close(); }}>
-              <span>Start page</span>
-              {posture === "start" ? <span className="check">✓</span> : null}
-            </button>
             <div className="mi muted"><span>Mix Focus</span><span className="soon">soon</span></div>
           </div>
         </div>
         <div className="sep" />
+        {/* The first-run checklist (StartChecklist.tsx): beat, voice, phone. */}
+        <button type="button" className="mi" role="menuitem" data-testid="v3-open-checklist"
+          onClick={() => { useStore.getState().setView("arrange"); setPosture("studio"); useStartMemory.getState().reopen(); close(); }}>
+          <span>Getting started</span>
+        </button>
         <button type="button" className="mi" role="menuitem" data-testid="v3-open-settings"
           onClick={() => { close(); setSettingsOpen(true); }}>
           <span>Settings…</span><kbd>⌘,</kbd>

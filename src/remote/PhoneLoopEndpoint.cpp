@@ -124,7 +124,7 @@ juce::var PhoneLoopEndpoint::buildState()
     state->setProperty ("contributions", contributions);
     state->setProperty ("receipts", receipts);
     state->setProperty ("error", ! hostAlive ? juce::String ("Mosh is not responding on the Mac.")
-                                : ! engaged  ? juce::String ("Pick a track on the Mac first (Setup).")
+                                : ! engaged  ? juce::String ("Pick a track on the Mac first: open Getting started, then Phone.")
                                              : loop.getProperty ("blockReason", {}).toString());
     return juce::var (state);
 }

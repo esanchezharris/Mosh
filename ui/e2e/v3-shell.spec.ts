@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { bootV3 } from "./helpers";
+import { bootV3, enterBooth } from "./helpers";
 
 async function bootV3Page(page: Page): Promise<void> {
   await bootV3(page);
@@ -66,13 +66,16 @@ test("the colorway reaches the accents: a selected clip's border follows violet,
   expect(JSON.stringify(await border())).not.toBe(JSON.stringify(lime));
 });
 
-test("File menu Templates enter Booth without a top toggle or RECORDING banner", async ({ page }) => {
+test("the File menu has no way into the Booth; the view itself shows no top toggle or RECORDING banner", async ({ page }) => {
   await bootV3Page(page);
   await page.getByTestId("v3-file-trigger").click();
   await expect(page.getByTestId("v3-file-menu")).toBeVisible();
   await page.getByTestId("v3-templates").hover();
-  await page.getByTestId("v3-template-booth").click();
-  await expect(page.getByTestId("v3-booth")).toBeVisible();
+  await expect(page.getByTestId("v3-template-studio")).toBeVisible();
+  await expect(page.getByTestId("v3-template-booth")).toHaveCount(0);
+  await expect(page.getByTestId("v3-file-menu")).not.toContainText("Booth");
+  await page.keyboard.press("Escape");
+  await enterBooth(page);
   await expect(page.getByTestId("v3-arrangement")).toHaveCount(0);
   await expect(page.getByText("RECORDING", { exact: true })).toHaveCount(0);
   await expect(page.locator(".recording-banner")).toHaveCount(0);

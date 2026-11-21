@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { bootV3Start } from "./helpers";
+import { bootV3Start, enterBooth } from "./helpers";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -82,9 +82,7 @@ test.describe("V3-feel: every surface in every colorway", () => {
 
       await page.getByTestId("v3-rail-plugins").click();   // put the side pane away first
       await expect(page.getByTestId("v3-plugins-pane")).toHaveCount(0);
-      await page.getByTestId("v3-file-trigger").click();
-      await page.getByTestId("v3-templates").hover();
-      await page.getByTestId("v3-template-booth").click();
+      await enterBooth(page);
       await expect(page.getByTestId("v3-booth")).toBeVisible();
       await expect(page.getByTestId("v3-file-menu")).toHaveAttribute("aria-hidden", "true");   // the menu stays mounted…
       await expect.poll(() => page.getByTestId("v3-file-menu").evaluate((el) => {                // …and fades: wait for the fade
@@ -101,33 +99,33 @@ test.describe("V3-feel: every surface in every colorway", () => {
     });
   }
 
-  // The Start page (DESIGN.md §10): its five steps, in every colorway, on a fresh install.
+  // The first-run checklist (DESIGN.md §10): its three items over the workspace, in every
+  // colorway, on a fresh install.
   for (const colorway of COLORWAYS) {
-    test(`colorway ${colorway}: Start page welcome, beat, voice, ready, phone`, async ({ page }) => {
+    test(`colorway ${colorway}: first-run checklist beat, voice, phone, all set`, async ({ page }) => {
       await page.setViewportSize({ width: 1440, height: 900 });
       await bootV3Start(page, { seed: "fresh", colorway });
       await expect(page.getByTestId("v3-shell")).toHaveAttribute("data-colorway", colorway);
       const shot = (name: string) => page.screenshot({ path: join(OUT, `${colorway}-${name}.png`), fullPage: false });
-      const step = page.getByTestId("v3-start");
+      const list = page.getByTestId("v3-checklist");
 
-      await shot("09-start-welcome");
-      await page.getByTestId("v3-start-new").click();
-      await expect(step).toHaveAttribute("data-step", "beat");
-      await page.getByTestId("v3-start-choose").click();
-      await expect(page.getByTestId("v3-start-tempo-line")).toContainText("88");
-      await shot("10-start-beat");
-      await page.getByTestId("v3-start-bpm-confirm").click();
-      await page.getByTestId("v3-start-beat-next").click();
-      await expect(step).toHaveAttribute("data-step", "voice");
-      await expect(page.getByTestId("v3-start-ready")).toBeEnabled();
-      await shot("11-start-voice");
-      await page.getByTestId("v3-start-ready").click();
-      await expect(page.getByTestId("v3-start-ready-card")).toBeVisible();
-      await shot("12-start-ready");
-      await page.getByTestId("v3-start-add-phone").click();
-      await page.getByTestId("v3-start-show-code").click();
-      await expect(page.getByTestId("v3-start-qr")).toBeVisible();
-      await shot("13-start-phone");
+      await expect(list).toHaveAttribute("data-current", "beat");
+      await shot("09-checklist-open");
+      await page.getByTestId("v3-check-choose").click();
+      await expect(page.getByTestId("v3-check-tempo-line")).toContainText("88");
+      await shot("10-checklist-beat");
+      await page.getByTestId("v3-check-bpm-confirm").click();
+      await expect(list).toHaveAttribute("data-current", "voice");
+      await expect(page.getByTestId("v3-check-voice-ok")).toBeEnabled();
+      await shot("11-checklist-voice");
+      await page.getByTestId("v3-check-voice-ok").click();
+      await expect(list).toHaveAttribute("data-current", "phone");
+      await page.getByTestId("v3-check-show-code").click();
+      await expect(page.getByTestId("v3-check-qr")).toBeVisible();
+      await shot("12-checklist-phone");
+      await page.getByTestId("v3-check-skip-phone").click();
+      await expect(page.getByTestId("v3-check-set")).toBeVisible();
+      await shot("13-checklist-set");
     });
   }
 

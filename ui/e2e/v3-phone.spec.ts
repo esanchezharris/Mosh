@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { bootV3 } from "./helpers";
+import { bootV3, enterBooth } from "./helpers";
 
 // MOSHI phone pad, desktop half — the QR a phone actually scans. The whole point of this
 // surface is that the encoded URL is the LAN-IP Safari pad (`http://<ip>:<port>/pad#token=…`):
@@ -8,13 +8,6 @@ import { bootV3 } from "./helpers";
 // row in docs/VERIFICATION.md; this pins what the desktop hands it.
 
 const PAD_URL = /^http:\/\/\d+\.\d+\.\d+\.\d+:\d+\/pad#token=[a-f0-9]{32,128}$/;
-
-async function enterBooth(page: Parameters<typeof bootV3>[0]) {
-  await page.getByTestId("v3-file-trigger").click();
-  await page.getByTestId("v3-templates").hover();
-  await page.getByTestId("v3-template-booth").click();
-  await expect(page.getByTestId("v3-booth")).toBeVisible();
-}
 
 test("Phone pairs to the LAN-IP Safari pad, never to mosh:// or a .local host", async ({ page }) => {
   await bootV3(page);

@@ -1,8 +1,8 @@
 // TPL-001 — mock-bridge parity for new_project { template: "vocal" }.
 //
 // The template is pure composition of existing commands, so what the UI depends on is
-// the SHAPE it leaves behind: Backing + Vocal audio tracks, Vocal armed with automatic
-// monitoring, a one-bar count-in, overdub takes, and a four-bar loop from bar 1. An
+// the SHAPE it leaves behind: Beat, Lead vocal and Ad-libs audio tracks, the Lead armed with
+// automatic monitoring, a one-bar count-in, overdub takes, and a four-bar loop from bar 1. An
 // unknown template still yields a project and says so, never a silent empty project.
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -23,10 +23,10 @@ describe("new_project template:vocal — mock parity", () => {
     expect(d.template).toBe("vocal");
     const s = await snap();
     const names = s.tracks.map((t) => t.name);
-    expect(names).toContain("Backing");
-    expect(names).toContain("Vocal");
-    const vocal = s.tracks.find((t) => t.id === d.vocalTrackId)!;
-    expect(vocal.armed).toBe(true);
+    expect(names).toEqual(["Beat", "Lead vocal", "Lead vocal · Takes", "Ad-libs"]);
+    // Passes land on the Lead's Takes lane, which holds the arm.
+    expect(s.tracks.find((t) => t.name === "Lead vocal · Takes")!.armed).toBe(true);
+    expect(s.tracks.find((t) => t.id === d.vocalTrackId)!.armed).toBe(false);
     expect(s.session.countInBars).toBe(1);
     expect(s.session.project?.recordOptions?.overdub).toBe(true);
     expect(s.transport.looping).toBe(true);

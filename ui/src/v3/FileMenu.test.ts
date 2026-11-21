@@ -7,9 +7,11 @@ import { useV3 } from "./shellState";
 import { useStore } from "../store";
 import type { Snapshot } from "../types";
 import { escapeStackDepth, pushEscapeHandler } from "../hooks/escapeStack";
-import { runAction } from "../menuActions";
+import { useStartMemory } from "./startMemory";
+import { createRecordingSong } from "./startSong";
 
 vi.mock("../menuActions", () => ({ runAction: vi.fn() }));
+vi.mock("./startSong", () => ({ createRecordingSong: vi.fn(async () => true) }));
 
 function snap(): Snapshot {
   return {
@@ -49,10 +51,11 @@ describe("v3 File menu + top bar", () => {
     expect(host.querySelector<HTMLElement>('[data-testid="v3-file-menu"]')?.inert).toBe(false);
   });
 
-  it("has Templates › Recording Booth / Full Studio and no Studio/Booth top toggle", () => {
+  it("has Templates › Full Studio, no way into the Booth, and no Studio/Booth top toggle", () => {
     act(() => root.render(React.createElement(FileMenu, { title: "untitled" })));
     expect(host.querySelector('[data-testid="v3-templates"]')).not.toBeNull();
-    expect(host.querySelector('[data-testid="v3-template-booth"]')?.textContent).toMatch(/Recording Booth/);
+    expect(host.querySelector('[data-testid="v3-template-booth"]')).toBeNull();
+    expect(host.textContent).not.toMatch(/Booth/);
     expect(host.querySelector('[data-testid="v3-template-studio"]')?.textContent).toMatch(/Full Studio/);
     expect(host.textContent).toMatch(/soon/);
     expect(host.querySelector('[data-testid="v3-studio-toggle"]')).toBeNull();
@@ -90,11 +93,23 @@ describe("v3 File menu + top bar", () => {
     }
   });
 
-  it("offers New Vocal Recording, which runs the vocal template action and closes the menu", () => {
-    vi.mocked(runAction).mockClear();
+  it("offers New Recording Song, which makes the recording song and closes the menu", () => {
+    vi.mocked(createRecordingSong).mockClear();
     act(() => root.render(React.createElement(FileMenu, { title: "untitled" })));
     act(() => host.querySelector<HTMLElement>('[data-testid="v3-new-vocal"]')?.click());
-    expect(vi.mocked(runAction)).toHaveBeenCalledWith("new_vocal_project", expect.anything());
+    expect(vi.mocked(createRecordingSong)).toHaveBeenCalledTimes(1);
+    expect(useV3.getState().fileOpen).toBe(false);
+  });
+
+  it("Getting started reopens the first-run checklist over the arrangement, even after it was dismissed", () => {
+    useStore.setState({ view: "mixer" });
+    act(() => useStartMemory.getState().dismiss());
+    act(() => root.render(React.createElement(FileMenu, { title: "untitled" })));
+    act(() => host.querySelector<HTMLElement>('[data-testid="v3-open-checklist"]')?.click());
+    expect(useStartMemory.getState().open).toBe(true);
+    expect(useStartMemory.getState().progress.dismissed).toBe(false);
+    expect(useV3.getState().posture).toBe("studio");
+    expect(useStore.getState().view).toBe("arrange");
     expect(useV3.getState().fileOpen).toBe(false);
   });
 
@@ -107,10 +122,10 @@ describe("v3 File menu + top bar", () => {
 
     act(() => templates.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })));
 
-    expect(document.activeElement).toBe(host.querySelector('[data-testid="v3-template-booth"]'));
+    expect(document.activeElement).toBe(host.querySelector('[data-testid="v3-template-studio"]'));
   });
 
-  it.each(["booth", "studio"] as const)("shows arrangement when the %s template is selected from Mixer", (posture) => {
+  it.each(["studio"] as const)("shows arrangement when the %s template is selected from Mixer", (posture) => {
     useStore.setState({ view: "mixer" });
     act(() => root.render(React.createElement(FileMenu, { title: "untitled" })));
 

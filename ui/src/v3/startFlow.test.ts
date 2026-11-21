@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { LoopState, Plugin, Snapshot, Track } from "../types";
 import {
-  beatClipOf, beatDone, firstIncomplete, hasOwnChain, loopCoversClip, pickBackingTrack, pickContinueLead,
-  pipStates, PRESET_IDS, readyBlocker, repairTarget, setKeyArgs, songReady, tempoStillConfirmed, voicePresetOf,
-  type BeatLocal, type MicState, type StartIds,
+  EMPTY_PROGRESS, beatClipOf, beatDone, checklistOpensAtLaunch, checklistSettled, firstOpenItem, hasOwnChain, isBeatTrackName,
+  itemStates, loopCoversClip, micLaneOf, pickBackingTrack, pickContinueLead, PRESET_IDS, repairTarget, resolveIds, setKeyArgs,
+  songReady, tempoStillConfirmed, voiceBlocker, voicePresetOf,
+  type BeatLocal, type ChecklistProgress, type MicState, type StartIds,
 } from "./startFlow";
 
 // ── factories ───────────────────────────────────────────────────────────────────────────
@@ -130,6 +131,10 @@ describe("hasOwnChain", () => {
 // ── track picking ───────────────────────────────────────────────────────────────────────
 
 describe("pickBackingTrack", () => {
+  it("matches the template's Beat track as well as the older Backing name", () => {
+    expect(pickBackingTrack([track("L"), track("X", { name: "Beat" })], loop())?.id).toBe("X");
+  });
+
   it("matches the name Backing case-insensitively and ignoring surrounding spaces", () => {
     expect(pickBackingTrack([track("L"), track("X", { name: "  BACKING " })], loop())?.id).toBe("X");
     expect(pickBackingTrack([track("X", { name: "backing" })], null)?.id).toBe("X");
@@ -310,9 +315,9 @@ describe("beatDone", () => {
   });
 });
 
-// ── readyBlocker ────────────────────────────────────────────────────────────────────────
+// ── voiceBlocker ────────────────────────────────────────────────────────────────────────
 
-describe("readyBlocker", () => {
+describe("voiceBlocker", () => {
   function input(over: {
     lead?: Partial<Track>;
     takes?: Partial<Track>;
@@ -335,47 +340,54 @@ describe("readyBlocker", () => {
   }
 
   it("is null when everything is in place (clean on both, or tuned on both)", () => {
-    expect(readyBlocker(input())).toBeNull();
-    expect(readyBlocker(input({ lead: { plugins: tunedChain() }, takes: { plugins: tunedChain() } }))).toBeNull();
+    expect(voiceBlocker(input())).toBeNull();
+    expect(voiceBlocker(input({ lead: { plugins: tunedChain() }, takes: { plugins: tunedChain() } }))).toBeNull();
   });
 
-  it("says Setting up… before the song is ready, ahead of every other problem", () => {
-    expect(readyBlocker(input({ loop: { engaged: false, blockReason: "no input" }, mic: "denied" }))).toBe("Setting up…");
-    expect(readyBlocker({ ...input(), snapshot: null })).toBe("Setting up…");
+  it("asks for a song before anything else when there is no vocal track", () => {
+    expect(voiceBlocker({ ...input({ loop: { blockReason: "no input" }, mic: "denied" }), ids: { ...IDS, leadTrackId: null } })).toBe("Set up a song first");
+    expect(voiceBlocker({ ...input(), snapshot: null })).toBe("Set up a song first");
+  });
+
+  it("before the phone remote exists the Lead itself takes the mic: armed and tuned is ready, un-armed is not", () => {
+    const noTakes = { ...IDS, takesTrackId: null };
+    expect(voiceBlocker(input({ lead: { armed: true, plugins: tunedChain() }, ids: noTakes }))).toBeNull();
+    expect(voiceBlocker(input({ lead: { armed: false, plugins: tunedChain() }, ids: noTakes }))).toBe("Fix the microphone first");
+    expect(voiceBlocker(input({ lead: { armed: true, plugins: [] }, ids: noTakes }))).toBe("Finish your voice");
   });
 
   it("says recording is unavailable for a loop blockReason, audioReady false, or a device error", () => {
     const msg = "Recording is unavailable on this Mac";
-    expect(readyBlocker(input({ loop: { blockReason: "no input" } }))).toBe(msg);
-    expect(readyBlocker(input({ session: { audioReady: false } }))).toBe(msg);
-    expect(readyBlocker(input({ session: { audioDeviceError: "Device lost" } }))).toBe(msg);
+    expect(voiceBlocker(input({ loop: { blockReason: "no input" } }))).toBe(msg);
+    expect(voiceBlocker(input({ session: { audioReady: false } }))).toBe(msg);
+    expect(voiceBlocker(input({ session: { audioDeviceError: "Device lost" } }))).toBe(msg);
   });
 
   it("puts recording-unavailable ahead of the microphone and the voice", () => {
-    expect(readyBlocker(input({ loop: { blockReason: "x" }, mic: "denied", takes: { armed: false, plugins: [] } })))
+    expect(voiceBlocker(input({ loop: { blockReason: "x" }, mic: "denied", takes: { armed: false, plugins: [] } })))
       .toBe("Recording is unavailable on this Mac");
   });
 
   it.each(["denied", "restricted", "timed-out"] as const)("asks to fix the microphone when it is %s", (mic) => {
-    expect(readyBlocker(input({ mic }))).toBe("Fix the microphone first");
+    expect(voiceBlocker(input({ mic }))).toBe("Fix the microphone first");
   });
 
   it("does not block on a microphone that is granted, undecided or unknown", () => {
-    expect(readyBlocker(input({ mic: "not-determined" }))).toBeNull();
-    expect(readyBlocker(input({ mic: "unknown" }))).toBeNull();
+    expect(voiceBlocker(input({ mic: "not-determined" }))).toBeNull();
+    expect(voiceBlocker(input({ mic: "unknown" }))).toBeNull();
   });
 
   it("asks to fix the microphone when the Takes lane is not armed", () => {
-    expect(readyBlocker(input({ takes: { armed: false } }))).toBe("Fix the microphone first");
+    expect(voiceBlocker(input({ takes: { armed: false } }))).toBe("Fix the microphone first");
   });
 
   it("puts the microphone ahead of the voice", () => {
-    expect(readyBlocker(input({ mic: "denied", lead: { plugins: [] } }))).toBe("Fix the microphone first");
+    expect(voiceBlocker(input({ mic: "denied", lead: { plugins: [] } }))).toBe("Fix the microphone first");
   });
 
   it("asks to finish the voice when Lead and Takes carry different presets", () => {
-    expect(readyBlocker(input({ takes: { plugins: tunedChain() } }))).toBe("Finish your voice");
-    expect(readyBlocker(input({ lead: { plugins: [] } }))).toBe("Finish your voice");
+    expect(voiceBlocker(input({ takes: { plugins: tunedChain() } }))).toBe("Finish your voice");
+    expect(voiceBlocker(input({ lead: { plugins: [] } }))).toBe("Finish your voice");
   });
 
   it.each([
@@ -384,67 +396,113 @@ describe("readyBlocker", () => {
     ["lost-tuner", () => tunedChain().slice(1)],
     ["mixed", () => [...cleanChain(), ...tunedChain()]],
   ] as const)("asks to finish the voice when both carry %s", (_label, chain) => {
-    expect(readyBlocker(input({ lead: { plugins: chain() }, takes: { plugins: chain() } }))).toBe("Finish your voice");
+    expect(voiceBlocker(input({ lead: { plugins: chain() }, takes: { plugins: chain() } }))).toBe("Finish your voice");
   });
 
   it("skips the voice check when no chain is required", () => {
-    expect(readyBlocker(input({ lead: { plugins: [] }, takes: { plugins: tunedChain() }, chainNotRequired: true }))).toBeNull();
+    expect(voiceBlocker(input({ lead: { plugins: [] }, takes: { plugins: tunedChain() }, chainNotRequired: true }))).toBeNull();
     // ...but never the microphone check.
-    expect(readyBlocker(input({ takes: { armed: false }, chainNotRequired: true }))).toBe("Fix the microphone first");
+    expect(voiceBlocker(input({ takes: { armed: false }, chainNotRequired: true }))).toBe("Fix the microphone first");
   });
 });
 
-// ── pips / re-entry ─────────────────────────────────────────────────────────────────────
+// ── the checklist ───────────────────────────────────────────────────────────────────────
 
-describe("pipStates", () => {
+describe("checklist progress", () => {
+  const p = (over: Partial<ChecklistProgress> = {}): ChecklistProgress => ({ ...EMPTY_PROGRESS, ...over });
+
+  it("opens at launch until every item is done or skipped, or it is dismissed", () => {
+    expect(checklistOpensAtLaunch(p())).toBe(true);
+    expect(checklistOpensAtLaunch(p({ beat: "done", voice: "skipped" }))).toBe(true);
+    expect(checklistOpensAtLaunch(p({ beat: "done", voice: "skipped", phone: "skipped" }))).toBe(false);
+    expect(checklistOpensAtLaunch(p({ dismissed: true }))).toBe(false);
+  });
+
+  it("is settled only when nothing is left to do", () => {
+    expect(checklistSettled(p({ beat: "done", voice: "done" }))).toBe(false);
+    expect(checklistSettled(p({ beat: "done", voice: "done", phone: "skipped" }))).toBe(true);
+  });
+
+  it("opens the earliest item still to do", () => {
+    expect(firstOpenItem(p())).toBe("beat");
+    expect(firstOpenItem(p({ beat: "skipped" }))).toBe("voice");
+    expect(firstOpenItem(p({ beat: "done", voice: "done" }))).toBe("phone");
+    expect(firstOpenItem(p({ beat: "done", voice: "done", phone: "done" }))).toBeNull();
+  });
+});
+
+describe("itemStates", () => {
   const base = {
-    snapshot: snap({ tracks: [track("L"), track("T")] }),
+    snapshot: snap({ tracks: [track("B"), track("L"), track("T")] }),
     ids: IDS,
     beat: beat(),
-    phone: { everConnected: false, skipped: false },
+    progress: EMPTY_PROGRESS,
     voiceReady: false,
+    phoneConnected: false,
   };
 
-  it("marks the step's pip current and the rest todo when nothing is done", () => {
-    expect(pipStates({ ...base, step: "beat" })).toEqual({ beat: "current", voice: "todo", phone: "todo", record: "todo" });
-    expect(pipStates({ ...base, step: "voice" })).toEqual({ beat: "todo", voice: "current", phone: "todo", record: "todo" });
-    expect(pipStates({ ...base, step: "phone" })).toEqual({ beat: "todo", voice: "todo", phone: "current", record: "todo" });
+  it("starts with everything to do", () => {
+    expect(itemStates(base)).toEqual({ beat: "todo", voice: "todo", phone: "todo" });
   });
 
-  it("lights Record as current on the ready card", () => {
-    expect(pipStates({ ...base, step: "ready" }).record).toBe("current");
+  it("the beat is a fact about the open song: a remembered 'done' does not light it without a beat", () => {
+    expect(itemStates({ ...base, progress: { ...EMPTY_PROGRESS, beat: "done" } }).beat).toBe("todo");
+    const withBeat = snap({ tracks: [track("B", { clips: [clip("c", 0, 8)] as Track["clips"] }), track("L"), track("T")] });
+    expect(itemStates({ ...base, snapshot: withBeat, beat: beat({ clipId: "c", confirmed: true }) }).beat).toBe("done");
   });
 
-  it("has no current pip on welcome or song", () => {
-    for (const step of ["welcome", "song"] as const) {
-      expect(Object.values(pipStates({ ...base, step }))).not.toContain("current");
-    }
+  it("a skipped beat shows skipped until a beat is actually in place", () => {
+    const skipped = { ...EMPTY_PROGRESS, beat: "skipped" as const };
+    expect(itemStates({ ...base, progress: skipped, beat: beat({ skipped: true }) }).beat).toBe("skipped");
+    const drums = snap({ tracks: [track("D", { type: "drum", clips: [clip("d", 0, 4, "midi")] as Track["clips"] }), track("L")] });
+    expect(itemStates({ ...base, snapshot: drums, progress: skipped }).beat).toBe("done");
   });
 
-  it("marks a pip done only once the singer has moved past it, and current wins over done", () => {
-    const all = { ...base, beat: beat({ skipped: true }), voiceReady: true, phone: { everConnected: true, skipped: false } };
-    // On Welcome nothing is behind the singer yet, whatever the facts say.
-    expect(pipStates({ ...all, step: "welcome" })).toEqual({ beat: "todo", voice: "todo", phone: "todo", record: "todo" });
-    // On the Beat step a ready voice is NOT shown as done: they haven't got there.
-    expect(pipStates({ ...all, step: "beat" })).toEqual({ beat: "current", voice: "todo", phone: "todo", record: "todo" });
-    // On the ready card everything passed is done.
-    expect(pipStates({ ...all, step: "ready" })).toEqual({ beat: "done", voice: "done", phone: "done", record: "current" });
-    // Passed but not done stays todo (a beat neither imported nor skipped).
-    expect(pipStates({ ...all, beat: beat(), step: "voice" }).beat).toBe("todo");
+  it("the voice is done only while it was confirmed AND still checks out", () => {
+    const confirmed = { ...EMPTY_PROGRESS, voice: "done" as const };
+    expect(itemStates({ ...base, progress: confirmed, voiceReady: true }).voice).toBe("done");
+    expect(itemStates({ ...base, progress: confirmed, voiceReady: false }).voice).toBe("todo");
+    expect(itemStates({ ...base, voiceReady: true }).voice).toBe("todo");
+  });
+
+  it("the phone is done while connected, or once it has been paired before", () => {
+    expect(itemStates({ ...base, phoneConnected: true }).phone).toBe("done");
+    expect(itemStates({ ...base, progress: { ...EMPTY_PROGRESS, phone: "done" } }).phone).toBe("done");
+    expect(itemStates({ ...base, progress: { ...EMPTY_PROGRESS, phone: "skipped" } }).phone).toBe("skipped");
   });
 });
 
-describe("firstIncomplete", () => {
-  const tracks = [track("L"), track("T")];
-  it("lands on welcome for no snapshot, an empty session, or a song that is not set up", () => {
-    expect(firstIncomplete(null, IDS, beat(), true)).toBe("welcome");
-    expect(firstIncomplete(snap({ tracks: [] }), IDS, beat(), true)).toBe("welcome");
-    expect(firstIncomplete(snap({ tracks, loop: loop({ engaged: false }) }), IDS, beat(), true)).toBe("welcome");
+describe("resolveIds / micLaneOf", () => {
+  const template = [track("B", { name: "Beat" }), track("L", { name: "Lead vocal", armed: true }), track("A", { name: "Ad-libs" })];
+  const none: StartIds = { backingTrackId: null, leadTrackId: null, takesTrackId: null };
+
+  it("finds the template's tracks by what they are when nothing is remembered: Lead vocal, never Ad-libs or Beat", () => {
+    const s = snap({ tracks: template, loop: loop({ engaged: false, leadTrackId: "", takesTrackId: "" }) });
+    expect(resolveIds(s, none)).toEqual({ backingTrackId: "B", leadTrackId: "L", takesTrackId: null });
+    expect(micLaneOf(s, resolveIds(s, none))?.id).toBe("L");
   });
-  it("lands on the first step whose facts are missing", () => {
-    expect(firstIncomplete(snap({ tracks }), IDS, beat(), true)).toBe("beat");
-    expect(firstIncomplete(snap({ tracks }), IDS, beat({ skipped: true }), false)).toBe("voice");
-    expect(firstIncomplete(snap({ tracks }), IDS, beat({ skipped: true }), true)).toBe("ready");
+
+  it("still finds a song made before the rename (Backing + Vocal)", () => {
+    const s = snap({ tracks: [track("B", { name: "Backing" }), track("V", { name: "Vocal" })], loop: null });
+    expect(resolveIds(s, none)).toEqual({ backingTrackId: "B", leadTrackId: "V", takesTrackId: null });
+    expect(isBeatTrackName(" BEAT ")).toBe(true);
+    expect(isBeatTrackName("Backing")).toBe(true);
+    expect(isBeatTrackName("Beat 2")).toBe(false);
+  });
+
+  it("counts the Takes lane only while the phone remote is set up on this Lead, and then it takes the mic", () => {
+    const tracks = [...template, track("T", { name: "Lead vocal · Takes", armed: true })];
+    const engaged = snap({ tracks, loop: loop({ leadTrackId: "L", takesTrackId: "T" }) });
+    expect(resolveIds(engaged, { backingTrackId: "B", leadTrackId: "L", takesTrackId: null }).takesTrackId).toBe("T");
+    expect(micLaneOf(engaged, resolveIds(engaged, none))?.id).toBe("T");
+    const elsewhere = snap({ tracks, loop: loop({ leadTrackId: "A", takesTrackId: "T" }) });
+    expect(resolveIds(elsewhere, { backingTrackId: "B", leadTrackId: "L", takesTrackId: null }).takesTrackId).toBeNull();
+  });
+
+  it("drops remembered tracks that no longer exist, and answers nothing for no snapshot", () => {
+    const s = snap({ tracks: [track("X", { name: "Guitar", clips: [clip("g", 0, 4)] as Track["clips"] })], loop: null });
+    expect(resolveIds(s, { backingTrackId: "gone", leadTrackId: "gone", takesTrackId: "gone" })).toEqual(none);
+    expect(resolveIds(null, IDS)).toEqual(none);
   });
 });
 

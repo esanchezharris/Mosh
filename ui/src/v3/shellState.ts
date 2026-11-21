@@ -1,9 +1,10 @@
 import { create } from "zustand";
 
 export type V3Pane = "none" | "browser" | "plugins";
-/** studio: the arrangement. booth: the recording loop. start: the guided Start page
- *  (StartPage.tsx), which replaces the workspace for a first-time singer. */
-export type V3Posture = "studio" | "booth" | "start";
+/** studio: the arrangement (where the first-run checklist, StartChecklist.tsx, sits over
+ *  the workspace). booth: the recording loop view, kept in the code but not reachable from
+ *  the menus while its redesign is pending. */
+export type V3Posture = "studio" | "booth";
 export type V3BrowserTab = "files" | "midi" | "presets";
 
 /** The top bar's LoRA button: the training dialog hands focus back to it on close. */
@@ -61,8 +62,7 @@ export const useV3 = create<V3ShellState>((set, get) => ({
   context: null,
   setPane: (pane) => set({ pane }),
   togglePane: (pane) => set({ pane: get().pane === pane ? "none" : pane }),
-  // The Start page owns the whole workspace, so a side pane would sit beside nothing.
-  setPosture: (posture) => set(posture === "start" ? { posture, fileOpen: false, pane: "none" } : { posture, fileOpen: false }),
+  setPosture: (posture) => set({ posture, fileOpen: false }),
   setBrowserTab: (browserTab) => set({ browserTab }),
   setFileOpen: (fileOpen) => set({ fileOpen, historyOpen: false, settingsOpen: false, mpOpen: false, phoneOpen: false, trainingOpen: false, context: null }),
   setHistoryOpen: (historyOpen) => set({ historyOpen, fileOpen: false, settingsOpen: false, mpOpen: false, phoneOpen: false, trainingOpen: false, context: null }),
@@ -73,3 +73,12 @@ export const useV3 = create<V3ShellState>((set, get) => ({
   setAiToolsOpen: (aiToolsOpen) => set({ aiToolsOpen, fileOpen: false, historyOpen: false, settingsOpen: false, mpOpen: false, phoneOpen: false, trainingOpen: false, context: null }),
   setContext: (context) => set({ context, fileOpen: false, historyOpen: false }),
 }));
+
+// Dev/e2e handle, like store.ts's __moshStore: the Booth view has no menu entry while its
+// redesign is pending, so its own specs enter it through here. Never set in production.
+if (
+  (import.meta.env.MODE === "development" || import.meta.env.MODE === "e2e" || import.meta.env.MODE === "test")
+  && typeof window !== "undefined"
+) {
+  (window as unknown as { __moshV3?: typeof useV3 }).__moshV3 = useV3;
+}

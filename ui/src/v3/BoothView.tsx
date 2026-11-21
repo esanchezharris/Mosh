@@ -315,8 +315,6 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
         )}
 
         <div className="row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button type="button" className="btn ghost" data-testid="v3-booth-start"
-            onClick={() => setPosture("start")}>← Start</button>
           <button type="button" className="btn ghost" data-testid="v3-booth-studio"
             onClick={() => setPosture("studio")}>← Studio</button>
           {/* Only once a phone is paired or attached — until then the TopBar's Phone pairs one. */}
