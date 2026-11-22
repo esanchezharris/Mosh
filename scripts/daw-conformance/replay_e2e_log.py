@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """DAW-parity P5 replay lane, native half: replay the command trace an e2e run captured
-from REAL UI gestures (ui/e2e/.replay-artifacts/*.json, written by replay-capture.spec.ts)
+from REAL UI gestures (ui/e2e/.replay-artifacts/*.json, written by v3-replay.spec.ts)
 through `Mosh --run-script`, proving the gesture→command surface the mock accepted is
 accepted by the ENGINE too — mock-contract drift dies here.
 
@@ -106,7 +106,7 @@ def main():
     traces = sorted(ART.glob("*.json"))
     if not traces:
         print(f"replay: no captured traces in {ART} — run the e2e capture spec first "
-              f"(cd ui && npx playwright test replay-capture.spec.ts). Nothing to do.")
+              f"(cd ui && npx playwright test v3-replay.spec.ts). Nothing to do.")
         return 0
     bad = 0
     for tf in traces:

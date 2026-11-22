@@ -1,9 +1,9 @@
 # Shell retirement plan — 2026-11-17
 
 **Status:** owner chose to retire all four shells (2026-11-17). Step 1 (move the shared
-pieces) is on `claude/shells-1-shared`. All four decisions in §6 are answered (retire all four shells,
-remove the group and lyrics commands, switch silently). Nothing is
-deleted yet.
+pieces) merged as #818. Step 2 (port the core specs to V3) is on `claude/shells-2-coverage`;
+see §4a. All four decisions in §6 are answered (retire all four shells, remove the group and
+lyrics commands, switch silently). Nothing is deleted yet.
 
 **Goal:** make V3 the only interface. Retire Classic, v2 ("Mosh (new)"), Live (clone) and
 Pro Tools, delete their code and tests together, and cut the gate's time to match.
@@ -31,7 +31,7 @@ measured after step 1:
 | `ui/` (old Arrange, Dock, Inspector, Rack, Topbar, SessionRail, presence, Meter, …) | 26 | |
 | `AppLegacy.tsx`, two hooks, `chrome/Menu`, `settings/layoutPresets`, one agent card | 6 | |
 | Vitest files under `protools/`, `live/`, `v2/` | 137 of 561 | |
-| e2e specs that drive an old shell | 52 of ~100 | |
+| e2e specs that drive an old shell | 76 of 109 (first counted as 52; the 24 that boot Classic through the plain `boot()` helper were missed) | |
 
 **Step 1 moved what V3 actually uses out of the old shells:**
 - `addTrackOfKind` and `TRACK_KINDS` → `ui/src/trackKinds.ts`. `menuActions.ts` imported
@@ -70,6 +70,34 @@ coverage gate would go red:
 | Lyrics: `analyze_lyrics`, `complete_lyrics`, `suggest_next_line`, `get_rhymes`, `fill_lyric_gap`, `regenerate_lyric`, `accept/reject_lyric_proposal`, `build_lyrics_from_clip`, `build_skeleton_from_clip`, `get_lyric_corpus_stats` | 14 | FMS is paused. Either remove these commands with the lyrics UI, or add one native conformance test each. Don't paper over them with waivers, which expire as a batch. |
 | Track and clip groups: `create/rename/duplicate/remove/configure_track_group`, `set_track_group_enabled`, `set_track_group_members`, `set_track_groups_suspended`, `create/rename/regroup/ungroup_clip_group` | 9 (the 4 clip-group commands overlap) | Only the Pro Tools shell exposes these. Keep the backend and add conformance tests (cheap, and the commands are engine-level), or remove them if groups are not planned for V3. |
 | `mp_send_signal` | 1 | V3 has multiplayer, so port `multiplayer.spec.ts` to V3. |
+
+## 4a. Step 2 result (2026-11-21)
+
+All 76 old-shell specs were read and their behaviour sorted. 13 new V3 spec files hold what
+survives: `v3-arrange-extra`, `v3-automation`, `v3-clip-edit`, `v3-drums`, `v3-generative`,
+`v3-multiplayer-guest`, `v3-piano-roll`, `v3-replay`, `v3-session`, `v3-templates`,
+`v3-track-ops`, `v3-tracks`, `v3-warp` (about 100 tests). Each file passed three runs in a row.
+
+- Where V3 has the control, the test drives V3's real UI. This covers the piano roll, File
+  menu, Export, master fader, record arm, Hear, audio routing, History, grid picker, clip
+  move and trim, Invite, the LoRA Lab and training sources.
+- Where V3 has no control, the command is driven through the store's `exec` (the same
+  `execute_command` path the UI uses) and the snapshot and one-step undo are asserted. Each
+  such test is named or commented NO-V3-UI.
+- `coverage_check`, simulated with all 76 old specs excluded, leaves exactly the 22 commands
+  being removed uncovered: the 12 group commands and 10 lyrics commands.
+  `build_skeleton_from_clip` stays covered until it is removed with the lyrics.
+
+**V3 has no UI for these (owner product question, not a blocker):** clip fade, gain, reverse,
+normalize, loop, warp and stretch; ripple delete, crop and time-range selection; automation;
+the master plugin chain and meters; track colour, icon, reorder and delete; quantize
+strength and grid Auto; select-similar and marquee; the camera toggle; Recent and the
+launch picker; Save pattern to memory; and the generative inserts (freeze, transform, RAVE,
+MIDI re-imagine, describe-it compile, sustain toggle).
+
+**V3 issues found, not fixed:** the inspector's preset chain and the piano roll both use the
+`.pr` class (`v3/shell.css:359`); a selected piano-roll note keeps its fill colour
+(`--pr-note-sel` equals `--pr-note`), so only a thin ring marks it.
 
 ## 5. PR sequence
 
