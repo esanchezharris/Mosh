@@ -8,7 +8,6 @@ import { isAriaValueControl, isEditableTarget, resolveKey } from "../interaction
 import { unshiftForQwerty } from "../interaction/qwertyMidi";
 import { qwertyState } from "./useQwertyMidi";
 import { useLive } from "../liveState";
-import { activeShell } from "../v2/shellFlag";
 import { useV3 } from "../v3/shellState";
 import { editorKeyFocused } from "./editorFocus";
 
@@ -109,8 +108,7 @@ export function useKeyboardShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const km = liveKeymap();
-      const shell = activeShell();
-      if (shell === "v3" && !km[EA.SETTINGS]) km[EA.SETTINGS] = "Mod+,";
+      if (!km[EA.SETTINGS]) km[EA.SETTINGS] = "Mod+,";
       let action = resolveKey(km, e);
       // While the computer MIDI keyboard is on it CLAIMS its letters (in capture phase, so
       // an unmodified A never reaches here). Ableton's escape hatch is to add Shift — so a
@@ -146,11 +144,9 @@ export function useKeyboardShortcuts() {
         case EA.CONTINUE_PLAY: prevent(); void dispatch("continue_play"); break;
         case EA.SETTINGS:
           prevent();
-          if (shell === "v3") {
+          {
             const v3 = useV3.getState();
             v3.setSettingsOpen(!v3.settingsOpen);
-          } else {
-            useLive.getState().toggleSettings();
           }
           break;
         // A — Live's Automation Mode: the global automation-lane VIEW toggle (the

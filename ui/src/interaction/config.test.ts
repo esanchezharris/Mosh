@@ -51,75 +51,15 @@ describe("buildKeymap", () => {
   });
 });
 
-// DAW shell interaction bundles are resolved only when the corresponding selector
-// has no persisted override. An explicit user choice always wins.
-describe("effectiveInteractionSetting — DAW shell defaults", () => {
-  const backup = { ...useSettings.getState() };
-  beforeEach(() => {
-    useSettings.setState({ template: null, values: {}, keyOverrides: {} });
-  });
-  afterAll(() => {
-    useSettings.setState(backup, true);
-  });
-
-  it("fresh install (V3, no settings) + no overrides → the schema default (mosh), not a DAW bundle", () => {
-    // V3 is the fresh-install shell since the parity flip (settings/schema.ts); it carries
-    // no DAW keymap/gesture bundle of its own, so an untouched install resolves to the
-    // schema defaults exactly as v2/classic do.
-    expect(effectiveInteractionSetting("uiShell")).toBe("v3");
-    expect(effectiveInteractionSetting("keymap")).toBe("mosh");
-    expect(effectiveInteractionSetting("gestureTable")).toBe("mosh");
-  });
-
-  it("Pro Tools shell + no overrides → the Pro Tools bundle", () => {
-    useSettings.setState({ values: { uiShell: "protools" } });
-    expect(effectiveInteractionSetting("keymap")).toBe("protools");
-    expect(effectiveInteractionSetting("gestureTable")).toBe("protools");
-    // …and the resolution reaches the ACTIVE bundle, not just the getter
-    expect(resolveKey(liveKeymap(), { key: " ", metaKey: true })).toBe(A.RECORD);
-    expect(liveGestureTable().some((r) => r.region === "clip.header")).toBe(true);
-  });
-
-  it("live shell + explicit 'mosh' keymap → mosh wins (an explicit choice, even the default value)", () => {
-    useSettings.setState({ values: { uiShell: "live", keymap: "mosh" } });
-    expect(effectiveInteractionSetting("keymap")).toBe("mosh");
-    expect(resolveKey(liveKeymap(), { key: "e", metaKey: true })).toBeNull();
-    // gestureTable is independently unset → still ableton
-    expect(effectiveInteractionSetting("gestureTable")).toBe("ableton");
-  });
-
-  it("live shell + a non-default explicit bundle → the user's bundle wins", () => {
-    useSettings.setState({ values: { uiShell: "live", keymap: "fl", gestureTable: "fl" } });
-    expect(effectiveInteractionSetting("keymap")).toBe("fl");
-    expect(effectiveInteractionSetting("gestureTable")).toBe("fl");
-  });
-
-  it("other shells + unset → the schema default (mosh), unchanged", () => {
-    useSettings.setState({ values: { uiShell: "v2" } });
-    expect(effectiveInteractionSetting("keymap")).toBe("mosh");
-    expect(effectiveInteractionSetting("gestureTable")).toBe("mosh");
-    useSettings.setState({ values: { uiShell: "classic" } });
-    expect(effectiveInteractionSetting("keymap")).toBe("mosh");
-  });
-
-  it("non-interaction ids pass straight through", () => {
-    expect(effectiveInteractionSetting("feel.dragThreshold")).toBe(FEEL_DEFAULTS.dragThreshold);
-    expect(effectiveInteractionSetting("uiShell")).toBe("v3"); // the schema default itself (fresh-install shell)
-  });
-
-  it("Pro Tools shell + unset interaction selectors → Pro Tools bundle", () => {
-    useSettings.setState({ values: { uiShell: "protools" } });
-
-    expect(effectiveInteractionSetting("keymap")).toBe("protools");
-    expect(effectiveInteractionSetting("gestureTable")).toBe("protools");
-  });
-
-  it("Pro Tools shell + explicit interaction selectors → the user's bundle wins", () => {
-    useSettings.setState({
-      values: { uiShell: "protools", keymap: "ableton", gestureTable: "fl" },
-    });
-
+describe("effectiveInteractionSetting", () => {
+  beforeEach(() => { localStorage.clear(); useSettings.getState().reset(); });
+  afterAll(() => useSettings.getState().reset());
+  it("reads the setting as stored (no shell maps an unset keymap to a DAW bundle)", () => {
+    expect(effectiveInteractionSetting("keymap")).toBe(defaultSettings().keymap);
+    useSettings.getState().set("keymap", "ableton");
     expect(effectiveInteractionSetting("keymap")).toBe("ableton");
-    expect(effectiveInteractionSetting("gestureTable")).toBe("fl");
+    expect(liveKeymap()).toBeTruthy();
+    expect(liveGestureTable()).toBeTruthy();
+    expect(effectiveInteractionSetting("theme")).toBe(useSettings.getState().get("theme"));
   });
 });

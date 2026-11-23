@@ -47,7 +47,7 @@ test.describe("portfolio screenshot", () => {
       window.localStorage.clear();
       window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 2, template: null, values: { colorway: cw, startOnLaunch: false }, keyOverrides: {} }));
     }, colorway);
-    await page.goto("/?shell=v3&mockSeed=portfolio");
+    await page.goto("/?mockSeed=portfolio");
     await expect(page.getByTestId("v3-shell")).toHaveAttribute("data-colorway", colorway);
     await expect(page.getByTestId("v3-arrangement")).toBeVisible();
     await expect(page.getByTestId("v3-track")).toHaveCount(7);

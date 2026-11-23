@@ -1,32 +1,9 @@
-// Which settings descriptors each shell hides. Classic shows everything. The v2
-// shell is one Mosh-native design with no skin/keymap/gesture/layout axis (inert
-// there, confusing). The live clone keeps every LIVE-effective axis — audio,
-// routing, keys, feel, layout, templates all apply under it — and hides only the
-// classic visual `skin` descriptor, which restyles classic/v2 chrome but never
-// the fixed live-clone look (inert in this shell).
-
-import type { ShellId } from "../v2/shellFlag";
-
-const V2_HIDDEN_CATEGORIES = new Set(["Layout", "Interaction", "Feel", "Keys"]);
-
-/** True when `id` (in `category`) should be hidden from Settings under `shell`. */
-const V3_HIDDEN_IDS = new Set([
-  "skin",
-  "redesignShell",
-  "protoolsDefaultFadeLengthMs",
-  "protoolsDefaultFadeCurveIn",
-  "protoolsDefaultFadeCurveOut",
-  "liveDockHeight",
-  "liveClipExpanded",
-]);
+// Which settings descriptors the Settings surfaces hide. V3 is the only shell.
 
 /** Settings with their own control elsewhere, hidden from every Settings surface. */
 const HIDDEN_EVERYWHERE = new Set(["startOnLaunch"]);
 
-export function settingHiddenForShell(shell: ShellId, category: string, id: string): boolean {
-  if (HIDDEN_EVERYWHERE.has(id)) return true;
-  if (shell === "v2") return V2_HIDDEN_CATEGORIES.has(category) || id === "skin";
-  if (shell === "live") return id === "skin";
-  if (shell === "v3") return V3_HIDDEN_IDS.has(id) || category === "Pro Tools";
-  return false;
+/** True when `id` (in `category`) should be hidden from Settings. */
+export function settingHidden(_category: string, id: string): boolean {
+  return HIDDEN_EVERYWHERE.has(id);
 }

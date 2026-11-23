@@ -25,7 +25,6 @@ OwnerRuntimeConfig OwnerRuntimeConfig::fromVar (const var& root)
     c.preferredPort = jlimit (1024, 65500, (int) root.getProperty ("preferredPort", 8491));
     c.stableAudioReleaseIdle = jlimit (0.0, 1.0, (double) root.getProperty ("stableAudioReleaseIdle", 0.99));
     c.prewarmAfterUnload = (bool) root.getProperty ("prewarmAfterUnload", true);
-    c.preferredShell = root.getProperty ("preferredShell", var()).toString().trim();
     return c;
 }
 
@@ -67,12 +66,6 @@ String OwnerRuntimeConfig::validationError() const
         return "owner runtime modelPath must be an absolute local path";
     if (pythonRuntimeRaw.isEmpty() || ! File::isAbsolutePath (pythonRuntimeRaw))
         return "owner runtime pythonRuntime must be an absolute local path";
-    // The shells the UI can boot (ui/src/v2/shellQuery.ts ShellId). v3 joined on the
-    // parity flip (PR #716): the owner's Finder config pins the boot shell through
-    // App.tsx, so a validator that lagged the UI silently kept the owner on v2.
-    if (preferredShell.isNotEmpty() && preferredShell != "live" && preferredShell != "protools"
-        && preferredShell != "v2" && preferredShell != "classic" && preferredShell != "v3")
-        return "owner runtime preferredShell is invalid";
     return {};
 }
 
@@ -348,7 +341,6 @@ void LocalBrainManager::publish (String state, String error, double ms)
     const auto port = activePort.load();
     o->setProperty ("port", port);
     o->setProperty ("endpoint", port > 0 ? "http://127.0.0.1:" + String (port) + "/v1" : String());
-    if (config.preferredShell.isNotEmpty()) o->setProperty ("preferredShell", config.preferredShell);
     if (error.isNotEmpty()) o->setProperty ("error", error);
     if (ms > 0.0) o->setProperty ("ms", ms);
     const var next (o);

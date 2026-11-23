@@ -225,6 +225,8 @@ export const AGENT_ONLY_COMMANDS: Readonly<Record<string, string>> = {
  * has to build. The test asserts every entry is STILL unreachable, so wiring one
  * up forces its removal here and the list can only shrink.
  */
+const RETIRED_SHELL_GAP = "only the retired shells had a control; V3 has none yet (shell retirement §4a)";
+
 export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // ── arrangement / editing ────────────────────────────────────────────────────
   // (add_drum_pattern was declared here. DrumSequencer now has a Pattern field — seeded
@@ -374,4 +376,73 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // (2026-09, the WebBridge two-phase hop moves the service fetch off the message thread)
   // and reachable by mouse via the v2 add-track menu's "Recipe beat" entry, which applies
   // the generated program as one undoable batch. Ratchet stays 0.)
+
+  // ── shell retirement, 2026-11-23 ─────────────────────────────────────────────
+  // These were reachable only from the retired Classic / v2 / Live / Pro Tools shells
+  // (last source at tag archive/shells-2026-11-23). V3 has no control for them yet; whether
+  // it should is the owner's product question (docs/SHELL-RETIREMENT-PLAN-2026-11-17.md §4a).
+  // Each command stays tested through the bridge from a V3 boot (the ui/e2e/v3-* specs
+  // marked NO-V3-UI) and natively. Ratchet 0 → 61.
+  accept_lyric_proposal: RETIRED_SHELL_GAP,
+  add_automation_point: RETIRED_SHELL_GAP,
+  assert_lyric_line: RETIRED_SHELL_GAP,
+  bypass_master_plugin: RETIRED_SHELL_GAP,
+  clear_automation: RETIRED_SHELL_GAP,
+  configure_track_group: RETIRED_SHELL_GAP,
+  create_annotation: RETIRED_SHELL_GAP,
+  create_clip_group: RETIRED_SHELL_GAP,
+  create_lyric_sheet: RETIRED_SHELL_GAP,
+  create_section: RETIRED_SHELL_GAP,
+  create_track_group: RETIRED_SHELL_GAP,
+  delete_time_range: RETIRED_SHELL_GAP,
+  duplicate_track_group: RETIRED_SHELL_GAP,
+  edit_annotation: RETIRED_SHELL_GAP,
+  insert_tempo_change: RETIRED_SHELL_GAP,
+  move_annotation: RETIRED_SHELL_GAP,
+  move_section: RETIRED_SHELL_GAP,
+  move_track: RETIRED_SHELL_GAP,
+  normalize_clip: RETIRED_SHELL_GAP,
+  open_master_plugin_editor: RETIRED_SHELL_GAP,
+  promote_take_region: RETIRED_SHELL_GAP,
+  regroup_clip_group: RETIRED_SHELL_GAP,
+  reject_lyric_proposal: RETIRED_SHELL_GAP,
+  remove_annotation: RETIRED_SHELL_GAP,
+  remove_automation_point: RETIRED_SHELL_GAP,
+  remove_bus: RETIRED_SHELL_GAP,
+  remove_lyric_line: RETIRED_SHELL_GAP,
+  remove_master_plugin: RETIRED_SHELL_GAP,
+  remove_section: RETIRED_SHELL_GAP,
+  remove_send: RETIRED_SHELL_GAP,
+  remove_tempo_change: RETIRED_SHELL_GAP,
+  remove_track: RETIRED_SHELL_GAP,
+  remove_track_group: RETIRED_SHELL_GAP,
+  rename_bus: RETIRED_SHELL_GAP,
+  rename_clip: RETIRED_SHELL_GAP,
+  rename_clip_group: RETIRED_SHELL_GAP,
+  rename_section: RETIRED_SHELL_GAP,
+  rename_track: RETIRED_SHELL_GAP,
+  reorder_master_plugin: RETIRED_SHELL_GAP,
+  set_automation_point: RETIRED_SHELL_GAP,
+  set_clip_crossfade: RETIRED_SHELL_GAP,
+  set_clip_gain: RETIRED_SHELL_GAP,
+  set_clip_reverse: RETIRED_SHELL_GAP,
+  set_clip_warp: RETIRED_SHELL_GAP,
+  set_lyric_constraint: RETIRED_SHELL_GAP,
+  set_lyric_line: RETIRED_SHELL_GAP,
+  set_master_plugin_param: RETIRED_SHELL_GAP,
+  set_record_options: RETIRED_SHELL_GAP,
+  set_send_mute: RETIRED_SHELL_GAP,
+  set_send_pan: RETIRED_SHELL_GAP,
+  set_send_pre_fader: RETIRED_SHELL_GAP,
+  set_time_signature: RETIRED_SHELL_GAP,
+  set_track_active: RETIRED_SHELL_GAP,
+  set_track_automation_mode: RETIRED_SHELL_GAP,
+  set_track_color: RETIRED_SHELL_GAP,
+  set_track_group_enabled: RETIRED_SHELL_GAP,
+  set_track_group_members: RETIRED_SHELL_GAP,
+  set_track_groups_suspended: RETIRED_SHELL_GAP,
+  set_track_icon: RETIRED_SHELL_GAP,
+  ungroup_clip_group: RETIRED_SHELL_GAP,
+  write_clip_gain_curve: RETIRED_SHELL_GAP,
+
 };

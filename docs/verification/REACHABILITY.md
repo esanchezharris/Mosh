@@ -2,57 +2,64 @@
 
 *"We can do it in Mosh" means a producer with a mouse and keyboard can do it — not that a
 MoshOps command exists (recording was native-complete and UI-unreachable for weeks; METER-001
-was a missing toggle). This ledger maps each user-facing capability to its v2-shell
+was a missing toggle). This ledger maps each user-facing capability to its V3-shell
 affordance and the e2e spec that exercises it. It is MACHINE-CHECKED: `ui/src/agent/reachability.test.ts`
 parses this file and fails the cheap gate when a `reachable` row's selector no longer exists
 in `ui/src/**`, a named spec is missing from `ui/e2e/`, or a `gap:` row references a backlog
 item that has shipped (the row must then flip to `reachable`).*
 
+*2026-11-23: V3 is the only shell. The rows were re-pointed at V3 when the Classic, v2, Live
+and Pro Tools shells were retired (the old ledger is at tag `archive/shells-2026-11-23`).
+Capabilities only those shells had a control for are `no-v3-ui`: the command is still
+covered, through the bridge from a V3 boot, by the named spec, but a mouse-only V3 user cannot
+reach it. Whether V3 gets each control is an owner decision
+(`docs/SHELL-RETIREMENT-PLAN-2026-11-17.md` §4a).*
+
 Row format (the guard parses these columns exactly):
 - **status** — `reachable` (affordance exists), `gap:<backlog-id>` (agent/command-only; the
   backlog item is the affordance's ticket, its e2e spec ships as `test.fixme` = the
-  definition of done), `hardware` (needs a live device — owner runbook).
+  definition of done), `no-v3-ui` (only a retired shell had the control; see above),
+  `hardware` (needs a live device — owner runbook).
 - **selector** — `testid:<data-testid>` (grepped in ui/src), `class:<className>` (grepped),
   or `role:<desc>` (not grepped — role/label-addressed controls).
-- **spec** — the covering `ui/e2e/` file, or `—` (reachable but not yet spec-covered; the
-  guard reports these as debt without failing).
+- **spec** — the covering `ui/e2e/` file, or `—` (not spec-covered; the guard reports these
+  as debt without failing).
 
 | capability | commands | status | selector | spec |
 |---|---|---|---|---|
-| Clip fades (in/out + curve) | set_clip_fade | reachable | testid:v2-clip-fadein | clip-edit-fades.spec.ts |
-| Clip reverse | set_clip_reverse | reachable | testid:v2-clip-reverse | clip-edit-fades.spec.ts |
-| Clip normalize | normalize_clip | reachable | testid:v2-clip-normalize | clip-edit-fades.spec.ts |
-| Clip gain / mute / rename | set_clip_gain, write_clip_gain_curve, set_clip_mute, rename_clip | reachable | testid:pt-clip-gain-point | protools-clip-gain.spec.ts |
-| Clip loop region | set_clip_loop | reachable | testid:v2-clip-loop | clip-edit-fades.spec.ts |
-| Clip crossfade | set_clip_crossfade | reachable | testid:v2-clip-crossfade | clip-edit-fades.spec.ts |
-| Export (range / tail / format) | export_audio | reachable | testid:export-run | export-dialog.spec.ts |
-| Stem export | export_stems | reachable | testid:export-mode | export-dialog.spec.ts |
-| Master volume / pan | set_master_volume, set_master_pan | reachable | testid:v2-master-volume | master-bus.spec.ts |
-| Master plugin chain | load_master_builtin, bypass_master_plugin, remove_master_plugin | reachable | testid:v2-master-add-plugin | master-bus.spec.ts |
-| Sends / buses | create_bus, add_send, set_send_level, remove_send | reachable | testid:v2-add-bus | master-bus.spec.ts |
-| Track meters (per-track + master) | enable_track_meter | reachable | class:v2-meter | master-bus.spec.ts |
-| Warp / stretch (toggle, detect, fit-bars) | set_clip_warp, detect_clip_bpm, stretch_clip | reachable | testid:v2-warp-toggle | warp.spec.ts |
-| Tempo / time-sig / metronome / key | set_tempo, set_time_signature, set_metronome, set_key | reachable | role:topbar proj-meta inputs | — |
-| Count-in | set_count_in | reachable | role:topbar count-in select | — |
-| Quantize (piano roll / MIDI tab) | quantize_notes | reachable | testid:v2-open-pianoroll | — |
-| Takes (switch + keep) | set_current_take, keep_take | reachable | role:inspector Takes tab (dynamic testid v2-insp-tab-takes) | record-arm.spec.ts |
-| Pro Tools playlist region comp / Waveform take cycle | promote_take_region | reachable | testid:pt-playlist-promote | protools-shell.spec.ts |
-| Record (transport, auto-arm) | set_transport, arm_track | reachable | testid:v2-record | record-arm.spec.ts |
-| Per-track arm / input monitor / input picker | arm_track, set_input_monitor, set_track_input | reachable | testid:v2-track-arm | record-arm.spec.ts |
-| Automation editing in v2 (write-arm + lanes) | set_track_automation_mode, write_automation_curve, add_automation_point | gap:G16 | testid:v2-automation-arm | automation-write.spec.ts |
-| Automation point editing (classic shell) | add_automation_point, set_automation_point | reachable | testid:open-automation | polish.spec.ts |
-| Ripple delete | delete_time_range | reachable | testid:v2-timerange-delete-ripple | v2-timerange.spec.ts |
-| Group / ungroup tracks | create_group_track, ungroup_track | gap:G18 | testid:v2-group-tracks | ripple-delete.spec.ts |
-| Track colour | set_track_color | reachable | testid:v2-track-color-none | track-color.spec.ts |
-| Track icon | set_track_icon | reachable | testid:v2-track-icon-none | track-icon.spec.ts |
-| Track reorder | move_track | reachable | testid:v2-track-move-up | track-reorder.spec.ts |
+| Clip fades (in/out + curve) | set_clip_fade | no-v3-ui | — | v3-clip-edit.spec.ts |
+| Clip reverse | set_clip_reverse | no-v3-ui | — | v3-clip-edit.spec.ts |
+| Clip normalize | normalize_clip | no-v3-ui | — | v3-clip-edit.spec.ts |
+| Clip gain | set_clip_gain | no-v3-ui | — | v3-clip-edit.spec.ts |
+| Clip gain curve / mute / rename | write_clip_gain_curve, set_clip_mute, rename_clip | no-v3-ui | — | — |
+| Clip loop region | set_clip_loop | no-v3-ui | — | v3-clip-edit.spec.ts |
+| Clip crossfade | set_clip_crossfade | no-v3-ui | — | — |
+| Export (range / tail / format) | export_audio | reachable | testid:export-run | v3-session.spec.ts |
+| Stem export | export_stems | reachable | testid:export-mode | v3-session.spec.ts |
+| Master volume / pan | set_master_volume, set_master_pan | reachable | testid:master-strip | v3-tracks.spec.ts |
+| Master plugin chain | load_master_builtin, bypass_master_plugin, remove_master_plugin | no-v3-ui | — | v3-tracks.spec.ts |
+| Buses | create_bus | reachable | testid:v3-add-bus | v3-replay.spec.ts |
+| Sends (add + level) | add_send, set_send_level | reachable | testid:v3-send-add | — |
+| Send remove | remove_send | no-v3-ui | — | — |
+| Track meters (per-track + master) | enable_track_meter | no-v3-ui | — | — |
+| Warp / stretch (toggle, detect, fit-bars) | set_clip_warp, detect_clip_bpm, stretch_clip | no-v3-ui | — | v3-warp.spec.ts |
+| Tempo / time-sig / metronome / key | set_tempo, set_time_signature, set_metronome, set_key | reachable | role:V3 top bar tempo + click, checklist key | — |
+| Count-in | set_count_in | reachable | role:V3 top bar count-in select | — |
+| Quantize (piano roll) | quantize_notes | reachable | testid:pr-quantize | v3-arrange-extra.spec.ts |
+| Takes (switch + keep) | set_current_take, keep_take | no-v3-ui | — | — |
+| Take region comp | promote_take_region | no-v3-ui | — | — |
+| Record (transport, auto-arm) | set_transport, arm_track | reachable | testid:v3-record | v3-record.spec.ts |
+| Per-track arm / input monitor / input picker | arm_track, set_input_monitor, set_track_input | reachable | role:V3 track header R button, Mix inspector input | v3-tracks.spec.ts |
+| Automation (write mode + points) | set_track_automation_mode, write_automation_curve, add_automation_point, set_automation_point | no-v3-ui | — | v3-automation.spec.ts |
+| Ripple delete | delete_time_range | no-v3-ui | — | v3-clip-edit.spec.ts |
+| Group / ungroup tracks | create_group_track, ungroup_track | gap:G18 | — | — |
+| Track colour / icon / reorder | set_track_color, set_track_icon, move_track | no-v3-ui | — | v3-track-ops.spec.ts |
 | Live capture to a take (mic) | arm_track, stop_recording | hardware | — | — |
 
 ## Current debt (tracked)
 
-- **G16** — v2 automation surface: write-mode arming IS reachable (`ui/src/ui/AutomationPanel.tsx`,
-  mounted from `AppV2.tsx`), so the remaining debt is narrower than this bullet used to say —
-  inline automation LANES on the arrangement, rather than a floating panel.
+- **G16** — automation surface: the write-arm control and the floating automation panel went
+  with the retired shells, so V3 has neither (row `no-v3-ui`). The backlog item stands.
 - **G18** — group/submix: `create_group_track` is reachable (`Mod+G` groups the whole
   selection, `menuActions.ts`), but `ungroup_track` has NO UI call site anywhere.
   Half-shipped, and the missing half is BLOCKED ON A DESIGN DECISION, not on effort:

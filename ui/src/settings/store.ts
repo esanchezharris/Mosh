@@ -1,10 +1,8 @@
 // The canonical settings store — schema-driven, localStorage-backed, UI-local.
 //
-// State model: `values` holds explicit OVERRIDES (whatever's been set, whether by a
-// template application or a single tweak); the effective value of a setting is
-// `values[id] ?? schema-default`. A template materialises its bundle into `values`
-// and records its name in `template` (for the picker highlight); a per-setting `set`
-// writes one override on top — that's the "template + diffs" model.
+// State model: `values` holds explicit OVERRIDES; the effective value of a setting is
+// `values[id] ?? schema-default`. (`template` is the retired template-picker name, kept
+// in the persisted shape so older blobs still load; nothing sets it any more.)
 //
 // Persistence is the override map + the template name, under a single versioned key.
 // Everything funnels through coerceSetting so a corrupted/out-of-range persisted
@@ -18,8 +16,6 @@ import {
   settingDef,
   type SettingValue,
 } from "./schema";
-import { templateValues } from "./templates";
-import { resolveShell } from "../v2/shellQuery";
 import { applySettingEffects } from "./effects";
 
 export const STORAGE_KEY = "mosh.settings";
@@ -45,29 +41,10 @@ function isKeyId(id: string): boolean {
 }
 
 // The active keymap that scopes key.* rebinds: the effective `keymap` value
-// (override ?? schema default), always defined even with no named template.
-// Mirrors effectiveInteractionSetting() in interaction/config.ts: under a DAW shell,
-// an UNSET keymap resolves to that shell's native bundle so rebinds land in the same
-// bucket that the effective keymap reads.
+// (override ?? schema default), always defined.
 function activeKeymap(values: Record<string, SettingValue>): string {
-  const v = values.keymap;
-  if (typeof v === "string") return v;
-  const shell = resolveShell(
-    typeof values.uiShell === "string" ? values.uiShell : settingDef("uiShell")?.default,
-  );
-  switch (shell) {
-    case "live": return "ableton";
-    case "protools": return "protools";
-    case "classic":
-    case "v2":
-    case "v3": break;
-    default: {
-      const unreachable: never = shell;
-      return unreachable;
-    }
-  }
-  const d = settingDef("keymap")?.default;
-  return typeof d === "string" ? d : "mosh";
+  const v = values.keymap ?? settingDef("keymap")?.default;
+  return typeof v === "string" ? v : "mosh";
 }
 
 // Sanitise a persisted keyOverrides blob: keep only string keymap buckets, drop any
@@ -156,7 +133,6 @@ interface SettingsState {
   keyOverrides: KeyOverrides;
   get: (id: string) => SettingValue;
   set: (id: string, value: SettingValue) => void;
-  applyTemplate: (name: string) => void;
   reset: () => void;
   hydrate: () => void;
 }
@@ -205,12 +181,6 @@ export const useSettings = create<SettingsState>((set, get) => {
       const values = { ...get().values, [id]: coerceSetting(id, value) };
       set({ values });
       persist({ template: get().template, values, keyOverrides: get().keyOverrides });
-    },
-
-    applyTemplate: (name) => {
-      const values = { ...get().values, ...templateValues(name) };
-      set({ template: name, values });
-      persist({ template: name, values, keyOverrides: get().keyOverrides });
     },
 
     // Back to schema defaults (no template, no overrides) — persisted, so a reload

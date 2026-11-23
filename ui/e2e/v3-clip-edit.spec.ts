@@ -133,7 +133,7 @@ async function bootGestures(page: Page, gestureTable: "mosh" | "ableton") {
       version: 2, template: null, values: { colorway: "lime", startOnLaunch: false, gestureTable: gt }, keyOverrides: {},
     }));
   }, gestureTable);
-  await page.goto("/?shell=v3");
+  await page.goto("/");
   await expect(page.getByTestId("v3-arrangement")).toBeVisible();
 }
 const keysClip = (page: Page) =>

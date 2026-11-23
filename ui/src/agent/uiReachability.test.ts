@@ -102,19 +102,11 @@ function moduleGraph(entry: string, stopAt: readonly string[] = []): string[] {
   return [...seen];
 }
 
-// V3 is the fresh-install default (docs/V3-PARITY-BRIEF-2026-09-17.md §6); Pro Tools was before
-// it and v2 remains the complete general-purpose shell; all three form the union so a
-// command it reaches counts, and one it lacks shows up as a gap against the parity gate.
-// Their union is the primary production surface. Live is a focused compatibility shell and
-// classic is legacy, so neither is allowed to mask a missing primary-shell affordance.
-// bridge.mock is the dev BACKEND (it implements every command); it is not in this graph,
-// and including it would make everything look reachable — the exact mistake to avoid.
+// V3 is the only shell (docs/SHELL-RETIREMENT-PLAN-2026-11-17.md), so its graph is the whole
+// production surface. bridge.mock is the dev BACKEND (it implements every command); it is
+// not in this graph, and including it would make everything look reachable.
 const classicOnly = Object.keys(CLASSIC_ONLY_MODULES).map((p) => join(SRC, p));
-const PRIMARY_SHELL_ENTRIES = [
-  join(SRC, "v2", "AppV2.tsx"),
-  join(SRC, "protools", "AppProTools.tsx"),
-  join(SRC, "v3", "AppV3.tsx"),
-];
+const PRIMARY_SHELL_ENTRIES = [join(SRC, "v3", "AppV3.tsx")];
 const graph = [...new Set(PRIMARY_SHELL_ENTRIES.flatMap((entry) => moduleGraph(entry, classicOnly)))];
 
 // Two parts of the graph must be walked through but never SEARCHED, because each mentions
@@ -138,7 +130,7 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     expect(shell.length).toBeGreaterThan(200_000);
     // Sanity: commands we KNOW are wired must read as reachable, or the probe is broken
     // and every assertion below is vacuous.
-    for (const c of ["create_track", "add_midi_clip", "rename_track", "export_audio", "set_transport"])
+    for (const c of ["create_track", "add_midi_clip", "set_track_volume", "export_audio", "set_transport"])
       expect(isReachable(c), `probe broken: ${c} is wired but read as unreachable`).toBe(true);
   });
 
@@ -163,15 +155,6 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     // graphs are identical by construction.)
     if (Object.keys(CLASSIC_ONLY_MODULES).length > 0)
       expect(files.length).toBeLessThan(unstopped.filter((f) => !f.startsWith(join(SRC, "agent")) && !f.endsWith("bridge.mock.ts")).length);
-  });
-
-  it("classic's Arrange.tsx stays OUT of the v2 module graph (the structural exit is a ratchet)", () => {
-    // The clip renderers moved to ui/clipRenderers.tsx precisely so this file left the graph.
-    // With CLASSIC_ONLY_MODULES empty, one new v2 import of Arrange.tsx would silently drag
-    // the whole ~800-line classic subtree back into the searched surface — the false-positive
-    // class that once hid remove_track being unreachable. Re-importing it is a reviewed
-    // decision: either extract the helper you need, or declare a boundary AND move this line.
-    expect(graph, "a v2 module imports ui/Arrange.tsx again").not.toContain(join(SRC, "ui", "Arrange.tsx"));
   });
 
   it("every catalog command is reachable, or declared with a reason", () => {
@@ -270,10 +253,11 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     //      which is what kept bounce a relabel; the timeline's range selection now creates a
     //      section-scoped render, and the drawer's Bounce is gated on that shape alone.)
     //
-    // Zero. Every command in the agent catalog is now reachable by a mouse-only producer from
-    // the shipped v2 shell. This assertion stays — the value of the ratchet from here on is
-    // that the NEXT command to ship without a control fails the build instead of quietly
-    // joining a list nobody re-reads.
-    expect(Object.keys(UI_REACH_GAPS).length).toBe(0);
+    // Zero, until the shell retirement (2026-11-23): every catalog command was reachable from
+    // the v2 shell. With V3 as the only shell, the commands only the old shells had a control
+    // for are declared (commandClassification.ts, "shell retirement"). The value of the
+    // ratchet from here on is that the NEXT command to ship without a control fails the
+    // build instead of quietly joining a list nobody re-reads.
+    expect(Object.keys(UI_REACH_GAPS).length).toBe(61);
   });
 });

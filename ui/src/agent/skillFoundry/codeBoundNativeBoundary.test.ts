@@ -98,9 +98,6 @@ describe("adaptCodeBoundNativeSkillV1 is reachable from exactly one production c
       "agent/skillFoundry/runtime.ts",
       "agent/skillFoundry/adapters.test.ts",
       "agent/skillFoundry/codeBoundNativeBoundary.test.ts",
-      // Comment-only mention (documentation of WHY this test file no longer needs to mock
-      // the runtime) — not a call site.
-      "ui/AgentComposer.namedPlugin.test.ts",
     ]);
     for (const hit of hits) expect(allowed.has(hit), `unexpected reference to adaptCodeBoundNativeSkillV1 in ${hit}`).toBe(true);
   });

@@ -1,6 +1,6 @@
 @import "./tokens.css";
-@import "../v2/css/80-plugin-picker.css";
-@import "../v2/css/96-lora-lab.css";
+@import "./css/plugin-picker.css";
+@import "./css/lora-lab.css";
 @import "./panels/css/index.css";
 
 .v3-shell, .v3-shell * { box-sizing: border-box; }
@@ -985,7 +985,7 @@
 .v3-shell .training-body .btn.primary { background: var(--accent); border-color: var(--accent); color: #0B0C0C; font-weight: 600; }
 
 /* ── The LoRA Lab in V3 ──────────────────────────────────────────────────────────
-   The Lab's own stylesheet (v2/css/96-lora-lab.css) is imported at the top of this file,
+   The Lab's own stylesheet (v3/css/lora-lab.css) is imported at the top of this file,
    so it loses every same-specificity tie to the V3 rules above, and its markup reuses
    classic classes (.floatwin, .btn.x, .btn.primary, .mode-btn, .gen-prog, .gen-badge)
    whose global rules carry classic's palette. What either got wrong is restated here,

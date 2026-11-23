@@ -19,33 +19,27 @@ TEST_CASE ("owner runtime config accepts an exact local-only model", "[owner-run
     o->setProperty ("preferredPort", 8091);
     o->setProperty ("stableAudioReleaseIdle", 0.99);
     o->setProperty ("prewarmAfterUnload", true);
-    o->setProperty ("preferredShell", "live");
     const auto cfg = OwnerRuntimeConfig::fromVar (juce::var (o));
     REQUIRE (cfg.enabled);
     REQUIRE (cfg.preferredPort == 8091);
     REQUIRE (cfg.prewarmAfterUnload);
-    REQUIRE (cfg.preferredShell == "live");
     REQUIRE (cfg.validationError().isEmpty());
 }
 
-TEST_CASE ("owner runtime preferredShell accepts every bootable shell, v3 included, and rejects an unknown one", "[owner-runtime]")
+TEST_CASE ("owner runtime config from before the shell retirement still validates", "[owner-runtime]")
 {
-    auto make = [] (const char* shell)
+    // preferredShell used to pin the boot shell; V3 is the only shell now, so the key is
+    // ignored rather than rejected, and an old owner config keeps working.
+    for (const char* shell : { "live", "protools", "v2", "classic", "v3", "v4" })
     {
+        INFO (shell);
         auto* o = new juce::DynamicObject();
         o->setProperty ("enabled", true);
         o->setProperty ("modelPath", "/tmp/a3b-r5-4bit-hd");
         o->setProperty ("pythonRuntime", "/tmp/python3");
         o->setProperty ("preferredShell", shell);
-        return OwnerRuntimeConfig::fromVar (juce::var (o));
-    };
-    for (const char* shell : { "live", "protools", "v2", "classic", "v3" })
-    {
-        INFO (shell);
-        REQUIRE (make (shell).preferredShell == shell);
-        REQUIRE (make (shell).validationError().isEmpty());
+        REQUIRE (OwnerRuntimeConfig::fromVar (juce::var (o)).validationError().isEmpty());
     }
-    REQUIRE (make ("v4").validationError() == "owner runtime preferredShell is invalid");
 }
 
 TEST_CASE ("owner runtime config fails closed for remote or missing model paths", "[owner-runtime]")
@@ -160,7 +154,6 @@ TEST_CASE ("Finder owner config fails closed unless it is mode 600", "[owner-run
    #endif
     const auto loaded = OwnerRuntimeConfig::load();
     REQUIRE (loaded.enabled);
-    REQUIRE (loaded.preferredShell == "live");
     REQUIRE (loaded.validationError().isEmpty());
     mosh::unsetEnvVar ("MOSH_OWNER_RUNTIME_CONFIG");
     dir.deleteRecursively();

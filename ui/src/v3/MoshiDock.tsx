@@ -15,7 +15,6 @@ import { createRecordingLifecycleEnvironmentV1 } from "../recordingLifecycle";
 import { loopAllowed, runLoopTask } from "../agent/loop/runTask";
 import { routeAsk } from "../agent/loop/router";
 import { matchIssueReport } from "../agent/issueRoute";
-import { activeShell } from "../v2/shellFlag";
 import { brainRuntimeStatus, nativeMenuPresent, onEvent, type BrainRuntimeStatus } from "../bridge";
 import { IconArrowUp, IconMic } from "../ui/icons";
 import { MoshiFace } from "./MoshiFace";
@@ -178,7 +177,7 @@ export function MoshiDock() {
       const issue = matchIssueReport(text);
       if (issue) {
         const result = await st.exec("report_issue", {
-          ...issue, source, activeShell: activeShell(), selectedTrackId: st.selectedTrackId,
+          ...issue, source, activeShell: "v3", selectedTrackId: st.selectedTrackId,
           selectedClipIds: Array.from(st.selection), runtimeModelIdentity: brainRuntime?.model ?? null,
         }) as { ok: boolean; data?: { issueId?: string }; error?: string };
         if (!result.ok) throw new Error(result.error ?? "issue report failed");

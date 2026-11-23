@@ -46,15 +46,11 @@ describe("defaultSettings", () => {
     for (const d of SETTINGS) expect(defs[d.id]).toEqual(d.default);
   });
 
-  it("uses V3 for fresh settings (the V3 parity gate closed — brief §6)", () => {
-    expect(defaultSettings().uiShell).toBe("v3");
-  });
-
-  it("defines the Pro Tools no-dialog fade defaults", () => {
-    const defaults = defaultSettings();
-    expect(defaults.protoolsDefaultFadeLengthMs).toBe(10);
-    expect(defaults.protoolsDefaultFadeCurveIn).toBe("linear");
-    expect(defaults.protoolsDefaultFadeCurveOut).toBe("linear");
+  it("has no shell selector or old-shell settings (V3 is the only shell)", () => {
+    const ids = SETTINGS.map((d) => d.id);
+    for (const gone of ["uiShell", "redesignShell", "skin", "layout", "liveDockHeight",
+      "liveClipExpanded", "protoolsDefaultFadeLengthMs", "protoolsDefaultFadeCurveIn", "protoolsDefaultFadeCurveOut"])
+      expect(ids, gone).not.toContain(gone);
   });
 });
 
@@ -64,7 +60,7 @@ describe("settingsByCategory", () => {
     // AUD-SCAN — "Plugins" is last by design: it is maintenance (opt-in AU scanning),
     // not a preference, so it sits at the bottom of the settings panel.
     expect(groups.map((g) => g.category)).toEqual([
-      "Appearance", "Moshi", "Layout", "Pro Tools", "Privacy", "Interaction", "Feel", "Keys", "Plugins",
+      "Appearance", "Moshi", "Layout", "Privacy", "Interaction", "Feel", "Keys", "Plugins",
     ]);
   });
 
@@ -72,7 +68,7 @@ describe("settingsByCategory", () => {
     const groups = settingsByCategory();
     const appearance = groups.find((g) => g.category === "Appearance");
     if (!appearance) throw new Error("Appearance settings group is missing");
-    expect(appearance.settings.map((s) => s.id)).toEqual(["skin", "theme", "uiScale", "colorway"]);
+    expect(appearance.settings.map((s) => s.id)).toEqual(["theme", "uiScale", "colorway"]);
     const moshi = groups.find((g) => g.category === "Moshi");
     if (!moshi) throw new Error("Moshi settings group is missing");
     expect(moshi.settings.map((s) => s.id)).toEqual(["voiceOn", "voiceVol", "agentMemory", "agentConfirmDestructive", "produceLane"]);
@@ -103,16 +99,14 @@ describe("coerceSetting", () => {
 
   it("rejects an out-of-set enum value, returning the default", () => {
     expect(coerceSetting("theme", "chartreuse")).toBe("light");
-    expect(coerceSetting("skin", "cubase")).toBe("mosh");
   });
 
   it("passes a valid enum value through unchanged", () => {
     expect(coerceSetting("theme", "light")).toBe("light");
-    expect(coerceSetting("skin", "ableton")).toBe("ableton");
   });
 
   it("accepts the Pro Tools / Logic enum values across the DAW selectors", () => {
-    for (const id of ["skin", "layout", "gestureTable", "keymap"]) {
+    for (const id of ["gestureTable", "keymap"]) {
       expect(coerceSetting(id, "protools")).toBe("protools");
       expect(coerceSetting(id, "logic")).toBe("logic");
     }
@@ -129,10 +123,4 @@ describe("coerceSetting", () => {
     expect(coerceSetting("does-not-exist", 42)).toBe(42);
   });
 
-  it("bounds and validates remembered Pro Tools fade settings", () => {
-    expect(coerceSetting("protoolsDefaultFadeLengthMs", -1)).toBe(0);
-    expect(coerceSetting("protoolsDefaultFadeLengthMs", 60_001)).toBe(60_000);
-    expect(coerceSetting("protoolsDefaultFadeCurveIn", "sCurve")).toBe("sCurve");
-    expect(coerceSetting("protoolsDefaultFadeCurveOut", "not-a-curve")).toBe("linear");
-  });
 });

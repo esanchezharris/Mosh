@@ -51,33 +51,8 @@ export interface SettingDef {
   constraints?: SettingConstraints;
 }
 
-const PROTOOLS_FADE_CURVE_OPTIONS: EnumOption[] = [
-  { value: "linear", label: "Linear" },
-  { value: "convex", label: "Convex" },
-  { value: "concave", label: "Concave" },
-  { value: "sCurve", label: "S-Curve" },
-];
-
 // The descriptors. Grouped by category in the UI, in array order.
 export const SETTINGS: SettingDef[] = [
-  {
-    id: "skin",
-    type: "enum",
-    default: "mosh",
-    scope: "app",
-    category: "Appearance",
-    label: "Skin",
-    help: "Token set that reskins the whole UI. Independent of light/dark.",
-    constraints: {
-      options: [
-        { value: "mosh", label: "Mosh" },
-        { value: "ableton", label: "Ableton" },
-        { value: "fl", label: "FL" },
-        { value: "protools", label: "Pro Tools" },
-        { value: "logic", label: "Logic" },
-      ],
-    },
-  },
   {
     id: "theme",
     type: "enum",
@@ -85,7 +60,7 @@ export const SETTINGS: SettingDef[] = [
     scope: "app",
     category: "Appearance",
     label: "Theme",
-    help: "Light (warm cream + dark panels) or dark (Midnight Drive neon). An axis independent of skin.",
+    help: "Light (warm cream + dark panels) or dark (Midnight Drive neon).",
     constraints: {
       options: [
         { value: "dark", label: "Dark" },
@@ -166,64 +141,6 @@ export const SETTINGS: SettingDef[] = [
     help: "An explicit 'produce me a beat' / 'full beat' ask gets a full production pass: bigger budgets and the genre rules learned from real correction rounds, building an 8-12 track A/B arrangement with real sounds. Off = every ask stays a bounded assistant edit.",
   },
   {
-    id: "layout",
-    type: "enum",
-    default: "mosh",
-    scope: "app",
-    category: "Layout",
-    label: "Panel layout",
-    help: "Fixed zones (browser-left · arrange-center · dock-bottom). FL also pops the drum sequencer into a floating window.",
-    constraints: {
-      options: [
-        { value: "mosh", label: "Mosh" },
-        { value: "ableton", label: "Ableton" },
-        { value: "fl", label: "FL" },
-        { value: "protools", label: "Pro Tools" },
-        { value: "logic", label: "Logic" },
-      ],
-    },
-  },
-  {
-    id: "redesignShell",
-    type: "bool",
-    default: true,
-    scope: "app",
-    category: "Layout",
-    label: "Redesign shell",
-    help: "The agent-first shell: Session rail (Moshi + collaborators + Inspector), section navigator, per-track FX drawers, the bottom prompt bar + the “+” file/options control, timeline annotations, and collaborator video. On by default; turn it off for the classic layout.",
-  },
-  {
-    // The from-scratch demo-driven shell (ui/src/v2). A first-class axis, NOT a
-    // variant of redesignShell: "classic" = the prior App; "v2" = the new Mosh shell;
-    // "live" = the Live-12 Arrangement-View clone (ui/src/live); "protools" = the
-    // Pro Tools Edit-Window-inspired shell (ui/src/protools). UI-local + reversible
-    // (flip back anytime, here or via the in-app toggle). V3 ("Mosh (v3)") is the DEFAULT for
-    // fresh settings once the V3 parity gate closed (docs/V3-PARITY-BRIEF-2026-09-17.md §6;
-    // Pro Tools was the default from the 2026-08-09 session-readiness cutover until then).
-    // Existing explicit preferences remain persisted, and Pro Tools/Live/v2/classic stay
-    // fully available. In dev/e2e a `?shell=` query-param overrides this per page-load
-    // (see v2/shellQuery.ts).
-    id: "uiShell",
-    type: "enum",
-    default: "v3",
-    scope: "app",
-    category: "Layout",
-    label: "Interface",
-    help: "Which interface to use. “Mosh (v3)” is the fresh-install default; “Pro Tools,” “Live (clone),” “Mosh,” and “Classic” remain available, and an existing choice is preserved.",
-    constraints: {
-      options: [
-        { value: "classic", label: "Classic" },
-        { value: "v2", label: "Mosh (new)" },
-        // The additive Live-12 Arrangement-View clone (ui/src/live). Same store/seam,
-        // same reversible flip — picking it here (or the "Live (clone)" template, or
-        // ?shell=live in dev/e2e) mounts AppLive; classic and v2 are untouched.
-        { value: "live", label: "Live (clone)" },
-        { value: "protools", label: "Pro Tools" },
-        { value: "v3", label: "Mosh (v3)" },
-      ],
-    },
-  },
-  {
     // The friends-first launch: an empty session becomes the recording template (Beat, Lead
     // vocal, Ad-libs) and the first-run checklist opens over the workspace. UI-local view
     // state: never crosses the bridge, never an undo step. Its only control is the
@@ -238,36 +155,6 @@ export const SETTINGS: SettingDef[] = [
     category: "Layout",
     label: "Set up a song at launch",
     help: "Open Mosh with a recording song and the getting-started checklist. The Start button in the top bar opens the checklist any time.",
-  },
-  {
-    id: "protoolsDefaultFadeLengthMs",
-    type: "number",
-    default: 10,
-    scope: "app",
-    category: "Pro Tools",
-    label: "Default fade length",
-    help: "Edge length used by the Pro Tools no-dialog fade shortcut and remembered after a successful Fades dialog Apply, in milliseconds.",
-    constraints: { min: 0, max: 60_000, step: 1 },
-  },
-  {
-    id: "protoolsDefaultFadeCurveIn",
-    type: "enum",
-    default: "linear",
-    scope: "app",
-    category: "Pro Tools",
-    label: "Default fade-in shape",
-    help: "Fade-in shape used by the Pro Tools no-dialog fade shortcut and remembered after a successful Fades dialog Apply.",
-    constraints: { options: PROTOOLS_FADE_CURVE_OPTIONS },
-  },
-  {
-    id: "protoolsDefaultFadeCurveOut",
-    type: "enum",
-    default: "linear",
-    scope: "app",
-    category: "Pro Tools",
-    label: "Default fade-out shape",
-    help: "Fade-out shape used by the Pro Tools no-dialog fade shortcut and remembered after a successful Fades dialog Apply.",
-    constraints: { options: PROTOOLS_FADE_CURVE_OPTIONS },
   },
   {
     // Opt-in crash reporting + anonymous usage telemetry (src/telemetry/, see
@@ -286,31 +173,6 @@ export const SETTINGS: SettingDef[] = [
     help: "Off by default. When on, Mosh may send anonymous crash reports and command-usage counts (command NAMES only — never audio, lyrics, file paths, or project content) to help find and fix bugs. No network activity happens while this is off.",
   },
   ...interactionSettings(),
-  {
-    // The live shell's detail-dock height (points), written by the dock's drag
-    // splitter so the layout survives a reload. The persisted bounds here are broad;
-    // the runtime clamp (min 226, max 70% of the shell) lives in live/dockGeometry.ts.
-    id: "liveDockHeight",
-    type: "number",
-    default: 265,
-    scope: "app",
-    category: "Layout",
-    label: "Live dock height",
-    help: "Detail-dock height in the Live (clone) interface, in points. Set by dragging the divider above the dock.",
-    constraints: { min: 120, max: 800, step: 1 },
-  },
-  {
-    // Live's Expanded Clip View (⌥⌘E): the docked editor consumes the whole window
-    // (browser/arrangement/headers hidden). STICKY across close/reopen of the clip
-    // view, like Live — hence a persisted setting rather than shell view state.
-    id: "liveClipExpanded",
-    type: "bool",
-    default: false,
-    scope: "app",
-    category: "Layout",
-    label: "Live: expanded clip view",
-    help: "The docked editor fills the whole window in the Live (clone) interface.",
-  },
   {
     // AUD-SCAN — opt-in AudioUnit cataloging. Off by default because an AU sweep is the
     // slow/risky path (a hung component is killed by the ~25 s stall watchdog, a crashed

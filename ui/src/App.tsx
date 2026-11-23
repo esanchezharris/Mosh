@@ -1,20 +1,13 @@
-// App router — picks the active shell from the
-// `uiShell` UI-local setting, honoring a dev-only `?shell=` override. This is the
-// single mount point main.tsx renders; it owns the data lifecycle (init() runs once
-// here, so switching shells at runtime never re-subscribes the event feed). Both
-// shells are pure clients of the same store/seam — the backend is identical either way.
+// App root — the single mount point main.tsx renders. It owns the data lifecycle (init()
+// runs once here) and mounts the V3 shell, the only interface since the old Classic, v2,
+// Live and Pro Tools shells were retired (docs/SHELL-RETIREMENT-PLAN-2026-11-17.md; their
+// last source is at tag archive/shells-2026-11-23). The shell is a pure client of the
+// store/seam.
 
 import { lazy, Suspense, useEffect } from "react";
 import { useStore } from "./store";
-import { useSettings } from "./settings/store";
-import { resolveShell } from "./v2/shellQuery";
 import { isCharacterLab } from "./lab/labQuery";
-import { AppLegacy } from "./AppLegacy";
-import { AppV2 } from "./v2/AppV2";
-import { AppLive } from "./live/AppLive";
-import { AppProTools } from "./protools/AppProTools";
 import { AppV3 } from "./v3/AppV3";
-import { brainRuntimeStatus } from "./bridge";
 
 // Dev-only Character Lab demo. The reference is gated on an explicit development mode so that in
 // the production build the ternary folds to a literal `null` and the lazy import() lands in
@@ -27,8 +20,6 @@ const CharacterLab = import.meta.env.MODE === "development"
 
 export function App() {
   const init = useStore((s) => s.init);
-  const uiShell = useSettings((s) => s.get("uiShell"));
-  const shell = resolveShell(uiShell);
 
   // Dev-only Character Lab demo: `?view=character-lab` swaps the whole shell for the
   // knob demo and never touches the store, so it has zero backend dependency and can't
@@ -36,31 +27,11 @@ export function App() {
   const charLab = isCharacterLab();
 
   useEffect(() => { if (!charLab) init(); }, [init, charLab]);
-  useEffect(() => {
-    void brainRuntimeStatus().then((runtime) => {
-      if (runtime.preferredShell) useSettings.getState().set("uiShell", runtime.preferredShell);
-    }).catch(() => {});
-  }, []);
 
   if (charLab && CharacterLab) return (
     <Suspense fallback={null}>
       <CharacterLab />
     </Suspense>
   );
-  switch (shell) {
-    case "classic":
-      return <AppLegacy />;
-    case "v2":
-      return <AppV2 />;
-    case "live":
-      return <AppLive />;
-    case "protools":
-      return <AppProTools />;
-    case "v3":
-      return <AppV3 />;
-    default: {
-      const unreachable: never = shell;
-      return unreachable;
-    }
-  }
+  return <AppV3 />;
 }
