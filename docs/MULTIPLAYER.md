@@ -38,26 +38,20 @@ The split is enforced in one place — `LockManager::classify()`
   the peer when the track is **committed** (see [commit-on-move](#track-locks--commit-on-move)).
 - **Clip edits** (move, trim, split, add/remove/edit notes, quantize, create render
   layer…) — clip-scoped, committed with their track.
-- **Session-global ops** — `create_track` / bus / group, **tempo**, **key**, master
+- **Session-global ops** — `create_track` / bus, **tempo**, **key**, master
   volume/pan, metronome, tempo-map. Scalars (tempo/key/master) use **last-writer-wins**
   ([MultiplayerSession.cpp:182](src/multiplayer/MultiplayerSession.cpp:182)). Incoming peer
   structural frames are restricted to the same closed command registry Mosh uses for
   outbound structural broadcasts; project/file/export/agent/transport/local-only and
   unknown commands are rejected before command execution.
-- **Buses and track groups** — `create_bus`/`rename_bus`/`remove_bus` and the track-group
-  commands (`create_track_group`/`configure_track_group`/`duplicate_track_group`/
-  `set_track_group_members`/`set_track_group_enabled`/`set_track_groups_suspended`/
-  `rename_track_group`/`remove_track_group`) ride the same structural channel. Both live
-  outside any single track's subtree (a bus's `AUXBUSNAMES` entry, a group's
-  `MOSH_TRACK_GROUPS` entry), so a plain per-track commit can't carry them — the create
-  commands self-broadcast their RESOLVED cross-peer-stable id (a bus's `mpBusId`, a group's
-  `groupId`, mirroring `create_annotation`'s own resolved-id pattern) instead of letting the
-  peer independently re-allocate one (a bus's routing NUMBER, in particular, is a per-engine
-  local-scan counter — an independently-chosen one would break `add_send`'s routing on the
-  peer). A track group's member `trackIds` are translated to/from the sender's stable
-  `moshLogicalId` at the broadcast boundary (raw EditItemIDs are per-engine, the same reason
-  `TrackCommit` exists) — see `src/moshops/MoshOps.Multiplayer.cpp`'s
-  `translateTrackGroupTrackIds`.
+- **Buses** — `create_bus`/`rename_bus`/`remove_bus` ride the same structural channel. A bus
+  lives outside any single track's subtree (its `AUXBUSNAMES` entry), so a plain per-track
+  commit can't carry it — `create_bus` self-broadcasts its RESOLVED cross-peer-stable
+  `mpBusId` (mirroring `create_annotation`'s own resolved-id pattern) instead of letting the
+  peer independently re-allocate one (a bus's routing NUMBER is a per-engine local-scan
+  counter — an independently-chosen one would break `add_send`'s routing on the peer).
+  Track groups rode this channel too until they were retired with the old shells
+  (2026-11-23); a peer's group op is now refused and a bootstrap's `trackGroups` ignored.
 - **Locks + presence** — who's editing which track, name, colour, online status.
 
 ## Track locks & commit-on-move

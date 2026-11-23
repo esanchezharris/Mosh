@@ -104,7 +104,6 @@ cat > "$ART/a.jsonl" <<EOF
 {"command":"add_test_tone_clip","args":{"trackId":"\${TT}","seconds":2.0,"freq":330.0}}
 {"command":"mp_commit_track","args":{"trackId":"\${TT}"}}
 {"command":"create_bus","args":{"name":"DryRunReverb"},"capture":{"BUSNUM":"busNumber"}}
-{"command":"create_track_group","args":{"trackIds":["\${TD}","\${TT}"],"name":"DryRunGroup","kind":"edit_mix"},"capture":{"GROUPID":"groupId"}}
 {"command":"create_track","args":{"name":"BigTake"},"capture":{"TB":"trackId"}}
 {"command":"mp_claim_track","args":{"trackId":"\${TB}"}}
 {"command":"import_clip","args":{"trackId":"\${TB}","file":"$ART/bigtake.wav","startSeconds":0}}
@@ -202,14 +201,6 @@ for want in ("Drums", "Tone", "BigTake"):
 buses = snap.get("buses", [])
 if not any(bus.get("name") == "DryRunReverb" for bus in buses):
     failures.append(f"bus 'DryRunReverb' did not replicate to B (buses: {buses})")
-
-groups = snap.get("trackGroups", [])
-if not any(g.get("name") == "DryRunGroup" for g in groups):
-    failures.append(f"track group 'DryRunGroup' did not replicate to B (trackGroups: {groups})")
-else:
-    g = next(g for g in groups if g.get("name") == "DryRunGroup")
-    if len(g.get("trackIds", [])) != 2:
-        failures.append(f"track group 'DryRunGroup' replicated with wrong membership: {g}")
 
 bigtake = next((t for t in snap.get("tracks", []) if t["name"] == "BigTake"), None)
 if bigtake is None:

@@ -15,7 +15,7 @@ function track(id: string, index: number): Track {
 }
 async function fixture(): Promise<Snapshot> {
   const snapshot = await mockSnapshot<Snapshot>();
-  return { ...snapshot, tracks: [track("lead", 0), track("room", 1), track("protected", 2)], trackGroups: [] };
+  return { ...snapshot, tracks: [track("lead", 0), track("room", 1), track("protected", 2)] };
 }
 const volume = (trackId: string, db: number) => ({ command: "set_track_volume", args: { trackId, db } });
 const frequency = (hz: number) => ({ command: "set_plugin_param", args: { trackId: "lead", index: 3, paramIndex: 0, value: (hz - 10) / 21990 } });
@@ -76,19 +76,6 @@ describe("Producer v0 allowed controls", () => {
     param.automated = false;
     param.points = [{ t: 0, v: 0.5 }];
     expect(validateProducerRack(snapshot, rack, [], "initial")).toContain("automation");
-  });
-
-  it("refuses group fan-out, including legacy groups with default volume linkage", async () => {
-    const snapshot = await fixture();
-    snapshot.trackGroups = [{ id: "g", name: "Linked", trackIds: ["lead", "protected"], kind: "mix", enabled: true }];
-    expect(validateProducerRack(snapshot, rack, [], "initial")).toContain("linked fader");
-    snapshot.trackGroupsSuspended = true;
-    expect(validateProducerRack(snapshot, rack, [], "initial")).toBeNull();
-    snapshot.trackGroupsSuspended = false;
-    const group = snapshot.trackGroups[0];
-    if (!group) throw new TypeError("fixture group missing");
-    group.mixAttributes = ["main_pan"];
-    expect(validateProducerRack(snapshot, rack, [], "initial")).toBeNull();
   });
 
   it("refuses missing or replaced selected plugin identity and limits", async () => {

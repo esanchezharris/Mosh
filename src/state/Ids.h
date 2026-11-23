@@ -203,29 +203,6 @@ namespace mosh::ids
     MOSH_DECLARE_ID (sectionEndBeat)
     MOSH_DECLARE_ID (sectionColor)
 
-    // Pro Tools Clip Groups — arrangement membership only, never a Tracktion folder
-    // or routing submix. Inactive nodes stay persisted so Regroup can restore the
-    // last Ungroup without reconstructing a selection from UI state.
-    MOSH_DECLARE_ID (MOSH_CLIP_GROUPS)
-    MOSH_DECLARE_ID (MOSH_CLIP_GROUP)
-    MOSH_DECLARE_ID (MOSH_CLIP_GROUP_MEMBER)
-    MOSH_DECLARE_ID (clipGroupName)
-    MOSH_DECLARE_ID (clipGroupActive)
-    MOSH_DECLARE_ID (clipGroupClipId)
-    MOSH_DECLARE_ID (lastUngroupedClipGroupId)
-
-    // Pro Tools Track Groups — non-routing Edit/Mix linkage. These nodes never
-    // create Tracktion folder tracks or alter signal flow.
-    MOSH_DECLARE_ID (MOSH_TRACK_GROUPS)
-    MOSH_DECLARE_ID (MOSH_TRACK_GROUP)
-    MOSH_DECLARE_ID (MOSH_TRACK_GROUP_MEMBER)
-    MOSH_DECLARE_ID (trackGroupName)
-    MOSH_DECLARE_ID (trackGroupKind)
-    MOSH_DECLARE_ID (trackGroupEnabled)
-    MOSH_DECLARE_ID (trackGroupMixAttributes)
-    MOSH_DECLARE_ID (trackGroupTrackId)
-    MOSH_DECLARE_ID (trackGroupsSuspended)
-
     // ANN-001 — timeline ANNOTATIONS (lightweight, authored comment pins). A
     // MOSH_ANNOTATIONS container child of the Edit's own ValueTree (mirrors
     // MOSH_SECTIONS) holding MOSH_ANNOTATION nodes — each a BEAT-anchored note with

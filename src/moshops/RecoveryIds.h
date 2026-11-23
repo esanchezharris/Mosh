@@ -5,7 +5,7 @@
 namespace mosh::recovery
 {
 /** Rebind ids anywhere inside a journal argument tree. Multi-target commands such
-    as create_clip_group carry clipIds in an array, so top-level strings alone are
+    as consolidate_clips carry clipIds in an array, so top-level strings alone are
     insufficient after earlier replayed commands mint replacement ids. */
 inline juce::var substituteIds (
     const juce::var& value,

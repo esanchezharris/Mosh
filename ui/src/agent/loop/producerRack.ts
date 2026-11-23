@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { z } from "zod";
-import { DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES } from "../../types";
 import type { Snapshot, Track } from "../../types";
 import type { AgentCommandCall } from "../destructiveScreen";
 
@@ -14,17 +13,13 @@ const allowedCall = z.discriminatedUnion("command", [
 ]);
 const qualifiedFrequency = (value: number): boolean => [80, 120].some((hz) => Math.abs(value - (hz - 10) / 21990) <= 1e-9);
 
-function trackProblem(snapshot: Snapshot, track: Track): string | null {
+function trackProblem(track: Track): string | null {
   if (track.type !== "audio" || track.isGroup || track.isReturn || track.active === false || track.frozen)
     return `${track.name} must be an active, unfrozen audio track`;
   if ((track.automationMode ?? "read") !== "read") return `${track.name} must use read automation mode`;
   const fader = track.mixerPlugins?.find((plugin) => plugin.type === "volume" && !plugin.external)?.params.find((param) => param.index === 0 && param.name === "Volume");
   if (!fader) return `${track.name} has no verified existing fader`;
   if (fader.automated !== false || fader.points?.length) return `${track.name} fader automation is outside this rack`;
-  if (!snapshot.trackGroupsSuspended && snapshot.trackGroups?.some((group) => group.enabled && group.kind !== "edit"
-    && group.trackIds.includes(track.id) && group.trackIds.some((id) => id !== track.id && snapshot.tracks.some((other) => other.id === id))
-    && (group.mixAttributes ?? DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES).includes("main_volume")))
-    return `${track.name} has linked fader group effects`;
   return null;
 }
 
@@ -35,7 +30,7 @@ export function validateProducerRack(snapshot: Snapshot, rack: ProducerRack, cal
   const room = snapshot.tracks.find((track) => track.id === rack.roomTrackId);
   if (!lead || !room) return "A selected rack track no longer exists";
   for (const track of [lead, room]) {
-    const problem = trackProblem(snapshot, track);
+    const problem = trackProblem(track);
     if (problem) return problem;
   }
   const plugin = lead.plugins?.find((candidate) => candidate.index === rack.pluginIndex);

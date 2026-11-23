@@ -14,11 +14,10 @@
 // behaviour the UI relies on is exercised, while audio/Tracktion concepts never
 // appear (the swappable seam holds on the web side too).
 
-import { DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES, TRACK_GROUP_MIX_ATTRIBUTES } from "./types";
 import { scalePitchClasses } from "./ui/tuner";
 import { ottGainDb } from "./v3/panels/ott";
 import { xfMaxCuts, xfThreshold } from "./v3/panels/xfeedback";
-import type { AiToolsInstallStatus, AiToolsSnapshot, AiToolsStepId, Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingSource, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine, PluginMeterReading } from "./types";
+import type { AiToolsInstallStatus, AiToolsSnapshot, AiToolsStepId, Annotation, Snapshot, Clip, ClipGainPoint, LoopState, Track, Transport, CommandResult, RenderLayer, TrainingSource, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine, PluginMeterReading } from "./types";
 import type { MicrophonePermissionResult, MicrophonePermissionStatus, RemoteResult, RemoteStatus } from "./bridge";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
@@ -49,8 +48,6 @@ export const MOCK_ENABLED: boolean =
 const SR = 48000;
 let clipSeq = 100;
 let trackSeq = 10;
-let clipGroupSeq = 0;
-let trackGroupSeq = 0;
 // Layers whose render has already been landed on the "Neural Renders" lane, so a second
 // accept/bounce does not duplicate the clip (native guards the same way, via its internal
 // landedClipId). Module-local rather than a snapshot field — see the accept_render branch.
@@ -66,8 +63,6 @@ const nextTakeId = (): string => {
   return `${hex}-0000-4000-8000-000000000000`;
 };
 const nextTrackId = () => String(++trackSeq);
-const nextClipGroupId = () => `clip-group-${++clipGroupSeq}`;
-const nextTrackGroupId = () => `track-group-${++trackGroupSeq}`;
 // Live 12's Space vs ⇧Space marker memory (mirrors MoshOps::cmdSetTransport)
 let mockInsertMarker = 0;
 let mockViaContinue = false;
@@ -651,10 +646,6 @@ const MOCK_TXN_SAFE = new Set([
   "set_send_pre_fader", "remove_send",
   "set_tempo", "set_time_signature",
   "create_section", "rename_section", "move_section", "remove_section",
-  "create_clip_group", "ungroup_clip_group", "regroup_clip_group", "rename_clip_group",
-  "create_track_group", "configure_track_group", "duplicate_track_group",
-  "set_track_group_members", "set_track_group_enabled", "set_track_groups_suspended",
-  "rename_track_group", "remove_track_group",
   "create_lyric_sheet", "set_lyric_line", "set_lyric_constraint", "remove_lyric_line",
 ]);
 
@@ -1455,54 +1446,6 @@ export function mockPickFiles(opts?: { multiple?: boolean; filters?: string; tit
   return { ok: false, files: [] };
 }
 
-function trackGroupSupports(group: TrackGroup, axis: "edit" | "mix"): boolean {
-  return group.kind === axis || group.kind === "edit_mix";
-}
-const TRACK_GROUP_MIX_ATTRIBUTE_SET: ReadonlySet<string> = new Set(TRACK_GROUP_MIX_ATTRIBUTES);
-function isTrackGroupMixAttribute(value: unknown): value is TrackGroupMixAttribute {
-  return typeof value === "string" && TRACK_GROUP_MIX_ATTRIBUTE_SET.has(value);
-}
-function parseTrackGroupMixAttributes(value: unknown): TrackGroupMixAttribute[] | null {
-  if (!Array.isArray(value)) return null;
-  const attributes: TrackGroupMixAttribute[] = [];
-  for (const item of value) {
-    if (!isTrackGroupMixAttribute(item)) return null;
-    if (!attributes.includes(item)) attributes.push(item);
-  }
-  return attributes;
-}
-function parseTrackGroupKind(value: unknown): TrackGroupKind | null {
-  return value === "edit" || value === "mix" || value === "edit_mix" ? value : null;
-}
-function trackGroupMixAttributes(group: TrackGroup): readonly TrackGroupMixAttribute[] {
-  return group.mixAttributes ?? DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES;
-}
-function trackGroupTrackIds(value: unknown): string[] {
-  return Array.isArray(value) ? [...new Set(value.map(String))] : [];
-}
-function sameTrackGroupValues(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-function linkedMixTracks(trackId: string, attribute: TrackGroupMixAttribute): Track[] {
-  const source = findTrack(trackId);
-  if (!source || snapshot.trackGroupsSuspended) return source ? [source] : [];
-  const linked = new Set([trackId]);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const group of snapshot.trackGroups ?? []) {
-      if (!group.enabled || !trackGroupSupports(group, "mix")
-        || !trackGroupMixAttributes(group).includes(attribute)
-        || !group.trackIds.some((id) => linked.has(id))) continue;
-      for (const id of group.trackIds) {
-        if (!findTrack(id) || linked.has(id)) continue;
-        linked.add(id);
-        changed = true;
-      }
-    }
-  }
-  return snapshot.tracks.filter((track) => linked.has(track.id));
-}
 // Is this clip's render layer scoped to PART of the clip? Mirrors the ±1e-3 comparison in
 // MoshOps::applyRenderInPlace, which is what decides in-place apply vs the lane landing.
 function isSubRegion(clip: Clip): boolean {
@@ -2580,140 +2523,6 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate();
       return ok(command);
     }
-    case "create_track_group": {
-      const trackIds = trackGroupTrackIds(args.trackIds);
-      const kind = parseTrackGroupKind(args.kind);
-      const mixAttributes = args.mixAttributes === undefined
-        ? [...DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES]
-        : parseTrackGroupMixAttributes(args.mixAttributes);
-      if (trackIds.length === 0) return err(command, "trackIds must contain at least one track");
-      if (!kind)
-        return err(command, "kind must be edit, mix, or edit_mix");
-      if (!mixAttributes) return err(command, "mixAttributes must contain only supported attributes");
-      if (trackIds.some((trackId) => {
-        const track = findTrack(trackId);
-        return !track || track.isGroup || track.isReturn;
-      })) return err(command, "trackIds contains an unsupported track");
-      pushUndo();
-      const group: TrackGroup = {
-        id: nextTrackGroupId(),
-        name: str(args.name).trim() || `Group ${(snapshot.trackGroups?.length ?? 0) + 1}`,
-        trackIds,
-        kind,
-        enabled: true,
-        mixAttributes,
-      };
-      (snapshot.trackGroups ??= []).push(group);
-      invalidate();
-      return ok(command, { groupId: group.id, trackIds: [...group.trackIds] });
-    }
-    case "configure_track_group": {
-      const group = (snapshot.trackGroups ?? []).find((candidate) => candidate.id === str(args.groupId));
-      const name = str(args.name).trim();
-      const kind = parseTrackGroupKind(args.kind);
-      const trackIds = trackGroupTrackIds(args.trackIds);
-      const mixAttributes = parseTrackGroupMixAttributes(args.mixAttributes);
-      if (!group) return err(command, "track group not found");
-      if (!name) return err(command, "track group name cannot be empty");
-      if (!kind)
-        return err(command, "kind must be edit, mix, or edit_mix");
-      if (trackIds.length === 0) return err(command, "trackIds must contain at least one track");
-      if (trackIds.some((trackId) => {
-        const track = findTrack(trackId);
-        return !track || track.isGroup || track.isReturn;
-      })) return err(command, "trackIds contains an unsupported track");
-      if (!mixAttributes) return err(command, "mixAttributes must contain only supported attributes");
-      if (group.name === name && group.kind === kind
-        && sameTrackGroupValues(group.trackIds, trackIds)
-        && sameTrackGroupValues(trackGroupMixAttributes(group), mixAttributes))
-        return ok(command, { groupId: group.id, trackIds: [...group.trackIds], mixAttributes: [...mixAttributes] });
-      pushUndo();
-      group.name = name;
-      group.kind = kind;
-      group.trackIds = trackIds;
-      group.mixAttributes = mixAttributes;
-      invalidate();
-      return ok(command, { groupId: group.id, trackIds: [...group.trackIds], mixAttributes: [...mixAttributes] });
-    }
-    case "duplicate_track_group": {
-      const source = (snapshot.trackGroups ?? []).find((candidate) => candidate.id === str(args.groupId));
-      const name = str(args.name).trim();
-      const kind = parseTrackGroupKind(args.kind);
-      const trackIds = trackGroupTrackIds(args.trackIds);
-      const mixAttributes = parseTrackGroupMixAttributes(args.mixAttributes);
-      if (!source) return err(command, "track group not found");
-      if (!name) return err(command, "track group name cannot be empty");
-      if (!kind)
-        return err(command, "kind must be edit, mix, or edit_mix");
-      if (trackIds.length === 0) return err(command, "trackIds must contain at least one track");
-      if (trackIds.some((trackId) => {
-        const track = findTrack(trackId);
-        return !track || track.isGroup || track.isReturn;
-      })) return err(command, "trackIds contains an unsupported track");
-      if (!mixAttributes) return err(command, "mixAttributes must contain only supported attributes");
-      pushUndo();
-      const duplicate: TrackGroup = {
-        id: nextTrackGroupId(),
-        name,
-        kind,
-        trackIds,
-        enabled: true,
-        mixAttributes,
-      };
-      (snapshot.trackGroups ??= []).push(duplicate);
-      invalidate();
-      return ok(command, { groupId: duplicate.id, trackIds: [...trackIds], mixAttributes: [...mixAttributes] });
-    }
-    case "set_track_group_enabled": {
-      const group = (snapshot.trackGroups ?? []).find((candidate) => candidate.id === str(args.groupId));
-      if (!group) return err(command, "track group not found");
-      pushUndo();
-      group.enabled = Boolean(args.enabled);
-      invalidate();
-      return ok(command, { groupId: group.id, enabled: group.enabled });
-    }
-    case "set_track_group_members": {
-      const group = (snapshot.trackGroups ?? []).find((candidate) => candidate.id === str(args.groupId));
-      const trackIds = trackGroupTrackIds(args.trackIds);
-      if (!group) return err(command, "track group not found");
-      if (trackIds.length === 0) return err(command, "trackIds must contain at least one track");
-      if (trackIds.some((trackId) => {
-        const track = findTrack(trackId);
-        return !track || track.isGroup || track.isReturn;
-      })) return err(command, "trackIds contains an unsupported track");
-      if (group.trackIds.length === trackIds.length
-        && group.trackIds.every((trackId, index) => trackId === trackIds[index]))
-        return ok(command, { groupId: group.id, trackIds: [...group.trackIds] });
-      pushUndo();
-      group.trackIds = trackIds;
-      invalidate();
-      return ok(command, { groupId: group.id, trackIds: [...group.trackIds] });
-    }
-    case "set_track_groups_suspended": {
-      pushUndo();
-      snapshot.trackGroupsSuspended = Boolean(args.suspended);
-      invalidate();
-      return ok(command, { suspended: snapshot.trackGroupsSuspended });
-    }
-    case "rename_track_group": {
-      const group = (snapshot.trackGroups ?? []).find((candidate) => candidate.id === str(args.groupId));
-      const name = str(args.name).trim();
-      if (!group) return err(command, "track group not found");
-      if (!name) return err(command, "track group name cannot be empty");
-      pushUndo();
-      group.name = name;
-      invalidate();
-      return ok(command, { groupId: group.id });
-    }
-    case "remove_track_group": {
-      const groupId = str(args.groupId);
-      if (!(snapshot.trackGroups ?? []).some((group) => group.id === groupId))
-        return err(command, "track group not found");
-      pushUndo();
-      snapshot.trackGroups = (snapshot.trackGroups ?? []).filter((group) => group.id !== groupId);
-      invalidate();
-      return ok(command, { groupId });
-    }
     case "set_track_type": {
       const t = findTrack(str(args.trackId));
       if (!t) return err(command, "track not found");
@@ -2852,32 +2661,24 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "set_track_volume": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
-      const targets = linkedMixTracks(t.id, "main_volume");
-      const requested = num(args.db);
-      const delta = requested - (t.volumeDb ?? 0);
       pushUndo();
-      for (const target of targets)
-        target.volumeDb = targets.length === 1 ? requested : Math.min(6, Math.max(-70, (target.volumeDb ?? 0) + delta));
+      t.volumeDb = num(args.db);
       invalidate(); return ok(command);
     }
     case "set_track_pan": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
-      const targets = linkedMixTracks(t.id, "main_pan");
-      const requested = num(args.pan);
-      const delta = requested - (t.pan ?? 0);
       pushUndo();
-      for (const target of targets)
-        target.pan = targets.length === 1 ? requested : Math.min(1, Math.max(-1, (target.pan ?? 0) + delta));
+      t.pan = num(args.pan);
       invalidate(); return ok(command);
     }
     case "set_track_mute": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
-      pushUndo(); for (const target of linkedMixTracks(t.id, "main_mute")) target.mute = Boolean(args.mute);
+      pushUndo(); t.mute = Boolean(args.mute);
       invalidate(); return ok(command);
     }
     case "set_track_solo": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
-      pushUndo(); for (const target of linkedMixTracks(t.id, "solo")) target.solo = Boolean(args.solo);
+      pushUndo(); t.solo = Boolean(args.solo);
       invalidate(); return ok(command);
     }
     case "set_track_active": { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); const active = args.active !== false; if ((t.active ?? true) === active) return ok(command); pushUndo(); t.active = active; invalidate(); return ok(command); }
@@ -3439,11 +3240,6 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "move_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
-      const activeGroup = (snapshot.clipGroups ?? []).find((group) =>
-        group.active && group.clipIds.includes(f.clip.id));
-      const groupMembers = activeGroup
-        ? activeGroup.clipIds.map((id) => findClip(id)).filter((member) => member !== null)
-        : [f];
       // CAP-CLP-017 — the cross-track refusal is validated BEFORE any mutation, exactly
       // like the native handler: ripple describes a distance on the track the clip is
       // leaving, so it has no meaning across a move to another one.
@@ -3452,19 +3248,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         if (dest && dest !== f.track)
           return err(command, "ripple:true cannot be combined with a move to another track");
       }
-      if (activeGroup && args.ripple)
-        return err(command, "ripple move is not supported for a clip group");
-      if (activeGroup && "trackId" in args) {
-        const dest = findTrack(str(args.trackId));
-        if (dest && dest !== f.track)
-          return err(command, "moving a multitrack clip group between tracks is not supported");
-      }
       pushUndo();
       const oldStart = f.clip.start, oldEnd = f.clip.start + f.clip.length;
-      const requestedDelta = num(args.start, f.clip.start) - f.clip.start;
-      const earliestStart = Math.min(...groupMembers.map((member) => member.clip.start));
-      const delta = Math.max(requestedDelta, -earliestStart);
-      for (const member of groupMembers) member.clip.start += delta;
+      f.clip.start = Math.max(0, num(args.start, f.clip.start));
       if ("trackId" in args) { // move across tracks
         const dest = findTrack(str(args.trackId));
         if (dest && dest !== f.track) { f.track.clips = f.track.clips.filter((c) => c.id !== f.clip.id); dest.clips.push(f.clip); }
@@ -3480,66 +3266,6 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
               c.start = Math.max(0, c.start + delta);
       }
       invalidate(); return ok(command);
-    }
-    case "create_clip_group": {
-      const ids = Array.isArray(args.clipIds)
-        ? [...new Set(args.clipIds.map(String))]
-        : [];
-      if (ids.length === 0) return err(command, "clipIds must contain at least one clip");
-      if (ids.some((id) => !findClip(id))) return err(command, "clipIds contains an unknown clip");
-      if ((snapshot.clipGroups ?? []).some((group) =>
-        group.active && group.clipIds.some((id) => ids.includes(id))))
-        return err(command, "one or more clips are already grouped");
-      pushUndo();
-      const group: ClipGroup = {
-        id: nextClipGroupId(),
-        name: str(args.name).trim() || "Clip Group",
-        clipIds: ids,
-        active: true,
-      };
-      (snapshot.clipGroups ??= []).push(group);
-      invalidate();
-      return ok(command, { groupId: group.id, clipIds: [...group.clipIds] });
-    }
-    case "ungroup_clip_group": {
-      const clipId = str(args.clipId);
-      const group = (snapshot.clipGroups ?? []).find((candidate) =>
-        candidate.active && candidate.clipIds.includes(clipId));
-      if (!group) return err(command, "active clip group not found");
-      pushUndo();
-      group.active = false;
-      snapshot.lastUngroupedClipGroupId = group.id;
-      invalidate();
-      return ok(command, { groupId: group.id, clipIds: [...group.clipIds] });
-    }
-    case "regroup_clip_group": {
-      const groupId = str(args.groupId) || snapshot.lastUngroupedClipGroupId || "";
-      const group = (snapshot.clipGroups ?? []).find((candidate) => candidate.id === groupId);
-      if (!group || group.active) return err(command, "no ungrouped clip group is available to regroup");
-      const existingIds = group.clipIds.filter((id) => findClip(id));
-      if (existingIds.length === 0) return err(command, "the clip group's members no longer exist");
-      if ((snapshot.clipGroups ?? []).some((candidate) =>
-        candidate.active && candidate.id !== group.id
-          && candidate.clipIds.some((id) => existingIds.includes(id))))
-        return err(command, "one or more former members now belong to another clip group");
-      pushUndo();
-      group.clipIds = existingIds;
-      group.active = true;
-      delete snapshot.lastUngroupedClipGroupId;
-      invalidate();
-      return ok(command, { groupId: group.id, clipIds: [...group.clipIds] });
-    }
-    case "rename_clip_group": {
-      const clipId = str(args.clipId);
-      const group = (snapshot.clipGroups ?? []).find((candidate) =>
-        candidate.clipIds.includes(clipId));
-      const name = str(args.name).trim();
-      if (!group) return err(command, "clip group not found");
-      if (!name) return err(command, "clip group name cannot be empty");
-      pushUndo();
-      group.name = name;
-      invalidate();
-      return ok(command, { groupId: group.id, clipIds: [...group.clipIds] });
     }
     case "trim_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
@@ -6881,8 +6607,6 @@ export function __resetMockForTests(): void {
   // seq climbs across resets and cross-call id matching silently breaks.
   clipSeq = 100;
   trackSeq = 10;
-  clipGroupSeq = 0;
-  trackGroupSeq = 0;
   snapshot = seedSnapshot();
   mockProjects.clear();
   recentPaths = seedRecentPaths();

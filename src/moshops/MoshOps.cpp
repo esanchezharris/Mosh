@@ -833,23 +833,6 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "rename_section")    return cmdRenameSection (args);
     if (name == "move_section")      return cmdMoveSection (args);
     if (name == "remove_section")    return cmdRemoveSection (args);
-    if (name == "create_clip_group")  return cmdCreateClipGroup (args);
-    if (name == "ungroup_clip_group") return cmdUngroupClipGroup (args);
-    if (name == "regroup_clip_group") return cmdRegroupClipGroup (args);
-    if (name == "rename_clip_group")  return cmdRenameClipGroup (args);
-    // MP-003 — groups replicate via structural broadcast. The four commands that
-    // carry member `trackIds` (raw per-engine EditItemIDs) self-broadcast with
-    // those ids translated to the cross-peer-stable moshLogicalId (see
-    // translateTrackGroupTrackIds); the rest carry only the group's own already-
-    // portable UUID, so a plain dispatch-site wrap replays their args verbatim.
-    if (name == "create_track_group") return cmdCreateTrackGroup (args);
-    if (name == "configure_track_group") return cmdConfigureTrackGroup (args);
-    if (name == "duplicate_track_group") return cmdDuplicateTrackGroup (args);
-    if (name == "set_track_group_members") return cmdSetTrackGroupMembers (args);
-    if (name == "set_track_group_enabled") return broadcastStructuralIfActive (name, args, cmdSetTrackGroupEnabled (args));
-    if (name == "set_track_groups_suspended") return broadcastStructuralIfActive (name, args, cmdSetTrackGroupsSuspended (args));
-    if (name == "rename_track_group") return broadcastStructuralIfActive (name, args, cmdRenameTrackGroup (args));
-    if (name == "remove_track_group") return broadcastStructuralIfActive (name, args, cmdRemoveTrackGroup (args));
     // LYR-001 — Finish-My-Song lyric sheet (per-track).
     if (name == "create_lyric_sheet")   return cmdCreateLyricSheet (args);
     if (name == "remove_lyric_sheet")   return cmdRemoveLyricSheet (args);
@@ -1173,24 +1156,9 @@ std::vector<juce::String> MoshOps::lockKeysFor (LockManager::Scope scope,
         if (auto* trackIds = args.getProperty ("trackIds", var()).getArray())
             for (const auto& trackId : *trackIds)
                 addTrackKey (findTrack (trackId.toString()));
-        if (const auto group = findTrackGroupById (args.getProperty ("groupId", var()).toString());
-            group.isValid())
-            for (auto* track : trackGroupMembers (group)) addTrackKey (track);
         if (auto* t = findTrack (args.getProperty ("trackId", var()).toString()))
         {
-            static const std::set<juce::String> mixLinkedCommands {
-                "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo"
-            };
-            if (mixLinkedCommands.count (command))
-            {
-                const auto attribute = command == "set_track_volume" ? "main_volume"
-                    : command == "set_track_pan" ? "main_pan"
-                    : command == "set_track_mute" ? "main_mute"
-                    : "solo";
-                for (auto* track : mixLinkedTracks (t->itemID.toString(), attribute)) addTrackKey (track);
-            }
-            else
-                addTrackKey (t);
+            addTrackKey (t);
             return keys;
         }
         // Track-scoped composites may target via clipId only (add_drum_pattern) —
@@ -1208,11 +1176,7 @@ std::vector<juce::String> MoshOps::lockKeysFor (LockManager::Scope scope,
                 addTrackKey (clip->getTrack());
         };
         if (auto* c = findClip (args.getProperty ("clipId", var()).toString()))
-        {
             addTrackKey (c->getTrack());
-            if (const auto group = findClipGroupForClip (c->itemID.toString(), true); group.isValid())
-                for (auto* member : clipGroupMembers (group)) addTrackKey (member->getTrack());
-        }
         if (auto* clipIds = args.getProperty ("clipIds", var()).getArray())
             for (auto& clipId : *clipIds)
                 addClipTrack (clipId);
@@ -3863,14 +3827,6 @@ juce::var MoshOps::snapshot()
     // SEC-001 — named song sections (Intro/Verse/Hook/…) from the MOSH_SECTIONS tree.
     root->setProperty ("sections", sectionsToVar());
     root->setProperty ("annotations", annotationsToVar());
-    root->setProperty ("clipGroups", clipGroupsToVar());
-    if (const auto groups = edit.state.getChildWithName (ids::MOSH_CLIP_GROUPS); groups.isValid())
-        if (const auto groupId = groups[ids::lastUngroupedClipGroupId].toString(); groupId.isNotEmpty())
-            root->setProperty ("lastUngroupedClipGroupId", groupId);
-    root->setProperty ("trackGroups", trackGroupsToVar());
-    if (const auto groups = edit.state.getChildWithName (ids::MOSH_TRACK_GROUPS); groups.isValid())
-        root->setProperty ("trackGroupsSuspended",
-                           (bool) groups.getProperty (ids::trackGroupsSuspended, false));
 
     // Stage 7 — the rights registry with its adapters and jobs (additive). The training
     // popover and the LoRA Lab render from this block and nothing else: no UI code calls
@@ -4768,10 +4724,8 @@ bool MoshOps::isReplayableCommand (const juce::String& name) const
         "duplicate_clip", "delete_time_range", "insert_time", "paste_clip",
         "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo", "set_track_active",
         "create_section", "rename_section", "move_section", "remove_section",
-        "create_clip_group", "ungroup_clip_group", "regroup_clip_group", "rename_clip_group",
-        "create_track_group", "configure_track_group", "duplicate_track_group",
-        "set_track_group_members", "set_track_group_enabled", "set_track_groups_suspended",
-        "rename_track_group", "remove_track_group",
+        
+        
         "create_annotation", "edit_annotation", "move_annotation", "remove_annotation",
         "set_tempo", "set_time_signature", "set_metronome", "set_key", "set_project_settings" };
     return replayable.contains (name);
@@ -4795,7 +4749,7 @@ void MoshOps::appendRecoveryJournal (const juce::String& name, const juce::var& 
 
 // Replace any string arg whose VALUE is a journaled id with its freshly-assigned id.
 // Recursive substitution is required for multi-target commands whose ids live in arrays
-// (create_clip_group, consolidate_clips, crop_clip) or nested object payloads.
+// (consolidate_clips, crop_clip) or nested object payloads.
 juce::var MoshOps::substituteRecoveryIds (const juce::var& args, const juce::HashMap<juce::String, juce::String>& idMap)
 {
     return recovery::substituteIds (args, idMap);

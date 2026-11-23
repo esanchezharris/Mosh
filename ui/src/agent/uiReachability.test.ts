@@ -258,6 +258,6 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     // for are declared (commandClassification.ts, "shell retirement"). The value of the
     // ratchet from here on is that the NEXT command to ship without a control fails the
     // build instead of quietly joining a list nobody re-reads.
-    expect(Object.keys(UI_REACH_GAPS).length).toBe(61);
+    expect(Object.keys(UI_REACH_GAPS).length).toBe(50);
   });
 });

@@ -43,7 +43,7 @@ function pauseProvider() {
 // This is an envelope-level unit fixture, not a native durability or audio proof.
 async function fixture() {
   const seed = await mockSnapshot<Snapshot>();
-  const snapshot: Snapshot = { ...seed, tracks: [track("lead", 0), track("room", 1)], trackGroups: [] };
+  const snapshot: Snapshot = { ...seed, tracks: [track("lead", 0), track("room", 1)] };
   const records = new Map<string, { payload: string; execution: NativeExecution }>();
   const state = { revision: 0, unknownAfterApply: false };
   const calls: { command: string; args: Record<string, unknown> }[] = [];

@@ -295,47 +295,6 @@ export type Clip = {
   currentTakeId?: string;
 };
 
-/** Pro Tools-style arrangement group. Unlike a routing folder, this owns no signal
- *  path: active members select and move as one clip object. Inactive definitions are
- *  retained so the documented Regroup command can restore the last Ungroup. */
-export type ClipGroup = {
-  id: string;
-  name: string;
-  clipIds: string[];
-  active: boolean;
-};
-
-export type TrackGroupKind = "edit" | "mix" | "edit_mix";
-
-export const TRACK_GROUP_MIX_ATTRIBUTES = [
-  "main_volume",
-  "main_mute",
-  "main_pan",
-  "solo",
-  "record_enable",
-  "input_monitoring",
-] as const;
-export type TrackGroupMixAttribute = typeof TRACK_GROUP_MIX_ATTRIBUTES[number];
-export const DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES: readonly TrackGroupMixAttribute[] = [
-  "main_volume",
-  "main_mute",
-  "main_pan",
-  "solo",
-] as const;
-
-/** Pro Tools-style non-routing track linkage. These groups never create folder
- *  tracks or alter the signal path: Edit membership links selection, while Mix
- *  membership links volume, pan, mute, and solo. */
-export type TrackGroup = {
-  id: string;
-  name: string;
-  trackIds: string[];
-  kind: TrackGroupKind;
-  enabled: boolean;
-  /** Missing on legacy projects; consumers must apply DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES. */
-  mixAttributes?: TrackGroupMixAttribute[];
-};
-
 export type ControllerEventName =
   | "TRANSPORT_TOGGLE"
   | "TRANSPORT_SCRUB"
@@ -1206,14 +1165,6 @@ export type Snapshot = {
   buses?: Bus[];
   sections?: Section[];
   annotations?: Annotation[];
-  /** Additive Pro Tools-style arrangement groups; absent means no clip groups. */
-  clipGroups?: ClipGroup[];
-  /** The dormant definition eligible for Pro Tools Regroup. */
-  lastUngroupedClipGroupId?: string;
-  /** Additive, non-routing Pro Tools Edit/Mix group definitions. */
-  trackGroups?: TrackGroup[];
-  /** Temporarily bypasses every Track Group without deleting its membership. */
-  trackGroupsSuspended?: boolean;
   audio?: AudioSelection;
   /** Optional AI tools present on this Mac (src/generative/AiTools.h), machine state.
    *  Absent on a backend that predates the gate: treat everything as available. */
