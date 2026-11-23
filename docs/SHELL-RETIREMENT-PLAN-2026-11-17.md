@@ -1,9 +1,9 @@
 # Shell retirement plan — 2026-11-17
 
 **Status:** owner chose to retire all four shells (2026-11-17). Step 1 (move the shared
-pieces) merged as #818. Step 2 (port the core specs to V3) is on `claude/shells-2-coverage`;
-see §4a. All four decisions in §6 are answered (retire all four shells, remove the group and
-lyrics commands, switch silently). Nothing is deleted yet.
+pieces) merged as #818; step 2 (port the core specs to V3) merged as #819. Step 3 (delete) is
+on `claude/shells-3-delete`; see §5a. The archive tag `archive/shells-2026-11-23` is pushed on
+main 6db1875a. All four decisions in §6 are answered.
 
 **Goal:** make V3 the only interface. Retire Classic, v2 ("Mosh (new)"), Live (clone) and
 Pro Tools, delete their code and tests together, and cut the gate's time to match.
@@ -125,6 +125,31 @@ Start after #817 merges, because it touches V3 and settings.
    - Mark the Live-grid-parity (#667) and Pro Tools parity records as archived at the tag.
 
 Slice 2 (AI off) removes the group-3 specs along with the generative UI.
+
+## 5a. Step 3 result (2026-11-23)
+
+- **Shells:** `App.tsx` mounts V3 only. The 240 modules only the old shells reached are
+  deleted with their vitest files, the 76 old-shell e2e specs, the v2 visual suite and its
+  Storybook stories. `v2/`, `live/` and `protools/` are gone; `shellState` moved to `src/`,
+  and the two v2 stylesheets V3 imports moved to `v3/css/`.
+- **Settings:** `uiShell`, `redesignShell`, `skin`, `layout`, the Pro Tools fade defaults
+  and the Live dock settings are removed, with the template picker V3 never showed. Hydrate
+  drops unknown ids, so an old shell choice opens V3 silently (store test). `data-skin` is
+  pinned to `mosh`. `preferredShell` is gone from the bridge and the owner runtime; an old
+  owner config naming one still validates.
+- **Removed as unreachable without the old shells:** collaborator video (`src/webrtc`, no
+  V3 surface) and the classic Moshi composer.
+- **Groups:** the 12 group commands are removed natively and in the UI. Group-linked mix
+  moves, grouped clip moves, group lock fan-out and group bootstrap sync go with them, so an
+  old session holding group nodes behaves ungrouped.
+- **Lyrics:** deferred to friends slice 2 (AI off), as §6.3 allows.
+  `ui/e2e/v3-lyrics-bridge.spec.ts` keeps the 10 commands covered through the bridge until
+  then; delete it with them.
+- **Ledgers:** `uiReachability` walks V3 only, and 50 commands are declared as V3 gaps.
+  `REACHABILITY.md` has a `no-v3-ui` status.
+- **Not done here (step 4):** CLAUDE.md, `CURRENT_STATUS.md`, `FEATURE_AUDIT.md`, and
+  archiving the #667 and Pro Tools parity records. Dead skin CSS in `mosh.css` and the unused
+  `@storybook/*` devDependencies remain.
 
 ## 6. Owner decisions
 
