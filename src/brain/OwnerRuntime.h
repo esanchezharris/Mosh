@@ -25,7 +25,6 @@ struct OwnerRuntimeConfig
     int preferredPort = 8491;
     double stableAudioReleaseIdle = 0.99;
     bool prewarmAfterUnload = true;
-    juce::String preferredShell;
 
     static OwnerRuntimeConfig load();
     static OwnerRuntimeConfig fromVar (const juce::var&);

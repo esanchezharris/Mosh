@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { boot, bootV3 } from "./helpers";
+import { bootV3 } from "./helpers";
 
 for (const width of [900, 1440]) {
   test(`V3 Settings stays readable with the light theme at ${width}`, async ({ page }, info) => {
@@ -9,7 +9,7 @@ for (const width of [900, 1440]) {
         version: 2, template: null, values: { theme: "light", colorway: "lime", startOnLaunch: false }, keyOverrides: {},
       }));
     });
-    await page.goto("/?shell=v3");
+    await page.goto("/");
     await expect(page.getByTestId("v3-arrangement")).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await page.keyboard.press("Meta+Comma");
@@ -97,17 +97,6 @@ test("empty V3 session offers existing track and import actions", async ({ page 
   await expect(page.getByTestId("v3-plugins")).toBeVisible();
 });
 
-
-test("shared Mixer keeps its text-label appearance in classic", async ({ page }, info) => {
-  await boot(page);
-  await page.getByRole("button", { name: "Mixer", exact: true }).click();
-  const label = page.getByTestId("channel-strip").first().getByRole("button", { name: /^Select track/ });
-  await expect(label).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(label).toHaveCSS("border-top-width", "0px");
-  await label.focus(); await page.keyboard.press("Enter");
-  await expect(page.getByTestId("channel-strip").first()).toHaveAttribute("data-selected", "true");
-  await page.screenshot({ path: info.outputPath("classic-mixer.png"), animations: "disabled" });
-});
 
 test("a note added in the shared PianoRoll lands on the clip and one undo removes it", async ({ page }) => {
   await bootV3(page);

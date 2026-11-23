@@ -4,9 +4,9 @@ import { defaultSettings } from "./schema";
 
 // The settings store is the canonical, schema-driven, localStorage-backed home for
 // every UI-local setting. These tests pin the three behaviours the goal calls out:
-// schema→defaults, a localStorage persistence round-trip, and template application
-// with a per-setting override layered on top (template + diffs). Plus the DOM-effect
-// contract (skin/theme/scale apply to <html>) and corrupted-storage resilience.
+// schema→defaults and a localStorage persistence round-trip. Plus the DOM-effect
+// contract (theme/scale apply to <html>, data-skin is pinned) and corrupted-storage
+// resilience.
 
 beforeEach(() => {
   localStorage.clear();
@@ -18,7 +18,6 @@ describe("defaults from schema", () => {
     const s = useSettings.getState();
     const defs = defaultSettings();
     for (const id of Object.keys(defs)) expect(s.get(id)).toEqual(defs[id]);
-    expect(s.get("skin")).toBe("mosh");
     expect(s.get("theme")).toBe("light"); // v2 default: warm cream + dark panels
     expect(s.get("uiScale")).toBe(1);
     expect(s.get("voiceOn")).toBe(true);
@@ -37,7 +36,7 @@ describe("set + localStorage persistence round-trip", () => {
     expect(useSettings.getState().get("theme")).toBe("light");
     expect(useSettings.getState().get("uiScale")).toBe(1.2);
     // untouched settings stay at their defaults
-    expect(useSettings.getState().get("skin")).toBe("mosh");
+    expect(useSettings.getState().get("voiceOn")).toBe(true);
   });
 
   it("coerces on the way in so an out-of-range value never persists raw", () => {
@@ -56,58 +55,27 @@ describe("set + localStorage persistence round-trip", () => {
     });
   });
 
-  it("keeps an explicit existing Live preference when the fresh default is V3", () => {
-    savePersisted(localStorage, { template: null, values: { uiShell: "live" }, keyOverrides: {} });
-    useSettings.setState({ template: null, values: {} });
-
-    useSettings.getState().hydrate();
-
-    expect(useSettings.getState().get("uiShell")).toBe("live");
+  it("drops a stored old-shell choice on load, so an install on Pro Tools/Live/v2/classic opens V3", () => {
+    // Shell retirement (docs/SHELL-RETIREMENT-PLAN-2026-11-17.md §6.4): the move is silent.
+    for (const old of ["protools", "live", "v2", "classic"]) {
+      savePersisted(localStorage, {
+        template: "protools",
+        values: { uiShell: old, redesignShell: false, skin: "protools", liveDockHeight: 300, theme: "dark" },
+        keyOverrides: {},
+      });
+      const { values } = loadPersisted(localStorage);
+      expect(values, old).toEqual({ theme: "dark" });   // the other preferences survive
+      useSettings.setState({ template: null, values: {} });
+      useSettings.getState().hydrate();
+      expect(useSettings.getState().get("uiShell"), old).toBeUndefined();
+      expect(document.documentElement.getAttribute("data-skin"), old).toBe("mosh");
+    }
   });
 
-  it("reloads the last successful Pro Tools fade settings", () => {
-    useSettings.getState().set("protoolsDefaultFadeLengthMs", 37);
-    useSettings.getState().set("protoolsDefaultFadeCurveIn", "sCurve");
-    useSettings.getState().set("protoolsDefaultFadeCurveOut", "convex");
-
-    useSettings.setState({ template: null, values: {}, keyOverrides: {} });
-    useSettings.getState().hydrate();
-
-    expect(useSettings.getState().get("protoolsDefaultFadeLengthMs")).toBe(37);
-    expect(useSettings.getState().get("protoolsDefaultFadeCurveIn")).toBe("sCurve");
-    expect(useSettings.getState().get("protoolsDefaultFadeCurveOut")).toBe("convex");
-  });
-});
-
-describe("template application + per-setting override", () => {
-  it("applyTemplate sets all of the template's values", () => {
-    useSettings.getState().applyTemplate("ableton");
-    const s = useSettings.getState();
-    expect(s.template).toBe("ableton");
-    expect(s.get("skin")).toBe("ableton");
-    expect(s.get("theme")).toBe("light");
-  });
-
-  it("a per-setting override layers on top of the template (template + diffs)", () => {
-    useSettings.getState().applyTemplate("ableton"); // skin=ableton, theme=light
-    useSettings.getState().set("theme", "dark"); // override just the theme
-
-    const s = useSettings.getState();
-    expect(s.get("theme")).toBe("dark"); // the diff wins
-    expect(s.get("skin")).toBe("ableton"); // rest of the template stays
-    expect(s.template).toBe("ableton"); // still based on the template
-
-    // and the diff survives a reload
-    useSettings.setState({ template: null, values: {} });
-    useSettings.getState().hydrate();
-    expect(useSettings.getState().get("theme")).toBe("dark");
-    expect(useSettings.getState().get("skin")).toBe("ableton");
-  });
 });
 
 describe("reset", () => {
   it("clears overrides AND persists the cleared state (survives reload)", () => {
-    useSettings.getState().applyTemplate("ableton");
     useSettings.getState().set("uiScale", 1.3);
     useSettings.getState().reset();
 
@@ -122,27 +90,6 @@ describe("reset", () => {
 });
 
 describe("per-template (per-keymap) rebind persistence (AL-002)", () => {
-  it("stores an unset Pro Tools shell rebind in the Pro Tools keymap bucket", () => {
-    useSettings.getState().set("uiShell", "protools");
-
-    useSettings.getState().set("key.undo", "Mod+P");
-
-    const { keyOverrides } = loadPersisted(localStorage);
-    expect(keyOverrides.protools?.["key.undo"]).toBe("Mod+P");
-    expect(keyOverrides.mosh?.["key.undo"]).toBeUndefined();
-  });
-
-  it("stores a Pro Tools shell rebind in an explicitly selected keymap bucket", () => {
-    useSettings.getState().set("uiShell", "protools");
-    useSettings.getState().set("keymap", "ableton");
-
-    useSettings.getState().set("key.undo", "Mod+J");
-
-    const { keyOverrides } = loadPersisted(localStorage);
-    expect(keyOverrides.ableton?.["key.undo"]).toBe("Mod+J");
-    expect(keyOverrides.protools?.["key.undo"]).toBeUndefined();
-  });
-
   it("scopes a key.* rebind to the active keymap — it doesn't bleed into another", () => {
     // On the Ableton keymap, rebind Undo.
     useSettings.getState().set("keymap", "ableton");
@@ -225,17 +172,11 @@ describe("per-template (per-keymap) rebind persistence (AL-002)", () => {
 });
 
 describe("DOM effects", () => {
-  it("applies skin/theme to the root data-attributes and scale to zoom", () => {
-    // The skin axis only applies in the classic shell — the v2 shell
-    // pins data-skin=mosh (effects.ts). Opt into classic to exercise the skin effect.
-    useSettings.getState().set("uiShell", "classic");
-    useSettings.getState().applyTemplate("fl");
+  it("pins data-skin, applies theme to the root data-attributes and scale to zoom", () => {
+    useSettings.getState().set("theme", "dark");
     const root = document.documentElement;
-    expect(root.getAttribute("data-skin")).toBe("fl");
+    expect(root.getAttribute("data-skin")).toBe("mosh");
     expect(root.getAttribute("data-theme")).toBe("dark");
-
-    useSettings.getState().set("skin", "ableton");
-    expect(root.getAttribute("data-skin")).toBe("ableton");
 
     useSettings.getState().set("uiScale", 1.3);
     expect((root.style as CSSStyleDeclaration & { zoom?: string }).zoom).toBe("1.3");

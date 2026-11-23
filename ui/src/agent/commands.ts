@@ -48,13 +48,6 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "move_track", desc: "Reorder a track — toIndex is its new position in the arrangement (0 = top). Refuses a track inside a group", args: [S("trackId"), N("toIndex", true, "0-based position among the arrangement's tracks")] },
   { command: "remove_track", desc: "Delete a track and its clips", args: [S("trackId")] },
   { command: "set_track_active", desc: "Make a track active or inactive without deleting, hiding, or muting it", args: [S("trackId"), B("active")] },
-  { command: "create_track_group", desc: "Create an Edit, Mix, or Edit+Mix Track Group. Pass trackIds as an array of track ids; mixAttributes may be an array of linked Mix controls", args: [S("name", false), S("kind", false, "edit | mix | edit_mix")] },
-  { command: "configure_track_group", desc: "Atomically update a Track Group's name, type, members, and linked Mix controls. Pass trackIds and mixAttributes as arrays", args: [S("groupId"), S("name"), S("kind", true, "edit | mix | edit_mix")] },
-  { command: "duplicate_track_group", desc: "Duplicate a Track Group with an explicit new name, type, member trackIds array, and mixAttributes array", args: [S("groupId"), S("name"), S("kind", true, "edit | mix | edit_mix")] },
-  { command: "set_track_group_members", desc: "Replace a Track Group's members. Pass trackIds as an array", args: [S("groupId")] },
-  { command: "set_track_group_enabled", desc: "Enable or disable one Track Group without deleting its definition", args: [S("groupId"), B("enabled")] },
-  { command: "set_track_groups_suspended", desc: "Suspend or resume all Track Group linkage while preserving every group definition", args: [B("suspended")] },
-  { command: "remove_track_group", desc: "Remove one Track Group definition without deleting its tracks", args: [S("groupId")] },
   // ── song sections (Intro/Verse/Hook/…) — scope handles for "rework the hook" ──
   { command: "create_section", desc: "Add a named song section using quarter-note beat offsets from project start — never seconds (in 4/4, bar 1 to bar 5 is startBeat 0 to endBeat 16)", args: [S("name"), N("startBeat"), N("endBeat"), S("color", false)] },
   { command: "rename_section", desc: "Rename a song section", args: [S("sectionId"), S("name")] },
@@ -87,10 +80,6 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   // the span itself — there is no UI selection here).
   { command: "crop_clip", desc: "Trim clips to a time range (Crop Clip, ⇧⌘J): each clip's bounds become range ∩ clip; MIDI notes outside are removed and crossing notes clipped to the edge; audio clips edge-trim with offset adjust. One undo step. Pass clipIds (array) + start/end (seconds); errors when the range is empty, overlaps nothing, or already covers the clips", args: [N("start", true, "seconds"), N("end", true, "seconds")] },
   { command: "remove_clip", desc: "Delete a clip", args: [S("clipId")] },
-  { command: "create_clip_group", desc: "Group clips so selection and compatible edits treat them as one object. Pass clipIds as an array", args: [S("name", false)] },
-  { command: "ungroup_clip_group", desc: "Temporarily ungroup the active Clip Group containing this clip", args: [S("clipId")] },
-  { command: "regroup_clip_group", desc: "Restore a previously ungrouped Clip Group; omit groupId to restore the most recent one", args: [S("groupId", false)] },
-  { command: "rename_clip_group", desc: "Rename the Clip Group containing this clip", args: [S("clipId"), S("name")] },
   { command: "bounce_track", desc: "Offline-render a track's full output (clips through its instrument+FX chain, no master bus) to audio: mode inPlace replaces the track's clips with the render (devices stay), newTrack puts the render on a new track below (source untouched). One undo step. Refuses group/return/master tracks and empty tracks", args: [S("trackId"), S("mode", true, "inPlace | newTrack")] },
   { command: "freeze_track", desc: "Freeze a track (Live 12, ⌥⇧⌘F): render its output [0, last clip end] through its chain, replace the clips with the rendered audio, and park the devices (every plugin disabled, zero CPU). While frozen the track refuses clip-content and device edits (move/duplicate/remove stay allowed). One undo step restores the original clips + devices. Refuses group/return/master tracks, empty tracks, and already-frozen tracks", args: [S("trackId")] },
   { command: "unfreeze_track", desc: "Unfreeze a frozen track: re-enable its devices and drop the frozen marker. The rendered clips STAY (they are the track's current audio — undoing the freeze itself is how the originals return). One undo step re-freezes", args: [S("trackId")] },
@@ -358,13 +347,6 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "move_track": return `Moved a track to position ${a.toIndex}`;
     case "remove_track": return `Removed a track`;
     case "set_track_active": return a.active ? `Made a track active` : `Made a track inactive`;
-    case "create_track_group": return `Created Track Group${a.name ? ` "${a.name}"` : ""}`;
-    case "configure_track_group": return `Configured Track Group "${a.name}"`;
-    case "duplicate_track_group": return `Duplicated a Track Group as "${a.name}"`;
-    case "set_track_group_members": return `Changed Track Group members`;
-    case "set_track_group_enabled": return a.enabled ? `Enabled a Track Group` : `Disabled a Track Group`;
-    case "set_track_groups_suspended": return a.suspended ? `Suspended Track Groups` : `Resumed Track Groups`;
-    case "remove_track_group": return `Removed a Track Group`;
     case "add_test_tone_clip": return `Added a test tone`;
     case "import_clip": return `Imported audio ${a.file ? String(a.file).split("/").pop() : "clip"}${a.startSeconds ? ` at ${a.startSeconds}s` : ""}`;
     case "add_midi_clip": return `Added a MIDI clip`;
@@ -373,10 +355,6 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "split_clip": return `Split a clip at ${a.time}s`;
     case "duplicate_clip": return `Duplicated a clip`;
     case "remove_clip": return `Removed a clip`;
-    case "create_clip_group": return `Created Clip Group${a.name ? ` "${a.name}"` : ""}`;
-    case "ungroup_clip_group": return `Ungrouped a Clip Group`;
-    case "regroup_clip_group": return `Regrouped a Clip Group`;
-    case "rename_clip_group": return `Renamed a Clip Group to "${a.name}"`;
     case "delete_time_range": return `Cleared ${a.start}–${a.end}s across all tracks${a.ripple ? " and closed the gap" : ""}`;
     case "insert_time": return `Opened ${a.duration}s of space at ${a.start}s — everything after it moved later`;
     case "rename_clip": return `Renamed a clip to "${a.name}"`;

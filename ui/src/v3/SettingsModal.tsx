@@ -3,10 +3,9 @@ import { useStore } from "../store";
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { useSettings } from "../settings/store";
 import { settingsByCategory, type SettingDef } from "../settings/schema";
-import { settingHiddenForShell } from "../settings/shellVisibility";
+import { settingHidden } from "../settings/shellVisibility";
 import { EngineSettings, AudioRouting, ProjectSettings } from "../settings/SettingsPanel";
 import { bufferSizeOptions, monitoringDelayLabel } from "../settings/routing";
-import { activeShell } from "../v2/shellFlag";
 import type { Snapshot } from "../types";
 import { useV3 } from "./shellState";
 import { colorwayAttr } from "./colorway";
@@ -55,7 +54,6 @@ export function SettingsModal({ snapshot }: { snapshot: Snapshot }) {
   const colorway = colorwayAttr(useSettings((s) => s.get("colorway")));
   const set = useSettings((s) => s.set);
   const confirm = Boolean(useSettings((s) => s.get("agentConfirmDestructive")));
-  const shell = activeShell();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => setOpen(false), [setOpen]);
@@ -95,7 +93,7 @@ export function SettingsModal({ snapshot }: { snapshot: Snapshot }) {
   const groups = settingsByCategory()
     .map((g) => ({
       ...g,
-      settings: g.settings.filter((d) => !settingHiddenForShell(shell, g.category, d.id) && !CUSTOM.has(d.id)),
+      settings: g.settings.filter((d) => !settingHidden(g.category, d.id) && !CUSTOM.has(d.id)),
     }))
     .filter((g) => g.settings.length > 0);
 

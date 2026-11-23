@@ -1,7 +1,6 @@
 // The Settings panel — RENDERS ITSELF from the schema. One renderer per setting
 // `type`; add a descriptor to schema.ts and it appears here automatically, grouped
-// by category. Templates (preset bundles) sit at the top; the user can pick one and
-// then override any individual setting on top (template + diffs).
+// by category.
 //
 // Two intentional exceptions to "schema-driven + local":
 //   • Engine (buffer / threads / sample rate / device) — backend state from the
@@ -15,11 +14,8 @@ import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import type { Snapshot } from "../types";
 import { useSettings } from "./store";
 import { settingsByCategory, type SettingDef } from "./schema";
-import { TEMPLATES } from "./templates";
 import { eventToCombo } from "../interaction/keymap";
-import { effectiveInteractionSetting } from "../interaction/config";
-import { activeShell, isV2Active } from "../v2/shellFlag";
-import { settingHiddenForShell } from "./shellVisibility";
+import { settingHidden } from "./shellVisibility";
 import { runAction, FILE_MENU, type ActionId } from "../menuActions";
 import { outputDeviceOptions, inputDeviceOptions, waveInputOptions, currentTrackInput, audioDevicePatch, bufferSizeOptions } from "./routing";
 
@@ -27,14 +23,7 @@ import { outputDeviceOptions, inputDeviceOptions, waveInputOptions, currentTrack
 function SettingControl({ def }: { def: SettingDef }) {
   const raw = useSettings((s) => s.values[def.id]);
   const set = useSettings((s) => s.set);
-  // keymap/gestureTable resolve through the active DAW shell's default bundle
-  // (effectiveInteractionSetting): with no override persisted, an unset control
-  // must SHOW the value the app is actually using — displaying "mosh" while the
-  // live shell resolves ableton was exactly the confusion that hid this bug.
-  const value = raw !== undefined ? raw
-    : def.id === "keymap" || def.id === "gestureTable"
-      ? effectiveInteractionSetting(def.id)
-      : def.default;
+  const value = raw !== undefined ? raw : def.default;
 
   switch (def.type) {
     case "enum":
@@ -126,32 +115,6 @@ function SettingRow({ def }: { def: SettingDef }) {
       <span>{def.label}</span>
       <SettingControl def={def} />
     </label>
-  );
-}
-
-// ── template picker (preset bundles) ────────────────────────────────────────
-function TemplatePicker() {
-  const active = useSettings((s) => s.template);
-  const applyTemplate = useSettings((s) => s.applyTemplate);
-  const reset = useSettings((s) => s.reset);
-  return (
-    <div className="pop-group">
-      <div className="pop-label">Template</div>
-      <div className="pop-actions" data-testid="template-picker">
-        {TEMPLATES.map((t) => (
-          <button
-            key={t.name}
-            className={`btn${active === t.name ? " on" : ""}`}
-            aria-pressed={active === t.name}
-            onClick={() => applyTemplate(t.name)}
-          >
-            {t.label}
-          </button>
-        ))}
-        <button className="btn" title="Restore default settings" onClick={() => reset()}>Reset</button>
-      </div>
-      <div className="pop-note">A starting point — override any setting on top.</div>
-    </div>
   );
 }
 
@@ -330,23 +293,13 @@ export function ProjectSettings({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-// The v2 shell is a single Mosh-native design with no skin/keymap/gesture/layout axis,
-// so those settings (+ the DAW template picker) are hidden there — they'd be inert
-// (effects pins data-skin=mosh) and confusing. The live clone keeps every
-// live-effective axis (audio, keys, feel, layout, templates) and hides only the
-// classic visual skin (settings/shellVisibility.ts owns the per-shell rules).
-// Classic shows everything, unchanged.
-
 export function SettingsPanel({ snapshot }: { snapshot: Snapshot }) {
-  const v2 = isV2Active();
-  const shell = activeShell();
   const groups = settingsByCategory()
-    .map((g) => ({ ...g, settings: g.settings.filter((d) => !settingHiddenForShell(shell, g.category, d.id)) }))
+    .map((g) => ({ ...g, settings: g.settings.filter((d) => !settingHidden(g.category, d.id)) }))
     .filter((g) => g.settings.length > 0);
   return (
     <>
       <div className="pop-head">Settings</div>
-      {!v2 && shell !== "v3" && <TemplatePicker />}
       {groups.map((g) => (
         <div className="pop-group" key={g.category}>
           <div className="pop-label">{g.category}</div>

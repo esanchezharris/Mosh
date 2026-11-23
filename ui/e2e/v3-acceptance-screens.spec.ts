@@ -22,7 +22,7 @@ async function bootColorway(page: Page, colorway: string): Promise<void> {
       version: 2, template: null, values: { colorway: cw, startOnLaunch: false }, keyOverrides: {},
     }));
   }, colorway);
-  await page.goto("/?shell=v3");
+  await page.goto("/");
   await expect(page.getByTestId("v3-shell")).toBeVisible();
   await expect(page.getByTestId("v3-arrangement")).toBeVisible();
   await expect(page.getByTestId("v3-shell")).toHaveAttribute("data-colorway", colorway);

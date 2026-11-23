@@ -14,14 +14,6 @@ import {
   type SendLevel,
 } from "../types";
 import { isTrackPatch, applyTrackPatch } from "../snapshotPatch";
-// Collaborator video (redesign). The store routes inbound WebRTC signaling + presence
-// changes into the video room; the room couples back to the seam only via mp_send_signal.
-import { useVideo } from "../webrtc/useVideo";
-import type { SignalMessage } from "../webrtc/signal";
-import { useSettings } from "../settings/store";
-// Which shell is active — the v2 shell also surfaces collaborator video, so the
-// webrtc_signal gate must honor it (not just the legacy redesignShell flag).
-import { isV2Active } from "../v2/shellFlag";
 import { pruneOfflineLocks, type PeerInfo, type PeerPresence } from "../multiplayer/sync";
 // Type-only imports from the store module (erased at compile time — no runtime cycle).
 import type { State, Spectrum } from "../store";
@@ -248,27 +240,10 @@ export function onMpState(ev: MoshEvent, set: Set, get: Get): void {
       locksByLogicalId: pruneOfflineLocks(p.locks ?? {}, peers, p.selfPeer ?? null),
     };
   });
-  // Keep the video room's peer set in lockstep with presence (open links to new
-  // collaborators, drop departed ones); tear it down entirely when the session ends.
-  if (p.active) useVideo.getState().syncPeers(Object.keys(peers));
-  else useVideo.getState().teardown();
   // MP-003 — piggyback the idle-checkpoint check on this already-~4/s-while-active
   // event rather than a dedicated timer (see mpIdleCheckpointTick's own doc
   // comment). A no-op on almost every tick (the clock hasn't elapsed yet).
   if (p.active) void get().mpIdleCheckpointTick();
-}
-
-export function onWebrtcSignal(ev: MoshEvent): void {
-  // Inbound SDP/ICE from a peer (relayed point-to-point) → the video room. Video is
-  // surfaced by the redesign AND the v2 shells; a shell with no video UI must NOT
-  // silently negotiate / hold a peer connection (prime directive: flag-off == unchanged).
-  // Deliberately v2-only, not "modern shell": V3 mounts no video surface, so under V3 an
-  // inbound signal is dropped here (pinned by events.webrtcShellGate.test.ts). Widen this
-  // the day V3 grows a video room, together with that test (V3 parity brief §2).
-  if (Boolean(useSettings.getState().get("redesignShell")) || isV2Active()) {
-    const p = ev.payload as { from?: string; payload?: SignalMessage };
-    if (p?.from && p.payload) useVideo.getState().onSignal(p.from, p.payload);
-  }
 }
 
 export function onPeerSelection(ev: MoshEvent, set: Set): void {

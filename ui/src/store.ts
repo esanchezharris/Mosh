@@ -26,7 +26,7 @@ import { HISTORY_MOVES, movesUndoHead, noteUndoHeadMove, undoHeadMark } from "./
 import {
   onSnapshotInvalidated, onTransport, onLevels, onMuteAutomation, onTuner, onPluginMeters, onSpectrum, onPluginScanProgress,
   onTranscribeStatus, onBuildLyricsStatus, onSkeletonStatus, onSketchStatus,
-  onLayerRenderProgress, onLayerStatus, onMpState, onWebrtcSignal,
+  onLayerRenderProgress, onLayerStatus, onMpState,
   onPeerSelection, onPeerPresence, onMpCommitDone,
 } from "./store/events";
 // RFC 004 step 2 — the store is composed from StateCreator slices along the
@@ -49,7 +49,7 @@ import {
   type RecordingLaneObservationV1, type RecordingStoreOutcomeV1,
 } from "./recordingLifecycle";
 import { cancelTransportActions, enqueueTransportAction } from "./transportActionQueue";
-import { useShell } from "./v2/shellState";
+import { useShell } from "./shellState";
 
 export type Tool = "move" | "split" | "range";
 export type View = "arrange" | "mixer";
@@ -647,7 +647,8 @@ export const useStore = create<State>((set, get, api) => ({
       } else if (ev.type === "mp_state") {
         onMpState(ev, set, get);
       } else if (ev.type === "webrtc_signal") {
-        onWebrtcSignal(ev);
+        // Collaborator video retired with the old shells (V3 has no video surface):
+        // inbound SDP/ICE is dropped so no hidden peer connection is ever negotiated.
       } else if (ev.type === "peer_selection") {
         onPeerSelection(ev, set);
       } else if (ev.type === "peer_presence") {

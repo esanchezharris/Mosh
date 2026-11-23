@@ -13,7 +13,7 @@ import { meterAt, snapStep, snapStepBeats, tempoMapFrom, barSeconds, SNAP_DIVISI
 // The ruler-span selection the v2 and live shells draw (shift-drag on the ruler /
 // empty-lane drag) lives in this UI-local slice; loop_toggle reads it. Reading it
 // here never crosses the bridge — it only shapes the set_transport args.
-import { useShell } from "./v2/shellState";
+import { useShell } from "./shellState";
 // The loop toggle's argument shaping is shared with the live shell's control bar
 // (one rule: re-arm the existing range, default the first four bars when collapsed).
 import { loopToggleArgs } from "./transportBar";
@@ -81,7 +81,7 @@ export interface ActionStore {
   pxPerSec?: number;
   setPxPerSec?: (v: number) => void;
   // The classic shell's range-tool span (ARR-010); the v2/live shells' span lives in
-  // v2/shellState, which loop_toggle reads directly. Optional for test fakes.
+  // shellState.ts, which loop_toggle reads directly. Optional for test fakes.
   timeRange?: { start: number; end: number } | null;
   // select_all / invert_selection drive this; insert_midi_clip reads the selection's
   // track. Optional — a fake without them makes those actions no-ops.

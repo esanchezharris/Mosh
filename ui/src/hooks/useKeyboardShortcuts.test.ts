@@ -40,7 +40,7 @@ describe("useKeyboardShortcuts", () => {
 
   beforeEach(() => {
     // These tests pin MOSH-bundle behavior; the live shell's default bundle
-    // (ableton under uiShell "live") would otherwise change every gesture/feel result.
+    // would otherwise change every gesture/feel result.
     useSettings.setState({ values: { gestureTable: "mosh", keymap: "mosh" }, keyOverrides: {} });
     useV3.setState({ settingsOpen: false });
     useLive.setState({ settingsOpen: false });
@@ -96,7 +96,7 @@ describe("useKeyboardShortcuts", () => {
 
   it.each(["mosh", "protools", "ableton"])("opens V3 Settings with Mod+, when the keymap is %s", (keymap) => {
     // Given: V3 is active with a selected keymap and the native menu present.
-    useSettings.setState({ values: { uiShell: "v3", keymap } });
+    useSettings.setState({ values: { keymap } });
     vi.mocked(nativeMenuPresent).mockReturnValue(true);
     act(() => root.render(React.createElement(Harness)));
 
@@ -110,7 +110,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("closes V3 Settings when its shortcut is pressed again", () => {
     // Given: V3 Settings is already open.
-    useSettings.setState({ values: { uiShell: "v3" } });
+    useSettings.setState({ values: {} });
     useV3.setState({ settingsOpen: true });
     act(() => root.render(React.createElement(Harness)));
 
@@ -124,7 +124,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("keeps the V3 Settings shortcut rebound when an explicit key override exists", () => {
     // Given: Settings has been rebound to a different chord.
-    useSettings.setState({ values: { uiShell: "v3", keymap: "mosh" }, keyOverrides: { mosh: { "key.settings": "Mod+Shift+," } } });
+    useSettings.setState({ values: { keymap: "mosh" }, keyOverrides: { mosh: { "key.settings": "Mod+Shift+," } } });
     act(() => root.render(React.createElement(Harness)));
 
     // When: the default shortcut is pressed.
@@ -136,7 +136,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("routes an explicit V3 Settings rebind to the V3 overlay", () => {
     // Given: Settings has been rebound to a different chord.
-    useSettings.setState({ values: { uiShell: "v3", keymap: "mosh" }, keyOverrides: { mosh: { "key.settings": "Mod+Shift+," } } });
+    useSettings.setState({ values: { keymap: "mosh" }, keyOverrides: { mosh: { "key.settings": "Mod+Shift+," } } });
     act(() => root.render(React.createElement(Harness)));
 
     // When: the rebound shortcut is pressed.
@@ -145,32 +145,6 @@ describe("useKeyboardShortcuts", () => {
     // Then: it opens V3 Settings without changing the Live overlay.
     expect(useV3.getState().settingsOpen).toBe(true);
     expect(useLive.getState().settingsOpen).toBe(false);
-  });
-
-  it("preserves the Live Settings route when Live is active", () => {
-    // Given: Live uses its existing default shortcut.
-    useSettings.setState({ values: { uiShell: "live" } });
-    act(() => root.render(React.createElement(Harness)));
-
-    // When: the Settings shortcut is pressed.
-    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: ",", metaKey: true, bubbles: true })));
-
-    // Then: Live retains ownership.
-    expect(useLive.getState().settingsOpen).toBe(true);
-    expect(useV3.getState().settingsOpen).toBe(false);
-  });
-
-  it("does not add the V3 Settings shortcut to the classic shell", () => {
-    // Given: classic has no Settings binding in its default keymap.
-    useSettings.setState({ values: { uiShell: "classic", keymap: "mosh" } });
-    act(() => root.render(React.createElement(Harness)));
-
-    // When: the V3 default shortcut is pressed.
-    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: ",", metaKey: true, bubbles: true })));
-
-    // Then: neither overlay changes.
-    expect(useLive.getState().settingsOpen).toBe(false);
-    expect(useV3.getState().settingsOpen).toBe(false);
   });
 
   it("dispatches Space from the focused empty Moshi prompt", async () => {
@@ -815,7 +789,7 @@ describe("useKeyboardShortcuts", () => {
     const startFixture = () => {
       // The ableton keymap binds ↓ (nudge_down) and ⌘A (select_all); mosh's core does not,
       // so under it these keys would be inert anyway and the block would go untested.
-      useSettings.setState({ values: { gestureTable: "mosh", keymap: "ableton", uiShell: "v3" }, keyOverrides: {} });
+      useSettings.setState({ values: { gestureTable: "mosh", keymap: "ableton" }, keyOverrides: {} });
       const t1 = { id: "t1", name: "Backing", type: "audio", clips: [{ id: "clip-1", name: "Beat", type: "wave", start: 0, length: 2 }] };
       const t2 = { id: "t2", name: "Vocal", type: "audio", clips: [{ id: "clip-2", name: "Vox", type: "wave", start: 4, length: 2 }] };
       useStore.setState({

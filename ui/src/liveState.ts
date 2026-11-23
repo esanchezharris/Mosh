@@ -1,4 +1,4 @@
-// Live-clone shell view-state — the same discipline as v2/shellState.ts: a THIN
+// Live-clone shell view-state — the same discipline as shellState.ts: a THIN
 // zustand slice for state the main store doesn't already hold (selection, transport,
 // editingClipId, pxPerSec all stay in useStore; track selection MUST stay there for
 // the multiplayer broadcast/lock-claim). Everything here is UI-local and never

@@ -4,7 +4,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Guard for docs/verification/REACHABILITY.md — the L3 lane's ledger (DAW-parity P5).
-// The ledger maps user-facing capabilities to v2 affordances + covering e2e specs; this
+// The ledger maps user-facing capabilities to V3 affordances + covering e2e specs; this
 // test keeps it from rotting: a renamed testid, a deleted spec, or a "gap" row whose
 // backlog item has shipped each fail the cheap gate. Parsing is deliberately strict —
 // if the table format drifts, THIS fails loudly rather than silently checking nothing.
@@ -84,7 +84,7 @@ describe("REACHABILITY ledger", () => {
   it("parses a non-trivial table (format-drift tripwire)", () => {
     expect(rows.length).toBeGreaterThanOrEqual(20);
     for (const r of rows) {
-      expect(["reachable", "hardware"].includes(r.status) || r.status.startsWith("gap:"),
+      expect(["reachable", "hardware", "no-v3-ui"].includes(r.status) || r.status.startsWith("gap:"),
         `${r.capability}: unknown status '${r.status}'`).toBe(true);
     }
   });

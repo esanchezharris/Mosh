@@ -652,7 +652,7 @@ describe("runAction — Live-12 arrangement keys", () => {
   });
 
   it("loop_toggle loops the drawn time selection when one exists (⌘L over a span)", async () => {
-    const { useShell } = await import("./v2/shellState");
+    const { useShell } = await import("./shellState");
     useShell.getState().setTimeRange({ start: 2, end: 6 });
     try {
       const { ctx, execCalls } = makeCtx();
@@ -757,7 +757,7 @@ describe("runAction — wave-0 Live menu actions", () => {
   });
 
   it("insert_midi_clip lands on the selected track over the drawn time span", async () => {
-    const { useShell } = await import("./v2/shellState");
+    const { useShell } = await import("./shellState");
     useShell.getState().setTimeRange({ start: 2, end: 6 });
     try {
       const { ctx, execCalls } = makeCtx({}, {
@@ -797,7 +797,7 @@ describe("runAction — wave-0 Live menu actions", () => {
   });
 
   it("select_loop draws the armed loop as a time selection; inert with no loop", async () => {
-    const { useShell } = await import("./v2/shellState");
+    const { useShell } = await import("./shellState");
     const on = makeCtx({}, { transport: { playing: false, looping: true, loopStart: 4, loopEnd: 8 } });
     await runAction("select_loop", on.ctx);
     expect(useShell.getState().timeRange).toEqual({ start: 4, end: 8 });
@@ -879,7 +879,7 @@ describe("runAction — crop_clip (⇧⌘J)", () => {
   } as unknown as Snapshot);
 
   it("passes the selected clips + the drawn time selection to crop_clip", async () => {
-    const { useShell } = await import("./v2/shellState");
+    const { useShell } = await import("./shellState");
     useShell.getState().setTimeRange({ start: 2, end: 6 });
     try {
       const { ctx, execCalls } = makeCtx({}, {
@@ -907,7 +907,7 @@ describe("runAction — crop_clip (⇧⌘J)", () => {
 
   it("with an empty clip selection it errors and sends nothing", async () => {
     const setLastError = vi.fn();
-    const { useShell } = await import("./v2/shellState");
+    const { useShell } = await import("./shellState");
     useShell.getState().setTimeRange({ start: 2, end: 6 });
     try {
       const { ctx, execCalls } = makeCtx({}, { setLastError });
@@ -920,7 +920,7 @@ describe("runAction — crop_clip (⇧⌘J)", () => {
   });
 
   it("surfaces an engine refusal (e.g. no overlap) via setLastError", async () => {
-    const { useShell } = await import("./v2/shellState");
+    const { useShell } = await import("./shellState");
     useShell.getState().setTimeRange({ start: 2, end: 6 });
     try {
       const setLastError = vi.fn();
@@ -998,7 +998,7 @@ describe("runAction — keymap-audit wave (nudge_up/down, ungroup, insert_silenc
   });
 
   it("insert_silence uses the time selection when one exists, else one bar at the playhead", async () => {
-    const { useShell } = await import("./v2/shellState");
+    const { useShell } = await import("./shellState");
     useShell.getState().setTimeRange({ start: 2, end: 6 });
     try {
       const { ctx, execCalls } = makeCtx({}, { snapshot: snapFor([]) });

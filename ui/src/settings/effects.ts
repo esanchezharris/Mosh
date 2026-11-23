@@ -2,7 +2,7 @@
 // document so a chosen skin/theme/scale reskins the running app. Kept separate from
 // the value store so the persistence logic stays pure and head-lessly testable.
 //
-//   skin           → <html data-skin="…">   (token set; see mosh.css skin blocks)
+//   (always)       → <html data-skin="mosh"> (V3 is the only shell and has no skin axis)
 //   theme          → <html data-theme="…">  (light/dark ground; independent axis)
 //   uiScale        → document zoom           (whole-UI reflow; the JUCE WebView handles it)
 //   telemetryOptIn → native bridge call      (no DOM effect — see below)
@@ -11,7 +11,6 @@
 // consumed by its React owner via the store — no effect needed here.
 
 import type { SettingValue } from "./schema";
-import { resolveShell } from "../v2/shellQuery";
 import { setTelemetryOptIn } from "../bridge";
 
 export function applySettingEffects(values: Record<string, SettingValue>): void {
@@ -26,12 +25,9 @@ export function applySettingEffects(values: Record<string, SettingValue>): void 
   void setTelemetryOptIn(Boolean(values.telemetryOptIn));
 
   const root = document.documentElement;
-  // The v2 shell is a single Mosh-native design with NO skin axis. When it's active,
-  // pin data-skin to "mosh" so a persisted non-mosh skin (e.g. "ableton") can't leak
-  // its token overrides into v2's scoped CSS. Classic keeps the user's chosen skin.
-  const shell = resolveShell(values.uiShell);
-  if (shell === "v2" || shell === "v3") root.setAttribute("data-skin", "mosh");
-  else if (typeof values.skin === "string") root.setAttribute("data-skin", values.skin);
+  // V3 is one Mosh-native design with no skin axis: pin data-skin so mosh.css's shared
+  // rules (piano roll, mixer) always resolve the Mosh token set.
+  root.setAttribute("data-skin", "mosh");
   if (typeof values.theme === "string") root.setAttribute("data-theme", values.theme);
   if (typeof values.uiScale === "number")
     (root.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(values.uiScale);

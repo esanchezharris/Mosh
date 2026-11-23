@@ -20,12 +20,10 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { readShellCss } from "../v2/cssSource";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const arrange = readFileSync(join(here, "clipRenderers.tsx"), "utf8");
 const mosh = readFileSync(join(here, "mosh.css"), "utf8");
-const shell = readShellCss();
 
 /** The clip renderers, sliced out by their own export statements so the scan cannot
  *  silently widen to the whole file (or narrow to nothing) if the renderers are reordered. */
@@ -104,15 +102,6 @@ describe("clip ink — every token exists on both sides of the bridge", () => {
     });
   }
 
-  it("the v2 shell re-pins the wave ink", () => {
-    // The one that HAD to change: it was the last lime in the arrangement.
-    expect(shell, "--clip-ink-wave is not re-pinned for .v2-shell").toContain("--clip-ink-wave:");
-    const v2Values = [...shell.matchAll(/--clip-ink-wave:\s*([^;]+);/g)].map((m) => m[1].trim());
-    expect(v2Values.length, "expected --clip-ink-wave in the v2 base and light blocks").toBe(2);
-    for (const v of v2Values) {
-      expect(v, `the v2 wave ink is lime again: ${v}`).not.toMatch(/204\s*,\s*255|#ccff/i);
-    }
-  });
 
   it("the classic values are the pre-token literals (extraction changed no pixels)", () => {
     // Tokenising was a refactor for the classic shell. If these drift, the classic

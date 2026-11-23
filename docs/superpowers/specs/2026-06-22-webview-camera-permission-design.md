@@ -15,7 +15,7 @@ compile-verified, no selftest regression) and the runbook.
 
 The collaborator-video feature (shipped behind `redesignShell`) calls
 `navigator.mediaDevices.getUserMedia({ video: true })` from
-[`ui/src/webrtc/useVideo.ts`](../../../ui/src/webrtc/useVideo.ts) when the user toggles
+[`ui/src/webrtc/useVideo.ts`](https://github.com/esanchezharris/Mosh/blob/archive/shells-2026-11-23/ui/src/webrtc/useVideo.ts) when the user toggles
 the camera on (off by default). In Chromium (the Playwright/e2e path) a fake device
 auto-grants. But in the **packaged app** the UI runs inside a JUCE 8
 `WebBrowserComponent`, which wraps a macOS `WKWebView`. WebKit asks its `WKUIDelegate`

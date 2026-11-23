@@ -54,7 +54,7 @@
   --v2-fs-sm: 11px;
   --v2-fs-base: 12px;
   --v2-tracking-caps: .08em;
-  /* The LoRA Lab (v2/css/96-lora-lab.css) also needs these. */
+  /* The LoRA Lab (v3/css/lora-lab.css) also needs these. */
   --v2-fs-display: 40px;
   --v2-radius-xs: 4px;
   /* Error TEXT in the Lab: V3's danger ink (.mi.danger), since --record is about 3.9:1 on its dark. */

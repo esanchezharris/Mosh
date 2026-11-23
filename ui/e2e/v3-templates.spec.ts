@@ -20,7 +20,7 @@ async function bootWithTemplate(page: Page, template: string, skin: string, them
       version: 2, template: t, values: { skin: s, theme: th, startOnLaunch: false }, keyOverrides: {},
     }));
   }, [template, skin, theme] as const);
-  await page.goto("/?shell=v3");
+  await page.goto("/");
   await expect(page.getByTestId("v3-shell")).toBeVisible();
   await expect(page.getByTestId("v3-arrangement")).toBeVisible();
 }
@@ -45,7 +45,7 @@ test("the stored template choice survives a reload (V3 never clobbers it)", asyn
       version: 2, template: "fl", values: { skin: "fl", theme: "dark", startOnLaunch: false }, keyOverrides: {},
     }));
   });
-  await page.goto("/?shell=v3");
+  await page.goto("/");
   await expect(page.getByTestId("v3-arrangement")).toBeVisible();
   await page.reload();
   await expect(page.getByTestId("v3-arrangement")).toBeVisible();
